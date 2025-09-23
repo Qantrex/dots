@@ -1,10 +1,3 @@
-Perfect! 🎉 Now that your dotfiles repo is clean, verified, and symlinked with Stow, a README will make it much easier to re-install on a new machine (or just show it off 😎).
-
-Here’s a **ready-to-drop `README.md`** with some colors, emojis, and tweaks:
-
----
-
-````markdown
 # ✨ My Dotfiles
 
 <p align="center">
@@ -146,14 +139,3 @@ rsync -a ~/.config.bak-2025-09-23-155701/ ~/.config/
 ## 🧑‍💻 License
 
 MIT – free to use, fork, and tweak.
-
----
-
-> “Dotfiles aren’t just config — they’re your second skin on a fresh machine.”
-
-```
-
----
-
-Would you like me to also add a **section for contribution / pull requests** (in case you open your dotfiles repo public), or keep it just personal use?
-```
