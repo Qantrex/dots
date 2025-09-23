@@ -1,0 +1,72 @@
+/*
+ * Minimalist Black and White Waybar
+ * This style sheet has been updated with more consistent spacing
+ * and the Font Awesome font family to display icons.
+ */
+
+#waybar {
+    background-color: transparent;
+    color: white;
+    border: none;
+    font-family: "Font Awesome 6 Free", Inter, sans-serif;
+    border-radius: 0;
+}
+
+.modules-left,
+.modules-right,
+.modules-center {
+    background-color: transparent;
+}
+
+/* Individual Module Styles - Adjusted Padding for a tighter fit */
+#clock,
+#pulseaudio,
+#network,
+#battery,
+#custom-media,
+#temperature,
+#cpu,
+#memory,
+#tray,
+#bluetooth {
+    background-color: transparent;
+    border: none;
+    padding: 0 8px; /* Slightly reduced padding for a tighter look */
+}
+
+/* Workspaces */
+#workspaces button {
+    background-color: transparent;
+    color: white;
+    border: none;
+    border-radius: 0;
+    padding: 0 10px;
+}
+
+#workspaces button.active {
+    background-color: white;
+    color: black;
+    border-bottom: 2px solid black;
+}
+
+#workspaces button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+#workspaces button.urgent {
+    background-color: red;
+    color: black;
+}
+
+#battery.charging {
+    color: green;
+}
+#battery.full {
+    color: green;
+}
+#battery.warning:not(.charging) {
+    color: yellow;
+}
+#battery.critical:not(.charging) {
+    color: red;
+}

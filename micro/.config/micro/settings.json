@@ -1,0 +1,16 @@
+{
+    "basename": true,
+    "colorscheme": "darkTheme",
+    "fileformat": "dos",
+    "hlsearch": true,
+    "mkparents": true,
+    "scrollmargin": 20,
+    "softwrap": true,
+    "statusformatl": "$(status.branch) $(filename) |$(modified)($(line),$(col))| $(status.paste)|ft:$(opt:filetype)|$(opt:fileformat) | $(opt:encoding) [$(status.size)] [lines:$(status.lines)]",
+    "statusformatr": "",
+    "sucmd": "doas",
+    "tabhighlight": true,
+    "tabsize": 80,
+    "wordwrap": true,
+    "xterm": true
+}
