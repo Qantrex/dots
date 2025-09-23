@@ -12,130 +12,71 @@ Backups are automatically kept in `~/.config.bak-<timestamp>` whenever I re-link
 
 ---
 
-## 📦 What’s inside?
+## Clone the Repo
 
-These configs are included:
+```bash
+# Install prerequisites
+sudo pacman -S --needed git stow
 
-- 🐟 **fish** – shell + functions  
-- ✍️ **micro** – terminal editor with bindings & themes  
-- 🔔 **fnott** – Wayland notification daemon  
-- 🖼 **foot** – Wayland terminal emulator  
-- 🎛 **qt5ct** – Qt5 theme control  
-- 📊 **waybar** – status bar for Wayland  
-- 🎨 **gtk-3.0 / gtk-4.0** – GTK theming & settings  
-- 🔍 **wofi** – Wayland application launcher  
-- ⚙️ **scripts** – helper scripts I use often  
-- 🌌 **hypr** – Hyprland WM configs  
+# Clone into home
+git clone https://github.com/<your-username>/dotfiles.git ~/dotfiles
+cd ~/dotfiles
+````
 
 ---
 
-## 🚀 Installation
-
-### 1. Install prerequisites
-```bash
-sudo pacman -S --needed stow git
-````
-
-### 2. Clone the repo
+## Apply Configs with Stow
 
 ```bash
-git clone https://github.com/<your-username>/dotfiles.git ~/dotfiles
-cd ~/dotfiles
-```
-
-### 3. Apply configs with Stow
-
-```bash
+# Symlink all configs into ~/.config
 stow -v micro fish fnott foot qt5ct waybar gtk wofi scripts hypr
 ```
 
-That’s it! 🎉 Your `~/.config` now symlinks into this repo.
+Now `~/.config/...` points directly into your `~/dotfiles`.
 
 ---
 
-## 🔍 Verify installation
-
-I ship a helper script to double-check everything against backups:
+## Install yay (AUR helper)
 
 ```bash
-~/dotfiles/verify-dotfiles.sh
+sudo pacman -S --needed base-devel git
+cd /tmp
+git clone https://aur.archlinux.org/yay.git
+cd yay
+makepkg -si
 ```
 
-It will:
-
-* ✅ Confirm symlinks point into `~/dotfiles`
-* ✅ Check repo copies exist
-* ✅ Compare repo vs backup contents
-
----
-
-## 🎨 Extra tweaks & ideas
-
-Here are some nice optional extras to spice things up:
-
-* 🌈 **Color previews**:
-  Use [pywal](https://github.com/dylanaraps/pywal) to auto-generate colors from wallpapers:
-
-  ```bash
-  yay -S python-pywal
-  wal -i ~/Pictures/wallpapers/mywall.jpg
-  ```
-
-* 💡 **Prompt eye candy**:
-  Try [starship](https://starship.rs/) for a modern, customizable shell prompt (works great with fish):
-
-  ```bash
-  curl -sS https://starship.rs/install.sh | sh
-  echo 'starship init fish | source' >> ~/.config/fish/config.fish
-  ```
-
-* 🛎 **Notifications**:
-  Tweak fnott styles in `~/.config/fnott/fnott.ini` for rounded corners, transparency, and colors.
-
-* 🔲 **Rounded corners everywhere**:
-  Add GTK theme like [rose-pine](https://github.com/rose-pine/gtk) or [catppuccin](https://github.com/catppuccin/gtk).
-
-* 🎵 **Spotify theming**:
-  If you use spicetify, add a package for it and Stow just like others.
-
----
-
-## ⚠️ Notes
-
-* Machine-specific files (like caches, `fish_variables`, `micro/buffers`) are ignored by `.gitignore`.
-* Any changes you want to **sync back into the repo**:
-
-  ```bash
-  rsync -a --delete ~/.config/<name>/ ~/dotfiles/<pkg>/.config/<name>/
-  git add .
-  git commit -m "update <name> configs"
-  git push
-  ```
-
----
-
-## 🌟 Screenshots
-
-*(Add some screenshots of your Waybar, Hyprland desktop, etc. here!)*
-
----
-
-## 💾 Backup & Restore
-
-Every time I swap configs, I keep a backup:
-
-```
-~/.config.bak-YYYY-MM-DD-HHMMSS/
-```
-
-To restore from backup:
+Verify:
 
 ```bash
-rsync -a ~/.config.bak-2025-09-23-155701/ ~/.config/
+yay --version
 ```
 
 ---
 
-## 🧑‍💻 License
+## 🛠 Install Required Applications
 
-MIT – free to use, fork, and tweak.
+With `yay` installed, grab all the apps my dotfiles configure:
+
+```bash
+yay -S \
+  fish \
+  micro \
+  fnott \
+  foot \
+  qt5ct \
+  waybar \
+  wofi \
+  hyprland \
+  starship \
+  pywal
+```
+
+---
+
+## Finish Setup
+
+  ```bash
+  chsh -s /usr/bin/fish
+  ```
+---
