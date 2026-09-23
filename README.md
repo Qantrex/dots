@@ -137,8 +137,12 @@ hypr/.config/hypr/
 Each `require` runs in its own scope, so an error in one module does not stop
 the others from loading.
 
-The previous hyprlang config is preserved in
-`hypr/.config/hypr/_backup-hyprlang-<date>/`.
+The previous hyprlang config lives in git history, at the commit before it
+was removed:
+
+```bash
+git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
+```
 
 ### Keybindings
 
