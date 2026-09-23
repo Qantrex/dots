@@ -27,7 +27,7 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 🎨 `gtk` | GTK 3/4 theming |
 | 🎛 `qt5ct` | Qt5 theming |
 | ⚙️ `scripts` | Helper scripts |
-| 🐚 `zsh` | zsh functions (`gpumode`, `powermode`, …) |
+| 🐚 `zsh` | zsh functions (`gpumode`, `fixnet`, `hyprr`, …) |
 
 ---
 
@@ -232,7 +232,8 @@ sudo ~/.config/scripts/optimize-boot.sh   # --dry-run / --show also available
 One-time pass that fixes a `quit` → `quiet` typo in the kernel cmdline, wires
 up `amd-ucode`, adds a fallback boot entry (there was none, and
 `loader.conf` has `timeout 0` — hold Space at boot for the menu), trims the
-initramfs for the current GPU mode, and socket-activates docker and libvirtd.
+initramfs for the current GPU mode, drops the plymouth boot splash (~500 ms
+across its four units), and socket-activates docker and libvirtd.
 
 > Containers with `restart: always` and VMs marked autostart will no longer
 > come up by themselves at boot — they start when something first touches

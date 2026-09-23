@@ -126,7 +126,29 @@ else
     fi
 fi
 
-# ------------------------------------------------------------- 4. initramfs
+# --------------------------------------------------------------- 4. plymouth
+# Boot splash, ~500ms across plymouth-start/read-write/quit/quit-wait. Dropping
+# the hook and the "splash" parameter is enough; the plymouth-*.service units
+# are all `static` and only get pulled in by those two. The package can stay
+# installed. Safe here because root is plain ext4 -- on an encrypted root
+# plymouth provides the passphrase prompt and removing it would be a mistake.
+# To restore: re-add "plymouth" to HOOKS and "splash" to the options line.
+step "Boot splash (plymouth)"
+if grep -qE '^HOOKS=.*\bplymouth\b' "$MKCONF"; then
+    run "sed -i 's/\\bplymouth\\b *//; s/  */ /g; s/ )/)/' '$MKCONF'"
+    say "   removed the plymouth hook"
+else
+    say "   plymouth hook already absent"
+fi
+for e in "$ENTRY" "$FALLBACK_ENTRY"; do
+    [[ -f $e ]] || continue
+    if grep -qE '^options .*\bsplash\b' "$e"; then
+        run "sed -i '/^options /{s/\\bsplash\\b *//; s/  */ /g; s/ \$//}' '$e'"
+        say "   removed 'splash' from $(basename "$e")"
+    fi
+done
+
+# ------------------------------------------------------------- 5. initramfs
 step "initramfs for the current GPU mode"
 mode="$(envycontrol -q 2>/dev/null || echo unknown)"
 say "   envycontrol mode: $mode"
@@ -137,18 +159,19 @@ if [[ $mode == integrated ]]; then
         run "sed -i 's|^MODULES=.*|MODULES=()|' '$MKCONF'"
         say "   set MODULES=() -- nvidia is blacklisted in this mode anyway"
     fi
-    before="$(stat -c %s /boot/initramfs-linux.img 2>/dev/null || echo 0)"
-    run "mkinitcpio -P"
-    if (( ! DRY )); then
-        after="$(stat -c %s /boot/initramfs-linux.img)"
-        printf '   initramfs %s -> %s\n' \
-            "$(numfmt --to=iec "$before")" "$(numfmt --to=iec "$after")"
-    fi
 else
     say "   not integrated mode; leaving MODULES alone"
 fi
+# Rebuild regardless of mode: the HOOKS change above affects both.
+before="$(stat -c %s /boot/initramfs-linux.img 2>/dev/null || echo 0)"
+run "mkinitcpio -P"
+if (( ! DRY )); then
+    after="$(stat -c %s /boot/initramfs-linux.img)"
+    printf '   initramfs %s -> %s\n' \
+        "$(numfmt --to=iec "$before")" "$(numfmt --to=iec "$after")"
+fi
 
-# --------------------------------------------------------- 5. lazy services
+# --------------------------------------------------------- 6. lazy services
 # Walk a unit's Also=/Wants=/Requires= graph transitively and print every unit
 # reached. Also= chains nest (libvirtd -> virtlogd.socket -> virtlogd.service
 # -> virtlogd-admin.socket), so a one- or two-level lookup misses units that
