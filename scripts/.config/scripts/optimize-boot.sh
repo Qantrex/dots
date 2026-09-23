@@ -146,18 +146,47 @@ fi
 
 # --------------------------------------------------------- 5. lazy services
 step "Deferring services to socket activation"
+#
+# `systemctl disable X.service` also disables everything in the unit's Also=
+# list. libvirtd.service lists virtlogd.socket and virtlockd.socket there, and
+# it Requires= virtlogd.socket -- so a naive disable/enable pair silently
+# leaves virtlogd and virtlockd disabled and VMs fail to start on the next
+# boot. Snapshot which sockets are enabled first, then restore exactly those.
 for svc in docker libvirtd; do
-    if ! systemctl list-unit-files "${svc}.socket" >/dev/null 2>&1 \
-       || ! systemctl cat "${svc}.socket" >/dev/null 2>&1; then
+    if ! systemctl cat "${svc}.socket" >/dev/null 2>&1; then
         say "   ${svc}.socket not available; skipping"
         continue
     fi
-    if [[ "$(systemctl is-enabled "${svc}.service" 2>&1)" == enabled ]]; then
-        run "systemctl disable '${svc}.service'"
-        run "systemctl enable '${svc}.socket'"
-        say "   ${svc}: service disabled, socket enabled"
-    else
+    if [[ "$(systemctl is-enabled "${svc}.service" 2>&1)" != enabled ]]; then
         say "   ${svc}.service not enabled; leaving alone"
+        continue
+    fi
+
+    # Snapshot every enabled socket, disable, then re-enable whatever the
+    # disable took with it. Also= chains nest (libvirtd -> virtlogd ->
+    # virtlogd-admin), so enumerating the service's own directives is not
+    # enough -- diffing the before/after state catches all of it.
+    enabled_sockets() {
+        systemctl list-unit-files --no-legend --state=enabled '*.socket' 2>/dev/null \
+            | awk '{print $1}' | sort
+    }
+
+    if (( DRY )); then
+        say "   [dry-run] would disable ${svc}.service and keep its sockets enabled"
+        continue
+    fi
+
+    before_socks="$(enabled_sockets)"
+    systemctl disable "${svc}.service"
+    systemctl enable "${svc}.socket" >/dev/null 2>&1 || true
+    after_socks="$(enabled_sockets)"
+
+    mapfile -t lost < <(comm -23 <(printf '%s\n' "$before_socks") <(printf '%s\n' "$after_socks"))
+    if (( ${#lost[@]} )); then
+        systemctl enable "${lost[@]}" >/dev/null 2>&1 || true
+        say "   ${svc}: service disabled; restored ${lost[*]}"
+    else
+        say "   ${svc}: service disabled, ${svc}.socket enabled"
     fi
 done
 
