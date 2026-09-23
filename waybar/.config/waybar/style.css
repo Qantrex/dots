@@ -1,72 +1,175 @@
 /*
- * Minimalist Black and White Waybar
- * This style sheet has been updated with more consistent spacing
- * and the Font Awesome font family to display icons.
+ * Waybar -- monochrome terminal aesthetic.
+ *
+ * A floating, translucent panel. Hyprland blurs it via the layer rule in
+ * hypr/lua/rules.lua (match:namespace ^waybar$), which only works because the
+ * bar has a semi-opaque background -- a fully transparent one has nothing to
+ * blur and is skipped by ignore_alpha.
+ *
+ * GTK CSS: no variables, for compatibility with older GTK.
  */
 
-#waybar {
-    background-color: transparent;
-    color: white;
+/* --- Global --- */
+* {
     border: none;
-    font-family: "Font Awesome 6 Free", Inter, sans-serif;
     border-radius: 0;
+    /*
+     * The installed family is "JetBrainsMono Nerd Font". The old stack asked
+     * for "JetBrains Mono" and "Font Awesome 6 Free"; neither is installed
+     * here (fc-match resolved them to Noto Sans Mono and Noto Sans), so the
+     * bar rendered in Noto and the icons only appeared through fontconfig's
+     * automatic fallback.
+     */
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 14px;
+    font-weight: 500;
+    min-height: 0;
 }
 
+window#waybar {
+    background: transparent;
+    color: #ffffff;
+    transition-property: background-color;
+    transition-duration: .3s;
+}
+
+/* The visible panel. Padding on window#waybar cannot round the corners, so
+ * the background lives on the module containers instead. */
 .modules-left,
-.modules-right,
-.modules-center {
-    background-color: transparent;
+.modules-center,
+.modules-right {
+    background-color: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    margin: 4px 6px;
+    padding: 0 4px;
 }
 
-/* Individual Module Styles - Adjusted Padding for a tighter fit */
+/* --- General module spacing --- */
 #clock,
 #pulseaudio,
 #network,
 #battery,
-#custom-media,
-#temperature,
-#cpu,
 #memory,
 #tray,
-#bluetooth {
-    background-color: transparent;
-    border: none;
-    padding: 0 8px; /* Slightly reduced padding for a tighter look */
+#bluetooth,
+#mpris,
+#custom-powerprofile,
+#workspaces {
+    padding: 0 10px;
+    margin: 2px 0;
 }
 
-/* Workspaces */
+/* --- Separators between the right-hand modules --- */
+.modules-right > * > * {
+    margin-left: 2px;
+    padding-left: 10px;
+    border-left: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.modules-right > * > *:first-child {
+    border-left: none;
+    margin-left: 0;
+}
+
+/* --- Workspaces (animated pill) --- */
+#workspaces {
+    background-color: transparent;
+    padding: 0 2px;
+}
+
 #workspaces button {
     background-color: transparent;
-    color: white;
-    border: none;
-    border-radius: 0;
+    color: rgba(255, 255, 255, 0.55);
     padding: 0 10px;
-}
-
-#workspaces button.active {
-    background-color: white;
-    color: black;
-    border-bottom: 2px solid black;
+    margin: 2px 2px;
+    border: none;
+    border-radius: 10px;
+    transition: all 0.4s cubic-bezier(.55, -0.68, .48, 1.68);
 }
 
 #workspaces button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+}
+
+#workspaces button.active {
+    background-color: #ffffff;
+    color: #000000;
+    font-weight: bold;
+    padding: 0 15px;
 }
 
 #workspaces button.urgent {
-    background-color: red;
-    color: black;
+    background-color: #ffffff;
+    color: #000000;
+    font-weight: bold;
 }
 
-#battery.charging {
-    color: green;
+/* --- Clock: the one emphasised element --- */
+#clock {
+    font-weight: bold;
+    letter-spacing: 0.5px;
 }
-#battery.full {
-    color: green;
+
+/* --- Now playing --- */
+#mpris {
+    color: rgba(255, 255, 255, 0.85);
 }
+
+#mpris.paused {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* --- Monochrome status indicators --- */
+#battery.charging,
 #battery.warning:not(.charging) {
-    color: yellow;
+    font-weight: bold;
 }
+
 #battery.critical:not(.charging) {
-    color: red;
+    background-color: #ffffff;
+    color: #000000;
+    font-weight: bold;
+    border-radius: 8px;
+}
+
+#pulseaudio.muted,
+#network.disconnected,
+#bluetooth.disabled {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+/* --- Power profile (Quiet / Balanced / Performance) --- */
+#custom-powerprofile.quiet {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+#custom-powerprofile.balanced {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+#custom-powerprofile.performance {
+    color: #ffffff;
+    font-weight: bold;
+}
+
+/* --- Tray menu --- */
+#tray menu {
+    background-color: rgba(0, 0, 0, 0.9);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+}
+
+/* --- Tooltips --- */
+tooltip {
+    background-color: rgba(0, 0, 0, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 8px;
+}
+
+tooltip label {
+    color: #ffffff;
+    padding: 6px;
 }
