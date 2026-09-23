@@ -86,13 +86,17 @@ fi
 # -------------------------------------------------------------- 2. microcode
 step "Microcode"
 if pacman -Q amd-ucode >/dev/null 2>&1; then
-    if grep -q '^initrd .*amd-ucode' "$ENTRY"; then
-        say "   amd-ucode already referenced"
-    else
-        # must precede the main initramfs line
-        run "sed -i '0,/^initrd /s||initrd /amd-ucode.img\\ninitrd |' '$ENTRY'"
-        say "   added 'initrd /amd-ucode.img'"
-    fi
+    # Both entries need it, and the fallback may predate the install.
+    for e in "$ENTRY" "$FALLBACK_ENTRY"; do
+        [[ -f $e ]] || continue
+        if grep -q '^initrd .*amd-ucode' "$e"; then
+            say "   amd-ucode already referenced in $(basename "$e")"
+        else
+            # must precede the main initramfs line
+            run "sed -i '0,/^initrd /s||initrd /amd-ucode.img\\ninitrd |' '$e'"
+            say "   added 'initrd /amd-ucode.img' to $(basename "$e")"
+        fi
+    done
 else
     say "   amd-ucode NOT installed -- run 'pacman -S amd-ucode', then re-run this script"
 fi
@@ -145,6 +149,31 @@ else
 fi
 
 # --------------------------------------------------------- 5. lazy services
+# Walk a unit's Also=/Wants=/Requires= graph transitively and print every unit
+# reached. Also= chains nest (libvirtd -> virtlogd.socket -> virtlogd.service
+# -> virtlogd-admin.socket), so a one- or two-level lookup misses units that
+# `systemctl disable` nonetheless takes with it.
+expand_also() {
+    local -a queue=("$@") next
+    local -A seen=()
+    local u dep
+    while (( ${#queue[@]} )); do
+        u="${queue[0]}"; queue=("${queue[@]:1}")
+        [[ -z $u || -n ${seen[$u]:-} ]] && continue
+        seen[$u]=1
+        printf '%s\n' "$u"
+        mapfile -t next < <(
+            systemctl show -p Also -p Wants -p Requires --value "$u" 2>/dev/null \
+                | tr ' ' '\n' | grep -E '\.(socket|service)$'
+            # A .socket links to its .service by naming convention rather than
+            # any property, and that service is where the -admin variants are
+            # listed (virtlogd.service has Also=virtlogd-admin.socket).
+            [[ $u == *.socket ]] && printf '%s\n' "${u%.socket}.service"
+        )
+        (( ${#next[@]} )) && queue+=("${next[@]}")
+    done
+}
+
 step "Deferring services to socket activation"
 #
 # `systemctl disable X.service` also disables everything in the unit's Also=
@@ -158,7 +187,21 @@ for svc in docker libvirtd; do
         continue
     fi
     if [[ "$(systemctl is-enabled "${svc}.service" 2>&1)" != enabled ]]; then
-        say "   ${svc}.service not enabled; leaving alone"
+        # Already deferred. Verify the companion sockets survived -- an earlier
+        # version of this script disabled the service without restoring the
+        # units its Also= chain took with it, which leaves libvirtd unable to
+        # start VMs (it Requires= virtlogd.socket).
+        broken=()
+        while read -r dep; do
+            [[ -n $dep ]] || continue
+            [[ "$(systemctl is-enabled "$dep" 2>&1)" == disabled ]] && broken+=("$dep")
+        done < <(expand_also "${svc}.service" | grep '\.socket$')
+        if (( ${#broken[@]} )); then
+            run "systemctl enable ${broken[*]}"
+            say "   ${svc}: repaired disabled companion sockets: ${broken[*]}"
+        else
+            say "   ${svc}.service already deferred; sockets look healthy"
+        fi
         continue
     fi
 
