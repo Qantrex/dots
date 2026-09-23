@@ -7,7 +7,10 @@ return {
     terminal    = "foot",
     fileManager = "dolphin",
     browser     = "firefox",
-    music       = "spotify-adblock",
+    -- spotify-adblock ships a shared library, not an executable, so it has to
+    -- be LD_PRELOADed into spotify. The old config ran "spotify-adblock"
+    -- directly, which is not a command -- Spotify never actually autostarted.
+    music       = "env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify",
     chat        = "vesktop --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto",
 
     menu        = 'wofi --show drun --prompt="App Launcher"',
