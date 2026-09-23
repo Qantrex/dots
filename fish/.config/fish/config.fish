@@ -23,7 +23,9 @@ function fish_greeting
 end
 
 
-
+function ls
+    echo "ich liebe männer"
+end
 
 if status is-interactive
     # Commands to run in interactive sessions can go here
@@ -33,3 +35,5 @@ fish_add_path /home/kbauer/.spicetify
 
 
 abbr -a hyprr 'hyprr'
+
+abbr -a fixnet 'fixnet'
