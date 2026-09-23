@@ -37,7 +37,14 @@ show_state() {
     say "journal:         $(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)"
     say "/boot perms:     $(stat -c %A /boot 2>/dev/null)  (vfat: set by fmask/dmask in fstab)"
     say "sslh generator:  $([[ -L /etc/systemd/system-generators/systemd-sslh-generator ]] && echo masked || echo 'active (crashes each boot)')"
-    say "nvidia modload:  $([[ -L /etc/modules-load.d/nvidia-utils.conf ]] && echo masked || echo 'active')"
+    say "nvidia modload:  $(
+        if [[ ! -f /usr/lib/modules-load.d/nvidia-utils.conf ]]; then
+            echo 'n/a (nvidia-utils no longer ships it)'
+        elif [[ -L /etc/modules-load.d/nvidia-utils.conf ]]; then
+            echo masked
+        else
+            echo active
+        fi)"
     say "failed units:    $(systemctl --failed --no-legend 2>/dev/null | wc -l)"
 }
 
@@ -134,11 +141,21 @@ else
     run "cp -a '$FSTAB' '$FSTAB.bak-$STAMP'"
     run "sed -i '\\|[[:space:]]/boot[[:space:]]|{s/fmask=0022/fmask=0077/; s/dmask=0022/dmask=0077/}' '$FSTAB'"
     if (( ! DRY )); then
-        if findmnt --verify --verbose >/dev/null 2>&1 && mount -o remount /boot 2>/dev/null; then
-            say "   set fmask=0077,dmask=0077 and remounted -> $(stat -c %A /boot)"
-        else
+        if ! findmnt --verify >/dev/null 2>&1; then
             cp -a "$FSTAB.bak-$STAMP" "$FSTAB"
-            say "   remount failed; fstab restored from backup" >&2
+            say "   fstab failed validation; restored from backup" >&2
+        else
+            mount -o remount /boot 2>/dev/null || true
+            # vfat cannot change fmask/dmask on a remount -- the kernel keeps
+            # the mask it was mounted with. Check whether it actually took
+            # rather than assuming, and say so plainly if it did not.
+            if findmnt -n -o OPTIONS /boot | grep -q 'fmask=0077'; then
+                say "   set fmask=0077,dmask=0077, applied now -> $(stat -c %A /boot)"
+            else
+                say "   fstab updated to fmask=0077,dmask=0077."
+                say "   vfat cannot change the mask on remount, so /boot is still"
+                say "   $(stat -c %A /boot) until the next boot. No action needed."
+            fi
         fi
     fi
 fi
