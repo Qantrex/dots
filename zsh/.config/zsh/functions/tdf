@@ -1,0 +1,22 @@
+#compdef tdf
+tdf() {
+  # resolve real binaries (ignore aliases/functions)
+  local _kit _tdf
+  _kit="$(whence -p kitty)" || { print -u2 "tdf: 'kitty' not found in PATH"; return 127; }
+  _tdf="$(whence -p tdf)"   || { print -u2 "tdf: '/usr/bin/tdf' not found"; return 127; }
+
+  # if we're already inside kitty, just exec the real tdf binary
+  if [[ -n "$KITTY_LISTEN_ON" || "$TERM" = kitty ]]; then
+    exec "$_tdf" "$@"
+  fi
+
+  # launch kitty fullscreen, KGP enabled; no --detach so errors show
+  "$_kit" \
+    --start-as=fullscreen \
+    -o enable_graphics_protocol=yes \
+    -o allow_remote_control=yes \
+    -- "$_tdf" "$@"
+}
+
+# complete only on PDFs
+compdef '_files -g "*.pdf(PN:e:)"' tdf

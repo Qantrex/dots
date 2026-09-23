@@ -1,0 +1,11 @@
+# File: ~/.config/zsh/functions/fixnet
+
+echo "Attempting to restart NetworkManager..."
+
+# Use pkexec for a graphical password prompt instead of sudo.
+if pkexec systemctl restart NetworkManager.service; then
+    echo "✅ Success! NetworkManager is restarting. Reconnection may take a moment."
+else
+    echo "❌ Failure. Either you cancelled the password entry or an error occurred."
+    echo "   Try running 'journalctl -u NetworkManager' for details."
+fi

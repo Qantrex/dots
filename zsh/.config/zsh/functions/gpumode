@@ -1,0 +1,78 @@
+#!/usr/bin/env zsh
+
+#
+# Manage the dedicated NVIDIA GPU via envycontrol.
+#
+#   gpumode on      - dedicated NVIDIA GPU
+#   gpumode off     - integrated AMD GPU only (battery)
+#   gpumode status  - current mode, initramfs size, MODULES line
+#
+# Beyond calling envycontrol, this keeps /etc/mkinitcpio.conf's MODULES line in
+# sync with the mode, because the two modes want different initramfs contents:
+#
+#   nvidia mode      NVIDIA drives the display, so the modules belong in the
+#                    initramfs for early KMS (no console mode-flicker on boot).
+#
+#   integrated mode  The modules are blacklisted by envycontrol and never load,
+#                    but mkinitcpio still pulls them in along with ~109 MB of
+#                    GSP firmware. Measured on this machine that is the
+#                    difference between a 142 MB and a 48 MB initramfs, which
+#                    systemd-boot reads and the kernel decompresses on every
+#                    boot (0.220s vs 0.041s of decompression alone).
+#
+# MODULES must be set *before* envycontrol runs, because envycontrol rebuilds
+# the initramfs itself (mkinitcpio -P) as its last step. It never touches
+# MODULES on its own.
+#
+
+gpumode() {
+  emulate -L zsh
+
+  local conf=/etc/mkinitcpio.conf
+  local nvidia_modules='nvidia nvidia_modeset nvidia_uvm nvidia_drm'
+
+  # Rewrite the MODULES=(...) line. Non-zero if the line is missing.
+  _gpumode_set_modules() {
+    local want="$1"
+    if ! grep -qE '^MODULES=' "$conf"; then
+      echo "ERROR: no MODULES= line in $conf; leaving it alone." >&2
+      return 1
+    fi
+    sudo sed -i "s|^MODULES=.*|MODULES=($want)|" "$conf" || return 1
+    echo "  set MODULES=($want)"
+    return 0
+  }
+
+  case "$1" in
+    on)
+      echo "Switching dedicated GPU ON (NVIDIA)..."
+      _gpumode_set_modules "$nvidia_modules" || return 1
+      sudo envycontrol -s nvidia || return 1
+      echo "\nReboot is required for the change to take effect."
+      ;;
+
+    off)
+      echo "Switching dedicated GPU OFF (integrated AMD)..."
+      _gpumode_set_modules "" || return 1
+      sudo envycontrol -s integrated || return 1
+      echo "\nReboot is required for the change to take effect."
+      ;;
+
+    status)
+      echo "GPU mode:   $(envycontrol -q 2>/dev/null)"
+      echo "MODULES:    $(grep -E '^MODULES=' "$conf" 2>/dev/null)"
+      echo "initramfs:  $(du -h /boot/initramfs-linux.img 2>/dev/null | cut -f1)"
+      echo "GPUs on the PCI bus:"
+      lspci | grep -iE 'vga|3d controller' | sed 's/^/  /'
+      ;;
+
+    *)
+      echo "GPU Management"
+      echo "Usage: gpumode [on|off|status]"
+      echo "--------------------------------"
+      echo "  on      - Switch to dedicated NVIDIA GPU"
+      echo "  off     - Switch to integrated AMD GPU"
+      echo "  status  - Show mode, initramfs size and MODULES"
+      ;;
+  esac
+}

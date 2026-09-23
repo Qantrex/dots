@@ -1,0 +1,31 @@
+# File: ~/.config/zsh/functions/hyprr
+
+echo "--> Reloading Hyprland configuration..."
+
+# 1. Add error handling for the reload command.
+# If hyprctl reload fails, the script will stop and report the error.
+if ! hyprctl reload; then
+    echo "❌ ERROR: Hyprland failed to reload. Check for errors in your config."
+    return 1 # Exit the function with a non-zero status to indicate failure
+fi
+
+echo "--> Restarting Waybar..."
+
+# 2. Make the restart more robust.
+# - Use 'pkill -f' to more reliably target the waybar process.
+# - Redirect stderr to /dev/null to hide errors if Waybar isn't running.
+# - Add a tiny sleep to ensure the old process has time to die before a new one starts.
+pkill -f waybar 2>/dev/null
+sleep 0.1
+hyprctl dispatch exec waybar &
+
+sleep 0.1
+if ! hyprctl hyprpaper reload; then
+    echo "❌ ERROR: Hyprpaper failed to reload. Check for errors in your config."
+    return 1 # Exit the function with a non-zero status to indicate failure
+fi
+
+# You can add other components to restart here in the same way.
+# pkill -f mako 2>/dev/null; sleep 0.1; hyprctl dispatch exec mako &
+
+echo "✅ Reload complete."

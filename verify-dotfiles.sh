@@ -41,9 +41,10 @@ declare -A MAP=(
   [wofi]=wofi
   [scripts]=scripts
   [hypr]=hypr
+  [zsh]=zsh
 )
 
-names=(micro fish fnott foot qt5ct waybar gtk-3.0 gtk-4.0 wofi scripts hypr)
+names=(micro fish fnott foot qt5ct waybar gtk-3.0 gtk-4.0 wofi scripts hypr zsh)
 
 fail=0
 pad() { printf "%-12s" "$1"; }

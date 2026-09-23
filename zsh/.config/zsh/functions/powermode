@@ -1,0 +1,132 @@
+powermode() {
+  emulate -L zsh
+  set -o pipefail
+
+  local PROFILE_DIR="/etc/tlp.profiles"
+  local ACTIVE="/etc/tlp.d/90-ac-mode.conf"
+  local SILENT="${PROFILE_DIR}/silent-ac.conf"
+  local BAL="${PROFILE_DIR}/balanced-ac.conf"
+  local PERF="${PROFILE_DIR}/perf-ac.conf"
+
+  local cmd="${1:-help}"
+
+  # Ensure discoverable
+  [[ -d "$PROFILE_DIR" ]] || { echo "ERROR: missing $PROFILE_DIR"; return 1; }
+
+  # Quick warning if power-profiles-daemon is on
+  if systemctl is-active --quiet power-profiles-daemon 2>/dev/null; then
+    echo "WARN: power-profiles-daemon is ACTIVE and may fight TLP."
+  fi
+
+  # Resolve current mode by file compare
+  local current="custom/unknown"
+  if sudo cmp -s "$ACTIVE" "$SILENT" 2>/dev/null; then
+    current="silent"
+  elif sudo cmp -s "$ACTIVE" "$BAL" 2>/dev/null; then
+    current="balanced"
+  elif sudo cmp -s "$ACTIVE" "$PERF" 2>/dev/null; then
+    current="performance"
+  fi
+
+  # helper to switch mode (inline to stay zsh-simple)
+  _switch_mode() {
+    # $1 = target file, $2 = label
+    local src="$1" label="$2"
+    [[ -r "$src" ]] || { echo "ERROR: profile not found: $src"; return 1; }
+    echo "Switching TLP AC mode => ${label}…"
+    sudo install -m 0644 "$src" "$ACTIVE" || { echo "Failed to install ${label} profile."; return 1; }
+    sudo systemctl restart tlp || { echo "Failed to restart tlp."; return 1; }
+    echo "Done. New mode: ${label}"
+    return 0
+  }
+
+  case "$cmd" in
+    help|-h|--help)
+      echo "Usage: powermode {status|silent|balanced|performance|bench|help}"
+      return 0
+      ;;
+
+    status)
+      echo "Active mode (by file compare): $current"
+      echo
+      tlp-stat -s
+      return 0
+      ;;
+
+    silent)
+      _switch_mode "$SILENT" "silent"; return $?
+      ;;
+
+    balanced)
+      _switch_mode "$BAL" "balanced"; return $?
+      ;;
+
+    performance|perf)
+      _switch_mode "$PERF" "performance"; return $?
+      ;;
+
+    bench)
+      # quick CPU benchmark across available profiles, restore original at end
+      command -v sysbench >/dev/null 2>&1 || { echo "ERROR: sysbench not installed (pacman -S sysbench)"; return 1; }
+
+      local threads time primes
+      threads=$(nproc)
+      time=10
+      primes=20000
+
+      # build list of modes that exist
+      local modes=()
+      [[ -r "$SILENT" ]] && modes+=("silent")
+      [[ -r "$BAL"    ]] && modes+=("balanced")
+      [[ -r "$PERF"   ]] && modes+=("performance")
+
+      [[ ${#modes[@]} -gt 0 ]] || { echo "No profiles found to benchmark."; return 1; }
+
+      # remember current source to restore
+      local restore_label="$current"
+      local restore_src=""
+      case "$current" in
+        silent)      restore_src="$SILENT" ;;
+        balanced)    restore_src="$BAL" ;;
+        performance) restore_src="$PERF" ;;
+        *)           restore_src="" ;;
+      esac
+
+      # run benchmarks
+      local m score out
+      print "Running sysbench (threads=${threads}, time=${time}s, prime=${primes})…"
+      print -r -- "mode,events_per_sec"
+
+      for m in "${modes[@]}"; do
+        case "$m" in
+          silent)      _switch_mode "$SILENT" "silent"      >/dev/null || return 1 ;;
+          balanced)    _switch_mode "$BAL"    "balanced"    >/dev/null || return 1 ;;
+          performance) _switch_mode "$PERF"   "performance" >/dev/null || return 1 ;;
+        esac
+
+        out=$(sysbench cpu --cpu-max-prime="${primes}" --time="${time}" --threads="${threads}" run 2>/dev/null)
+        score=$(printf "%s\n" "$out" | awk '/events per second/ {print $4; exit}')
+        [[ -n "$score" ]] || score="NA"
+        print -- "${m},${score}"
+      done
+
+      # restore original (if it matched one of ours)
+      if [[ -n "$restore_src" ]]; then
+        case "$restore_label" in
+          silent)      _switch_mode "$SILENT" "silent"      >/dev/null ;;
+          balanced)    _switch_mode "$BAL"    "balanced"    >/dev/null ;;
+          performance) _switch_mode "$PERF"   "performance" >/dev/null ;;
+          *) ;;
+        esac
+        echo "Restored previous mode: ${restore_label}"
+      fi
+      return 0
+      ;;
+
+    *)
+      echo "Unknown subcommand: $cmd"
+      echo "Try: powermode help"
+      return 1
+      ;;
+  esac
+}
