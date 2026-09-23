@@ -1,0 +1,14 @@
+# Specifies the source file for the model's "brain"
+FROM hermes3:8b
+
+# Defines the chat structure. CRITICAL for making the model understand the conversation.
+TEMPLATE """<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+
+# Sets the "stop words". The model will halt generation when it's about to write these.
+PARAMETER stop <|im_start|>
+PARAMETER stop <|im_end|>
