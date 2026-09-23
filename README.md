@@ -241,6 +241,31 @@ across its four units), and socket-activates docker and libvirtd.
 
 ---
 
+## 🧹 Maintenance
+
+```bash
+sudo ~/.config/scripts/maintain.sh   # --dry-run / --show also available
+```
+
+Re-runnable; every step checks before acting. It prunes the pacman cache
+(which pacman never trims on its own — this machine reached **108 GB** across
+21,420 files, including 50 versions each of `ollama-cuda`, `ollama` and
+`linux`) and enables `paccache.timer` so it stays pruned. It also enables
+`fstrim.timer`, masks the `systemd-sslh-generator` that SIGABRTs on every
+boot, silences the `nvidia-utils` modules-load entry that logs
+`could not find module by name='off'` in integrated GPU mode, and tightens
+`/boot` permissions.
+
+> `/boot` is vfat, so `chmod` is a no-op there — permissions come from the
+> `fmask`/`dmask` mount options. The script edits fstab, backs it up, and
+> restores it if the remount fails.
+
+Orphaned packages are **reported, never removed**: "orphan" only means nothing
+depends on it, and toolchains you invoke directly (`dotnet-sdk`, `clang`,
+`doxygen`, `ant`) all qualify.
+
+---
+
 ## ⚠️ Notes
 
 - Machine-specific state (`fish_variables`, `micro/buffers`, `wofi/history`) is
