@@ -1,0 +1,70 @@
+########################################
+# NOTE ON PATHS
+########################################
+# This repo uses GNU Stow, so every config lives one level deep, under
+# <package>/.config/<name>/...  A pattern like ".config/micro/buffers/"
+# contains a slash, so git anchors it to the repo root -- where nothing of
+# that name exists -- and it matches nothing. Patterns below use
+# "*/.config/..." so they match the stow layout. The previous version of
+# this file was anchored the wrong way and ignored nothing at all.
+
+########################################
+# Global junk / editor temp files
+########################################
+*.swp
+*.swo
+*.log
+*~
+.DS_Store
+*.orig
+*.rej
+
+# Ad-hoc backups (e.g. style.css.bak-2026-09-23, ITSI.bak/)
+*.bak
+*.bak-*
+
+########################################
+# Caches
+########################################
+**/.cache/
+*/.config/*/Cache/
+*/.config/*/GPUCache/
+
+# Pywal output (generated colors)
+*/.config/wal/
+
+########################################
+# Micro -- editor state, not config
+########################################
+*/.config/micro/backups/
+*/.config/micro/buffers/
+
+########################################
+# Fish -- machine-specific universal variables
+########################################
+*/.config/fish/fish_variables
+
+########################################
+# Fnott
+########################################
+*/.config/fnott/**/*.cache/
+
+########################################
+# Waybar
+########################################
+*/.config/waybar/node_modules/
+*/.config/waybar/package-lock.json
+
+########################################
+# GTK -- per-machine chooser state
+########################################
+*/.config/gtk-3.0/bookmarks
+*/.config/gtk-3.0/gtkfilechooser.ini
+*/.config/gtk-3.0/gtkfilechooser.ini.lock
+*/.config/gtk-4.0/gtkfilechooser.ini
+*/.config/gtk-4.0/gtkfilechooser.ini.lock
+
+########################################
+# Wofi -- launcher usage history
+########################################
+*/.config/wofi/history
