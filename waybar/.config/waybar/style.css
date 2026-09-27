@@ -55,6 +55,7 @@ window#waybar {
 #bluetooth,
 #mpris,
 #custom-powerprofile,
+#custom-ai,
 #workspaces {
     padding: 0 10px;
     margin: 2px 0;
@@ -152,6 +153,29 @@ window#waybar {
 #custom-powerprofile.performance {
     color: #ffffff;
     font-weight: bold;
+}
+
+/* --- Local AI (ai waybar): off / starting / on, plus busy while a model is
+ * loaded or ComfyUI is running --- */
+#custom-ai.off {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+#custom-ai.starting {
+    animation: ai-pulse 1.2s ease-in-out infinite alternate;
+}
+
+#custom-ai.on {
+    color: #ffffff;
+}
+
+#custom-ai.busy {
+    font-weight: bold;
+}
+
+@keyframes ai-pulse {
+    from { color: rgba(255, 255, 255, 0.35); }
+    to   { color: #ffffff; }
 }
 
 /* --- Tray menu --- */
