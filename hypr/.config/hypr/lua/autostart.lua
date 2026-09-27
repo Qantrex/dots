@@ -46,10 +46,9 @@ hl.on("hyprland.start", function()
     -- Always start quiet; opt into Performance deliberately with SUPER+F2.
     hl.exec_cmd(apps.powerprofile .. " quiet")
 
-    -- Idle handling: lock after 5 minutes, and on suspend.
-    -- (The old config started this twice -- once here and once in idle.conf,
-    -- which nothing ever sourced.)
-    hl.exec_cmd("swayidle -w timeout 300 hyprlock before-sleep hyprlock lock hyprlock")
+    -- Idle handling: dim, lock, screen off, and suspend on battery.
+    -- See idle.sh for the timings and why it is a script.
+    hl.exec_cmd(apps.idle)
 
     -- Cursor theme for GTK applications. `cursor.sync_gsettings_theme` is on
     -- by default and usually covers this, but setting it explicitly costs

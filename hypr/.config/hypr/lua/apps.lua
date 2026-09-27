@@ -18,6 +18,7 @@ return {
     clipboard   = "~/.config/scripts/wofi-cliphist.sh",
     wallpaper   = "~/.config/scripts/wofi-wallpaper.sh",
     powerprofile = "~/.config/scripts/powerprofile.sh",
+    idle        = "~/.config/scripts/idle.sh",
 
     lock        = "hyprlock",
     bar         = "waybar",
