@@ -57,6 +57,13 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-theme 'BreezeX-RosePine-Linux'")
     hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-size 24")
 
+    -- Dark everywhere. On Wayland, GTK apps take their theme from gsettings
+    -- rather than settings.ini, and libadwaita apps, Firefox, Chrome and web
+    -- pages' prefers-color-scheme follow color-scheme (via the portal).
+    hl.exec_cmd("gsettings set org.gnome.desktop.interface gtk-theme 'rose-pine-moon-gtk'")
+    hl.exec_cmd("gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'")
+    hl.exec_cmd("gsettings set org.gnome.desktop.interface icon-theme 'Papirus-Dark'")
+
     -- Applications, each on its own workspace, without stealing focus.
     hl.exec_cmd(apps.terminal, { workspace = "1 silent" })
     hl.exec_cmd(apps.browser,  { workspace = "2 silent" })
