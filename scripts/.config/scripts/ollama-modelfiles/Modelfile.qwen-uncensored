@@ -1,0 +1,5 @@
+# qwen-uncensored: abliterated Qwen 3.5 4B, fully on the RTX 3050 (4 GB).
+# Ollama's auto-fit only places 21 of 33 layers and leaves ~1.7 GB free;
+# forcing all of them is ~30% faster (18 vs 14 tok/s) and still fits.
+FROM huihui_ai/qwen3.5-abliterated:4B
+PARAMETER num_gpu 99

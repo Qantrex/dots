@@ -1,42 +1,30 @@
 # Ollama Modelfiles
 
-Custom personas for the `SUPER+SHIFT+A` launcher (`ollama-launcher.sh`, which
-lists whatever `ollama list` reports and opens the chosen one in foot).
+The local models used by Open WebUI.
 
-| Modelfile | Persona |
+| Modelfile | Model |
 | --- | --- |
-| `Modelfile.arch-helper` | "Archie" — Arch Linux specialist |
-| `Modelfile.ethical-hacking` | "CyberBard" — ethical hacking assistant |
-| `Modelfile.lector` | "Der Lektor" — proofreader |
-| `Modelfile.mdguru` | "Markdown Guru" — Markdown formatting |
-| `Modelfile.nico` | "Nico" — fictional character |
-| `Modelfile` | base, no persona |
+| `Modelfile.qwen-uncensored` | `qwen-uncensored`: abliterated Qwen 3.5 4B, all layers on the GPU. |
+| `Modelfile.nico` | `nico`: roleplay persona on top of `qwen-uncensored` |
 
 ## Build them
 
-None of these had ever actually been built — as of 2026-09-23 `ollama list`
-showed only `llama3.2:latest`, so the launcher had only ever offered that one.
-
 ```bash
-ollama pull hermes3:8b
+ollama pull huihui_ai/qwen3.5-abliterated:4B
 cd ~/.config/scripts/ollama-modelfiles
-for f in Modelfile.*; do
-  ollama create "${f#Modelfile.}" -f "$f"
-done
-ollama list          # the personas should now appear
+ollama create qwen-uncensored -f Modelfile.qwen-uncensored   # first: nico builds on it
+ollama create nico -f Modelfile.nico
 ```
 
-## Why hermes3
+## Use them
 
-These originally read `FROM ./Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf` — a 4.6 GB
-file sitting in `~/ollama_models`, downloaded 2025-09 and hand-managed.
-`hermes3:8b` is the same lineage (NousResearch), current, and pulls straight
-from the registry, so there's no multi-gigabyte blob to babysit. The loose
-GGUF was removed once these were repointed.
+Pick them in Open WebUI's model selector (the robot icon in waybar starts it),
+or straight from a terminal with `ollama run qwen-uncensored` / `ollama run nico`.
 
-To use a different base — an uncensored variant, say — change the `FROM` line;
-`dolphin3`, `llama2-uncensored` and `wizard-vicuna-uncensored` are all in the
-registry.
+Thinking can't be set in a Modelfile (Ollama rejects `PARAMETER think`); it's
+chosen per request, which Open WebUI's Thinking button does
+(`/set think` / `/set nothink` inside `ollama run`).
 
-> Keep the `TEMPLATE` block in step with the base model. These use ChatML,
-> which suits the Hermes line; a Llama-2-derived base wants a different one.
+The Hermes-based personas that used to live here (Archie, CyberBard, Der
+Lektor, Markdown Guru) were early experiments and were dropped on 2026-09-25;
+they are still in git history.
