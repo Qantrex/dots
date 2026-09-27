@@ -17,7 +17,6 @@ return {
     emoji       = "wofimoji",
     clipboard   = "~/.config/scripts/wofi-cliphist.sh",
     wallpaper   = "~/.config/scripts/wofi-wallpaper.sh",
-    ollama      = "~/.config/scripts/ollama-launcher.sh",
     powerprofile = "~/.config/scripts/powerprofile.sh",
 
     lock        = "hyprlock",

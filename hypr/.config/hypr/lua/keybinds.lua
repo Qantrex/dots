@@ -18,7 +18,6 @@ hl.bind(mod .. " + C", hl.dsp.exec_cmd(apps.clipboard),   { description = "Clipb
 hl.bind(mod .. " + L", hl.dsp.exec_cmd(apps.lock),        { description = "Lock screen" })
 
 hl.bind(mod .. " + SHIFT + E", hl.dsp.exec_cmd(apps.emoji),     { description = "Emoji picker" })
-hl.bind(mod .. " + SHIFT + A", hl.dsp.exec_cmd(apps.ollama),    { description = "Ollama launcher" })
 hl.bind(mod .. " + SHIFT + W", hl.dsp.exec_cmd(apps.wallpaper), { description = "Wallpaper picker" })
 
 -- Reload Hyprland and restart the bar.
