@@ -1,6 +1,6 @@
 {
     "basename": true,
-    "colorscheme": "darkTheme",
+    "colorscheme": "monochrome",
     "fileformat": "dos",
     "hlsearch": true,
     "mkparents": true,

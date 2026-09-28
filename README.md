@@ -25,7 +25,13 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 🔔 `fnott` | Notification daemon config (mako is what actually runs) |
 | 🔍 `wofi` | Application launcher |
 | 🎨 `gtk` | GTK 3/4 theming |
-| 🎛 `qt5ct` | Qt5 theming |
+| 🎛 `qt5ct` / `qt6ct` | Qt5 / Qt6 theming (monochrome palette in `colors/`) |
+| 🗂 `kde` | `kdeglobals` colours for KDE apps (Dolphin) |
+| 🔊 `swayosd` | Volume/brightness OSD style |
+| 🪟 `tmux` | `~/.tmux.conf` |
+| 💬 `vesktop` | Discord theme (`themes/` only) |
+| 🎵 `spicetify` | Spotify theme + spicetify config |
+| 🚫 `spotify-adblock` | Ad/tracking filter for Spotify |
 | ⚙️ `scripts` | Helper scripts |
 | 🐚 `zsh` | zsh functions (`gpumode`, `fixnet`, `hyprr`, …) |
 
@@ -48,7 +54,13 @@ cd ~/dotfiles
 
 ```bash
 # Symlink all configs into ~/.config
-stow -v micro fish fnott foot qt5ct waybar gtk wofi scripts hypr zsh
+stow -v micro fish fnott foot qt5ct qt6ct waybar gtk wofi scripts hypr zsh \
+       swayosd kde tmux spotify-adblock
+
+# These only own part of the app's config dir -- the rest is Discord session
+# data / spicetify backups that must NOT land in the repo. --no-folding makes
+# stow link files instead of turning ~/.config/vesktop into a repo symlink.
+stow -v --no-folding vesktop spicetify
 ```
 
 Now `~/.config/...` points directly into your `~/dotfiles`.
@@ -96,6 +108,9 @@ yay -S mako swayidle swayosd batsignal \
 
 # Power management (see below)
 yay -S asusctl tlp
+
+# Apps with themes in this repo
+yay -S vesktop tmux spotify spotify-adblock spicetify-cli
 
 # Fonts and cursors -- the bar and lockscreen reference these by name
 yay -S ttf-jetbrains-mono-nerd rose-pine-hyprcursor
@@ -263,6 +278,43 @@ boot, silences the `nvidia-utils` modules-load entry that logs
 Orphaned packages are **reported, never removed**: "orphan" only means nothing
 depends on it, and toolchains you invoke directly (`dotnet-sdk`, `clang`,
 `doxygen`, `ant`) all qualify.
+
+---
+
+## 🖤 Theme
+
+Everything is **true-black monochrome** (`#000000`, white and greys) for the
+OLED panel, like waybar. Rosé Pine Moon is used **only as an accent** -- pine
+`#3e8fb0` for selections, buttons and active states -- never as a full-app
+theme.
+
+| App | Where |
+| --- | --- |
+| Discord | `vesktop/.../themes/monochrome.theme.css` (derived from rose-pine/discord, palette swapped) |
+| Spotify | Ziro theme, `[monochrome]` scheme in `spicetify/.../Themes/Ziro/color.ini` |
+| Qt / KDE | `qt*ct/.../colors/monochrome.conf`, `kde/.config/kdeglobals` |
+| micro | `micro/.../colorschemes/monochrome.micro` |
+
+### Spotify: spicetify + adblock
+
+Spotify is started through `~/.local/share/applications/spotify.desktop` and
+`apps.lua` with `LD_PRELOAD=/usr/lib/spotify-adblock.so`. `spicetify apply`
+restarts Spotify **without** that preload, so always apply with `-n` and
+start Spotify yourself:
+
+```bash
+spicetify apply -n            # after changing the theme/scheme
+spicetify restore backup apply -n   # after a Spotify update
+```
+
+The adblock config in `spotify-adblock/` overrides `/etc/spotify-adblock/`:
+Spotify now talks to regional hosts (`gew4-spclient.spotify.com`,
+`gew4-dealer.g2.spotify.com`) that the stock lists don't match, so ads got
+through and the realtime "dealer" connection was blocked. Check it with:
+
+```bash
+env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify | grep '^\[-\]'
+```
 
 ---
 

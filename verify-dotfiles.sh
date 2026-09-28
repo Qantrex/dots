@@ -28,7 +28,12 @@ else
 fi
 echo
 
-# config name under ~/.config  ->  stow package name
+# path under ~/.config  ->  stow package name
+#
+# A path can be deeper than one level (vesktop/themes) when only part of an
+# app's config dir belongs in the repo -- the rest holds session data or
+# caches. A "HOME:" prefix means the path is relative to ~ instead of
+# ~/.config (for dotfiles that live directly in the home directory).
 declare -A MAP=(
   [micro]=micro
   [fish]=fish
@@ -43,17 +48,31 @@ declare -A MAP=(
   [scripts]=scripts
   [hypr]=hypr
   [zsh]=zsh
+  [swayosd]=swayosd
+  [kdeglobals]=kde
+  [spotify-adblock]=spotify-adblock
+  [vesktop/themes]=vesktop
+  [spicetify/Themes]=spicetify
+  [spicetify/config-xpui.ini]=spicetify
+  [HOME:.tmux.conf]=tmux
 )
 
-names=(micro fish fnott foot qt5ct qt6ct waybar gtk-3.0 gtk-4.0 wofi scripts hypr zsh)
+names=(micro fish fnott foot qt5ct qt6ct waybar gtk-3.0 gtk-4.0 wofi scripts hypr zsh
+       swayosd kdeglobals spotify-adblock vesktop/themes spicetify/Themes
+       spicetify/config-xpui.ini HOME:.tmux.conf)
 
 fail=0
-pad() { printf "%-12s" "$1"; }
+pad() { printf "%-25s" "$1"; }
 
 for name in "${names[@]}"; do
   pkg="${MAP[$name]}"
-  repo_path="$REPO/$pkg/.config/$name"
-  live_path="$HOME/.config/$name"
+  if [[ $name == HOME:* ]]; then
+    repo_path="$REPO/$pkg/${name#HOME:}"
+    live_path="$HOME/${name#HOME:}"
+  else
+    repo_path="$REPO/$pkg/.config/$name"
+    live_path="$HOME/.config/$name"
+  fi
 
   echo "=== $(pad "$name") ==="
 

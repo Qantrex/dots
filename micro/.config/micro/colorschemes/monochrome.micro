@@ -1,0 +1,49 @@
+# True-black monochrome with a Rosé Pine Moon pine accent.
+# Background is left to the terminal (foot: #000000).
+color-link default "#ffffff"
+color-link comment "italic #666666"
+
+color-link identifier "#ffffff"
+color-link identifier.class "bold #ffffff"
+color-link identifier.var "#dddddd"
+
+color-link constant "bold #ffffff"
+color-link constant.number "#ffffff"
+color-link constant.string "#aaaaaa"
+color-link constant.string.url "underline #aaaaaa"
+color-link constant.bool "bold #ffffff"
+
+color-link symbol "#888888"
+color-link symbol.operator "#888888"
+color-link symbol.brackets "#888888"
+color-link symbol.tag "#3e8fb0"
+
+color-link type "#cccccc"
+color-link type.keyword "bold #3e8fb0"
+color-link type.extended "default"
+
+color-link statement "bold #3e8fb0"
+color-link special "#3e8fb0"
+color-link preproc "#3e8fb0"
+
+color-link underlined "underline #ffffff"
+color-link error "bold #eb6f92"
+color-link todo "bold #f6c177"
+
+color-link diff-added "#9ccfd8"
+color-link diff-modified "#f6c177"
+color-link diff-deleted "#eb6f92"
+
+color-link gutter-error "#eb6f92"
+color-link gutter-warning "#f6c177"
+
+color-link statusline "#ffffff,#111111"
+color-link tabbar "#ffffff,#111111"
+color-link indent-char "#333333"
+color-link line-number "#444444"
+color-link current-line-number "#ffffff"
+color-link divider "#222222,#222222"
+color-link cursor-line "#0f0f0f"
+color-link color-column "#111111"
+color-link selection "#ffffff,#3e8fb0"
+color-link scrollbar "#444444"
