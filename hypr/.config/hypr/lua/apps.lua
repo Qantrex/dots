@@ -11,6 +11,10 @@ return {
     -- be LD_PRELOADed into spotify. The old config ran "spotify-adblock"
     -- directly, which is not a command -- Spotify never actually autostarted.
     music       = "env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify",
+    -- aerc runs in its own foot window with a fixed app-id, so a window rule
+    -- can send it to its workspace without catching every other terminal.
+    mail        = "foot --app-id=aerc aerc",
+    mailHelp    = "~/.config/scripts/aerc-cheatsheet.sh",
     chat        = "vesktop --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto",
 
     menu        = 'wofi --show drun --prompt="App Launcher"',

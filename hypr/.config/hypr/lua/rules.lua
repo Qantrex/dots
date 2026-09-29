@@ -48,6 +48,29 @@ hl.window_rule({
     workspace = "9 silent",
 })
 
+hl.window_rule({
+    name  = "mail-to-workspace-8",
+    match = { class = "^(aerc)$" },
+
+    workspace = "8 silent",
+})
+
+-- The aerc cheatsheet (SUPER+H) tiles next to aerc, and takes you there.
+hl.window_rule({
+    name  = "mail-cheatsheet-to-workspace-8",
+    match = { class = "^(aerc-cheat)$" },
+
+    workspace = "8",
+})
+
+-- Whichever of aerc and its cheatsheet opens second, keep the sheet narrow and
+-- on the right. Window rules cannot express a split ratio, so a script does it.
+hl.on("window.open", function(win)
+    if win.class == "aerc" or win.class == "aerc-cheat" then
+        hl.exec_cmd("~/.config/scripts/aerc-cheatsheet.sh arrange " .. win.class)
+    end
+end)
+
 -- Notifications (mako) get blurred, and see through to the wallpaper.
 hl.layer_rule({
     name  = "blur-notifications",

@@ -66,6 +66,7 @@ hl.on("hyprland.start", function()
     -- Applications, each on its own workspace, without stealing focus.
     hl.exec_cmd(apps.terminal, { workspace = "1 silent" })
     hl.exec_cmd(apps.browser,  { workspace = "2 silent" })
+    hl.exec_cmd(apps.mail,     { workspace = "8 silent" })
     hl.exec_cmd(apps.music,    { workspace = "9 silent" })
     -- The old config passed `%U` to vesktop. That is a .desktop field code and
     -- means nothing on a command line -- vesktop received it as a literal
