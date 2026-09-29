@@ -327,6 +327,13 @@ user = \"greeter\""
   enable_services greetd.service
 }
 
+setup_icon_theme() {
+  step "Icon theme (Papirus-Mono: Papirus-Dark with grey folders)"
+  run "$DOTFILES/scripts/.config/scripts/build-papirus-mono.sh" \
+    || { FAILED+=("Papirus-Mono icons"); return; }
+  ok "Papirus-Mono built in ~/.local/share/icons"
+}
+
 setup_vesktop() {
   step "Discord (Vesktop) theme"
   local dir=$HOME/.config/vesktop

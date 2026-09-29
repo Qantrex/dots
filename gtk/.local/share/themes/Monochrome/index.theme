@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=X-GNOME-Metatheme
+Name=Monochrome
+Comment=True-black monochrome, generated from Adwaita-dark
+
+[X-GNOME-Metatheme]
+GtkTheme=Monochrome
+IconTheme=Papirus-Dark

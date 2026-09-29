@@ -262,12 +262,17 @@ depends on it, and toolchains you invoke directly (`dotnet-sdk`, `clang`,
 ## 🖤 Theme
 
 Everything is **true-black monochrome** (`#000000`, white and greys) for the
-OLED panel, like waybar. Rosé Pine Moon is used **only as an accent** -- pine
-`#3e8fb0` for selections, buttons and active states -- never as a full-app
-theme.
+OLED panel, like waybar. Selections, buttons and active states are greys or
+white. Rosé Pine Moon colour appears only where it helps reading: love / gold
+for errors and warnings, and rose / iris for Discord mentions and links and for
+syntax highlighting. It is never used as a full-app theme.
 
 | App | Where |
 | --- | --- |
+| GTK3 / GTK4 apps | `Monochrome` theme in `gtk/.local/share/themes/`, generated from Adwaita-dark by `~/.config/scripts/build-gtk-monochrome.py` (re-run after a gtk update) |
+| libadwaita apps | `gtk/.config/gtk-4.0/gtk.css` |
+| Icons | `Papirus-Mono` (Papirus-Dark with grey folders), built into `~/.local/share/icons` by `~/.config/scripts/build-papirus-mono.sh` |
+| App launcher | `wofi/` |
 | Discord | `vesktop/.../themes/monochrome.theme.css` (derived from rose-pine/discord, palette swapped) |
 | Spotify | Ziro theme, `[monochrome]` scheme in `spicetify/.../Themes/Ziro/color.ini` |
 | Qt / KDE | `qt*ct/.../colors/monochrome.conf`, `kde/.config/kdeglobals` |

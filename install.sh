@@ -71,6 +71,7 @@ run sudo systemctl --global enable pipewire.socket pipewire-pulse.socket wireplu
 run xdg-user-dirs-update
 
 setup_greetd
+setup_icon_theme
 setup_vesktop
 setup_spicetify
 setup_firefox_theme

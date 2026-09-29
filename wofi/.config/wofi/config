@@ -1,2 +1,12 @@
-show-icons=true
+# Style lives in style.css (true-black, matches waybar).
 allow_images=true
+image_size=24
+width=560
+height=420
+# One row per app: desktop actions (Firefox "New Window", ...) add an
+# expander arrow that knocks the icons out of line.
+no_actions=true
+insensitive=true
+matching=fuzzy
+hide_scroll=true
+term=foot

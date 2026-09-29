@@ -2,7 +2,7 @@
 * @name Monochrome (Rosé Pine accents)
 * @author Ardo
 * @version 4.5.0
-* @description True-black monochrome with a Rosé Pine Moon pine accent. Derived from rose-pine/discord.
+* @description True-black monochrome; greys for accents, Rosé Pine Moon rose/iris only for mentions and links. Derived from rose-pine/discord.
 * @source https://github.com/rose-pine/discord
 */
 
@@ -25,10 +25,16 @@ CONFIGURATION 📝‼️
     --text: #ffffff;
     --love: #eb6f92;
     --gold: #f6c177;
-    --rose: #dddddd;
-    --pine: #3e8fb0;
-    --foam: #3e8fb0;
-    --iris: #3e8fb0;
+    /* Accents are greys. The upstream theme's Rosé Pine names are kept so
+       its rules still apply: iris = borders / quiet fills, foam = light
+       highlights (dark text on them), pine = hover. Real Rosé Pine Moon
+       colour only where it helps reading: rose for mentions, iris-link for
+       links. */
+    --rose: #ea9a97;
+    --pine: #333333;
+    --foam: #d0d0d0;
+    --iris: #333333;
+    --iris-link: #c4a7e7;
     --highlightLow: #111111;
     --highlightMed: #222222;
     --highlightHigh: #333333;
@@ -222,7 +228,7 @@ CONFIGURATION 📝‼️
 
 .pill_e5445c .item__58105 {
     /*  Server Pill Active/Unread  */
-    background-color: var(--rose) !important;
+    background-color: var(--text) !important;
 }
 
 .unreadMentionsBar_ef3116 {
@@ -296,7 +302,7 @@ CONFIGURATION 📝‼️
 
 .containerDefault__29444 .name__29444 {
     /* Category name */
-    color: var(--iris) !important;
+    color: var(--subtle) !important;
 }
 
 .containerDefault__29444:hover .name__29444 {
@@ -327,7 +333,7 @@ CONFIGURATION 📝‼️
 }
 /* New message text */
 .channelInfo_c69b6d {
-    color: var(--foam) !important;
+    color: var(--subtle) !important;
 }
 .container__50387 {
     background-color: var(--overlay) !important;
@@ -342,12 +348,12 @@ CONFIGURATION 📝‼️
 /* Make selected channel text foam color - more specific selector */
 .containerDefault_c69b6d.selected_c69b6d .name__2ea32,
 .wrapper__2ea32.modeSelected__2ea32 .name__2ea32 {
-    color: var(--iris) !important;
+    color: var(--text) !important;
     opacity: 1 !important;
 }
 
 .folderIcon__48112 {
-    color: var(--foam) !important;
+    color: var(--subtle) !important;
 }
 /* Server header without banner */
 .container_f37cb1[data-banner-visible="false"],
@@ -357,7 +363,7 @@ CONFIGURATION 📝‼️
 
 /* New message text */
 .channelInfo_c69b6d, .text-xs\/semibold_cf4812 {
-    color: var(--foam) !important;
+    color: var(--subtle) !important;
 }
 
 .progressContainer__0d0f9 {
@@ -448,7 +454,7 @@ CONFIGURATION 📝‼️
 }
 
 .markup__75297 a {
-    color: var(--foam) !important;
+    color: var(--iris-link) !important;
 }
 
 .newMessagesBar__0f481 {
@@ -463,7 +469,7 @@ CONFIGURATION 📝‼️
 }
 
 .membersGroup_c8ffbb.container__13cf1 {
-    color: var(--iris) !important;
+    color: var(--subtle) !important;
 }
 
 .buttonsInner__5126c {
@@ -511,6 +517,7 @@ path.unreadPillCapStroke__908e2 {
 
 .button__201d5.lookFilled__201d5.colorBrand__201d5.sm.grow__201d5 {
     background-color: var(--foam) !important;
+    color: var(--base) !important;
 }
 
 /* New Message Divider */
@@ -601,7 +608,7 @@ path.unreadPillCapStroke__908e2 {
 }
 
 .codeIcon__4d95d {
-    color: var(--foam) !important;
+    color: var(--subtle) !important;
 }
 
 .downloadButton__4d95d {
@@ -797,12 +804,12 @@ rect[mask="url(#svg-mask-status-idle)"] {
 
 .buttons__37e49 .button__67645 {
     /* Mute/Deafen/Settings buttons */
-    color: var(--iris) !important;
+    color: var(--text) !important;
 }
 
 .rtcConnectionStatusConnected__06d62 {
     /* Voice Connected */
-    color: var(--foam) !important;
+    color: var(--subtle) !important;
 }
 
 .ping__06d62 path {
@@ -838,15 +845,15 @@ button[aria-label="Noise Suppression powered by Krisp"] .lottieIcon__5eb9b svg p
 }
 
 button[aria-label="Mute"] .lottieIcon__5eb9b svg path {
-    fill: var(--iris) !important;
+    fill: var(--text) !important;
 }
 
 button[aria-label="Deafen"] .lottieIcon__5eb9b svg path {
-    fill: var(--iris) !important;
+    fill: var(--text) !important;
 }
 
 button[aria-label="User Settings"] .lottieIcon__5eb9b svg path {
-    fill: var(--iris) !important;
+    fill: var(--text) !important;
 }
 
 
@@ -976,7 +983,7 @@ button[aria-label="User Settings"] .lottieIcon__5eb9b svg path {
 }
 
 .stickersNavItem__08434 {
-    color: var(--iris) !important;
+    color: var(--subtle) !important;
 }
 
 /* Apps and Commands */
@@ -2078,23 +2085,24 @@ Collapsible Search Bar
 .search__49676:not(:focus-within) .iconContainer_fea832>svg:first-child {
     display: block !important;
 }
-/* Monochrome: replace Discord blurple with the Rosé Pine Moon pine accent */
+/* Monochrome: replace Discord blurple with greys (switches/checkboxes light,
+   filled buttons dark grey with white text); links Rosé Pine Moon iris */
 :root, .theme-dark, .theme-darker, .theme-midnight, .visual-refresh {
-    --brand-360: #5aa3c2 !important;
-    --brand-400: #4c99b9 !important;
-    --brand-430: #3e8fb0 !important;
-    --brand-460: #3e8fb0 !important;
-    --brand-500: #3e8fb0 !important;
-    --brand-530: #357b97 !important;
-    --brand-560: #2f6d86 !important;
-    --brand-600: #2a6278 !important;
-    --brand-experiment: #3e8fb0 !important;
-    --brand-experiment-500: #3e8fb0 !important;
-    --brand-experiment-560: #2f6d86 !important;
-    --button-filled-brand-background: #3e8fb0 !important;
-    --button-filled-brand-background-hover: #357b97 !important;
-    --button-filled-brand-background-active: #2f6d86 !important;
-    --control-brand-foreground: #3e8fb0 !important;
-    --control-brand-foreground-new: #3e8fb0 !important;
-    --text-link: #3e8fb0 !important;
+    --brand-360: #bdbdbd !important;
+    --brand-400: #a0a0a0 !important;
+    --brand-430: #8a8a8a !important;
+    --brand-460: #6e6e6e !important;
+    --brand-500: #555555 !important;
+    --brand-530: #4a4a4a !important;
+    --brand-560: #404040 !important;
+    --brand-600: #333333 !important;
+    --brand-experiment: #555555 !important;
+    --brand-experiment-500: #555555 !important;
+    --brand-experiment-560: #404040 !important;
+    --button-filled-brand-background: #333333 !important;
+    --button-filled-brand-background-hover: #404040 !important;
+    --button-filled-brand-background-active: #2a2a2a !important;
+    --control-brand-foreground: #d0d0d0 !important;
+    --control-brand-foreground-new: #d0d0d0 !important;
+    --text-link: #c4a7e7 !important;
 }

@@ -19,6 +19,7 @@ LINKS=(
   ".config/fnott|fnott"
   ".config/gtk-3.0|gtk"
   ".config/gtk-4.0|gtk"
+  ".local/share/themes/Monochrome|gtk"
   ".config/qt5ct|qt5ct"
   ".config/qt6ct|qt6ct"
   ".config/kdeglobals|kde"

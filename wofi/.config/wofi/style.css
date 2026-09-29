@@ -1,44 +1,70 @@
-#outer-box{
-	background-color: #000000;
-	border: 1px solid white;
-	border-radius: 10px;
-}
-
-#inner-box{
-	    /* For reference */
+/*
+ * Wofi -- true-black monochrome, matching waybar and mako.
+ * GTK CSS: no variables.
+ */
+* {
+    font-family: "JetBrainsMono Nerd Font", monospace;
+    font-size: 14px;
 }
 
 window {
     background-color: transparent;
-    color: #ffffff;
-    font-family: sans-serif;
-    font-size: 14px;
-    border-radius: 14px;
+}
+
+#outer-box {
+    background-color: #000000;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 12px;
+    padding: 8px;
 }
 
 #input {
     background-color: #000000;
-    border: none;
-    padding: 8px;
-    margin: 5px;
-    border-radius: 6px;
     color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 0 0 8px 0;
+    box-shadow: none;
+    outline: none;
+    caret-color: #ffffff;
 }
 
-#input:focus{
-	border: 1px solid #ffffff;
+#input:focus {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+#input image {
+    color: #777777;
+}
+
+#scroll, #inner-box {
+    background-color: transparent;
+    border: none;
 }
 
 #entry {
-    background-color: #000000;
-    padding: 5px;
-    margin: 5px;
-    border-radius: 4px;
-    border: none;
+    background-color: transparent;
+    border-radius: 8px;
+    padding: 6px 10px;
+    margin: 1px 0;
+    outline: none;
+}
+
+#entry #img {
+    margin-right: 10px;
+}
+
+#entry #text {
+    color: #aaaaaa;
 }
 
 #entry:selected {
-    background-color: #000000;
+    background-color: #1c1c1c;
+    border: none;
+    outline: none;
+}
+
+#entry:selected #text {
     color: #ffffff;
-    border: 0.5px inset #ffffff;
 }

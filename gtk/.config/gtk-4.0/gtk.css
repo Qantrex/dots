@@ -1,0 +1,60 @@
+/* True-black monochrome for libadwaita apps (they ignore GTK themes).
+ * Plain GTK4 apps get the "Monochrome" theme; these variables are unused
+ * there. Accent is white-on-black, not blue; Rosé Pine Moon love / gold only
+ * for destructive / warning states. */
+:root {
+  --accent-bg-color: #e0e0e0;
+  --accent-fg-color: #000000;
+  --accent-color: #ffffff;
+
+  --destructive-bg-color: #eb6f92;
+  --destructive-fg-color: #000000;
+  --destructive-color: #eb6f92;
+  --error-bg-color: #eb6f92;
+  --error-fg-color: #000000;
+  --error-color: #eb6f92;
+  --warning-bg-color: #f6c177;
+  --warning-fg-color: #000000;
+  --warning-color: #f6c177;
+  --success-bg-color: #a0a0a0;
+  --success-fg-color: #000000;
+  --success-color: #d0d0d0;
+
+  --window-bg-color: #000000;
+  --window-fg-color: #eeeeee;
+  --view-bg-color: #000000;
+  --view-fg-color: #eeeeee;
+  --headerbar-bg-color: #000000;
+  --headerbar-fg-color: #eeeeee;
+  --headerbar-border-color: #eeeeee;
+  --headerbar-backdrop-color: #000000;
+  --headerbar-shade-color: #262626;
+  --headerbar-darker-shade-color: #333333;
+  --sidebar-bg-color: #000000;
+  --sidebar-fg-color: #eeeeee;
+  --sidebar-backdrop-color: #000000;
+  --sidebar-border-color: #262626;
+  --sidebar-shade-color: #262626;
+  --secondary-sidebar-bg-color: #000000;
+  --secondary-sidebar-fg-color: #eeeeee;
+  --secondary-sidebar-backdrop-color: #000000;
+  --secondary-sidebar-border-color: #262626;
+  --secondary-sidebar-shade-color: #262626;
+  --card-bg-color: #0d0d0d;
+  --card-fg-color: #eeeeee;
+  --card-shade-color: #262626;
+  --dialog-bg-color: #000000;
+  --dialog-fg-color: #eeeeee;
+  --popover-bg-color: #0a0a0a;
+  --popover-fg-color: #eeeeee;
+  --popover-shade-color: #262626;
+  --thumbnail-bg-color: #0d0d0d;
+  --thumbnail-fg-color: #eeeeee;
+  --shade-color: rgb(0 0 0 / 60%);
+  --scrollbar-outline-color: #000000;
+}
+
+/* Outline popovers and floating dialogs, their shadows vanish on black. */
+popover > contents, dialog.floating > sheet {
+  border: 1px solid #333333;
+}
