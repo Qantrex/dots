@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Check that every stow package is present in the repo and correctly symlinked
-# into ~/.config.
+# into $HOME. The list of links lives in install/links.sh.
 #
 #   ./verify-dotfiles.sh                 structure checks only
-#   BACKUP=~/.config.bak-... ./verify-dotfiles.sh   also diff against a backup
+#   BACKUP=~/.dotfiles-backup/<date> ./verify-dotfiles.sh   also diff against a backup
 #
 # The backup diff is opt-in. It used to run automatically against the newest
 # ~/.config.bak-*, which meant the script reported failure for every config
@@ -28,51 +28,17 @@ else
 fi
 echo
 
-# path under ~/.config  ->  stow package name
-#
-# A path can be deeper than one level (vesktop/themes) when only part of an
-# app's config dir belongs in the repo -- the rest holds session data or
-# caches. A "HOME:" prefix means the path is relative to ~ instead of
-# ~/.config (for dotfiles that live directly in the home directory).
-declare -A MAP=(
-  [micro]=micro
-  [fish]=fish
-  [fnott]=fnott
-  [foot]=foot
-  [qt5ct]=qt5ct
-  [qt6ct]=qt6ct
-  [waybar]=waybar
-  [gtk-3.0]=gtk
-  [gtk-4.0]=gtk
-  [wofi]=wofi
-  [scripts]=scripts
-  [hypr]=hypr
-  [zsh]=zsh
-  [swayosd]=swayosd
-  [kdeglobals]=kde
-  [spotify-adblock]=spotify-adblock
-  [vesktop/themes]=vesktop
-  [spicetify/Themes]=spicetify
-  [spicetify/config-xpui.ini]=spicetify
-  [HOME:.tmux.conf]=tmux
-)
-
-names=(micro fish fnott foot qt5ct qt6ct waybar gtk-3.0 gtk-4.0 wofi scripts hypr zsh
-       swayosd kdeglobals spotify-adblock vesktop/themes spicetify/Themes
-       spicetify/config-xpui.ini HOME:.tmux.conf)
+# shellcheck source=install/links.sh
+source "$REPO/install/links.sh"
 
 fail=0
-pad() { printf "%-25s" "$1"; }
+pad() { printf "%-42s" "$1"; }
 
-for name in "${names[@]}"; do
-  pkg="${MAP[$name]}"
-  if [[ $name == HOME:* ]]; then
-    repo_path="$REPO/$pkg/${name#HOME:}"
-    live_path="$HOME/${name#HOME:}"
-  else
-    repo_path="$REPO/$pkg/.config/$name"
-    live_path="$HOME/.config/$name"
-  fi
+for entry in "${LINKS[@]}"; do
+  name="${entry%%|*}"
+  pkg="${entry##*|}"
+  repo_path="$REPO/$pkg/$name"
+  live_path="$HOME/$name"
 
   echo "=== $(pad "$name") ==="
 

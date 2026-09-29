@@ -1,0 +1,21 @@
+# ~/.config/starship.toml
+
+# A minimal, single-line, black and white theme.
+add_newline = false
+format = "$directory$git_branch$character"
+
+[directory]
+truncation_length = 3
+truncation_symbol = "…/"
+format = "[$path]($style) "
+style = "bold" # Use bold style without color
+
+[git_branch]
+symbol = ""
+format = "([$symbol $branch]($style)) "
+style = "bold" # Use bold style without color
+
+[character]
+success_symbol = "[❯](bold)" # Use bold style without color
+error_symbol = "[❯](bold red)" # Error symbol is the only thing with color
+format = "$symbol "

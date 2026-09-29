@@ -19,7 +19,9 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | --- | --- |
 | 🌌 `hypr` | Hyprland compositor, hyprlock, hyprpaper |
 | 📊 `waybar` | Status bar |
-| 🐟 `fish` | Shell, functions and prompt |
+| 🐚 `zsh` | `.zshrc` (oh-my-zsh), `.zsh_aliases`, functions (`gpumode`, `fixnet`, `hyprr`, …) |
+| 🚀 `starship` | Prompt |
+| 🐟 `fish` | Fish config (zsh is the login shell) |
 | 🖼 `foot` | Terminal emulator |
 | ✍️ `micro` | Terminal editor |
 | 🔔 `fnott` | Notification daemon config (mako is what actually runs) |
@@ -30,101 +32,77 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 🔊 `swayosd` | Volume/brightness OSD style |
 | 🪟 `tmux` | `~/.tmux.conf` |
 | 💬 `vesktop` | Discord theme (`themes/` only) |
-| 🎵 `spicetify` | Spotify theme + spicetify config |
-| 🚫 `spotify-adblock` | Ad/tracking filter for Spotify |
+| 🎵 `spicetify` | Spotify theme (Ziro + `monochrome` scheme) |
+| 🚫 `spotify-adblock` | Ad/tracking filter + `spotify.desktop` that loads it |
 | ⚙️ `scripts` | Helper scripts |
-| 🐚 `zsh` | zsh functions (`gpumode`, `fixnet`, `hyprr`, …) |
 
 ---
 
-## Clone the Repo
+## 🛠 Install
+
+Two installers, both safe to re-run. Pass `--dry-run` to see every command
+first, or `--yes` to take the default answer to every question.
+
+### From a bare Arch install
+
+For the state `archinstall` leaves with the **Minimal** profile: base
+system, kernel, bootloader, and a user with sudo. Log in on the TTY, get
+online (`nmtui` or `iwctl`), then:
 
 ```bash
-# Install prerequisites
-sudo pacman -S --needed git stow
+curl -fsSL https://raw.githubusercontent.com/Qantrex/dots/main/install.sh | bash
+```
 
-# Clone into home
+or, with the repo already cloned, `~/dotfiles/install.sh`. It:
+
+1. updates the system and installs git, stow and yay (optionally adds the
+   [chaotic-aur](https://aur.chaotic.cx) repo so AUR apps come prebuilt)
+2. detects the GPU (AMD / Intel / NVIDIA, hybrid → `envycontrol`), laptop and
+   ASUS hardware and installs drivers and tools for it
+3. installs PipeWire, NetworkManager, bluetooth, Hyprland and everything the
+   config starts, the shell tools, fonts, themes and apps
+4. links the dotfiles (anything in the way goes to `~/.dotfiles-backup/<date>/`)
+5. sets up oh-my-zsh and its plugins and makes zsh the login shell
+6. enables the services and the greetd + tuigreet login screen
+7. applies the Discord, Spotify and (optionally) Firefox themes
+8. offers the one-time root scripts: firewall, ASUS power profiles,
+   maintenance, boot tuning (off by default -- written for this laptop)
+
+Then reboot.
+
+### Onto an existing Hyprland setup
+
+```bash
 git clone https://github.com/Qantrex/dots.git ~/dotfiles
-cd ~/dotfiles
+~/dotfiles/install-hyprland.sh
 ```
 
----
+Same as above, except it leaves graphics drivers, the audio stack, the
+network manager and your display manager alone (greetd only if there is
+none). Your old `hypr`, `waybar`, `wofi`, ... configs are moved to
+`~/.dotfiles-backup/<date>/`, and it warns about things that clash with
+this setup (dunst/swaync vs mako, hypridle vs swayidle, swww vs hyprpaper).
 
-## Apply Configs with Stow
+### After the first login
 
-```bash
-# Symlink all configs into ~/.config
-stow -v micro fish fnott foot qt5ct qt6ct waybar gtk wofi scripts hypr zsh \
-       swayosd kde tmux spotify-adblock
+Spotify has to run once before spicetify can theme it: start it, log in,
+quit, and run the installer again. It only does what's still missing.
 
-# These only own part of the app's config dir -- the rest is Discord session
-# data / spicetify backups that must NOT land in the repo. --no-folding makes
-# stow link files instead of turning ~/.config/vesktop into a repo symlink.
-stow -v --no-folding vesktop spicetify
+### Layout
+
+```
+install.sh            bare Arch → full desktop
+install-hyprland.sh   existing Hyprland → these dotfiles
+install/lib.sh        the steps both share
+install/packages.sh   package lists
+install/links.sh      every symlink into $HOME (also read by verify-dotfiles.sh)
 ```
 
-Now `~/.config/...` points directly into your `~/dotfiles`.
+To add a config: put it in a stow package, add its path to
+`install/links.sh`, and if it needs packages, add them to
+`install/packages.sh`.
 
-Verify with:
-
-```bash
-~/dotfiles/verify-dotfiles.sh
-```
-
----
-
-## Install yay (AUR helper)
-
-```bash
-sudo pacman -S --needed base-devel git
-cd /tmp
-git clone https://aur.archlinux.org/yay.git
-cd yay
-makepkg -si
-```
-
-Verify:
-
-```bash
-yay --version
-```
-
----
-
-## 🛠 Install Required Applications
-
-```bash
-# Compositor and its ecosystem
-yay -S hyprland hyprlock hyprpaper hyprpolkitagent \
-       xdg-desktop-portal-hyprland
-
-# Shell, terminal, editor, launcher, bar
-yay -S fish foot micro wofi wofimoji waybar qt5ct dolphin
-
-# Desktop services the Hyprland autostart expects
-yay -S mako swayidle swayosd batsignal \
-       cliphist wl-clipboard grim slurp \
-       playerctl brightnessctl wireplumber
-
-# Power management (see below)
-yay -S asusctl tlp
-
-# Apps with themes in this repo
-yay -S vesktop tmux spotify spotify-adblock spicetify-cli
-
-# Fonts and cursors -- the bar and lockscreen reference these by name
-yay -S ttf-jetbrains-mono-nerd rose-pine-hyprcursor
-```
-
----
-
-## Finish Setup
-
-```bash
-chsh -s /usr/bin/fish
-sudo systemctl enable --now tlp
-sudo ~/.config/scripts/setup-power-profiles.sh
-```
+Check the links at any time with `~/dotfiles/verify-dotfiles.sh`.
 
 ---
 

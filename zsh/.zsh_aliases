@@ -1,0 +1,44 @@
+# TMUX
+alias t='tmux attach 2>/dev/null || tmux'
+alias bare='TMUX= /bin/zsh'  # open a raw shell without tmux
+
+# --- File Management ---
+alias ls='eza --icons'
+alias la='eza -a --icons'
+alias ll='eza -l --icons'
+alias lt='eza --tree --icons'
+alias catt='bat --paging=never'
+alias dl='cd ~/Downloads'
+alias dc='cd ~/Documents'
+
+# --- Search / Find ---
+alias rg='rg --smart-case'
+alias fd='fd --hidden'
+
+# --- Zsh / Plugins ---
+alias zupdate='zgenom selfupdate && zgenom update'   # Update zgenom + plugins
+alias reload='exec zsh'
+
+# --- System / Scripts ---
+alias wallpaper='~/.config/scripts/wofi-wallpaper.sh -m eDP-1'
+
+# --- Networking ---
+alias pa='ping archlinux.org'
+alias myip='curl ifconfig.me'
+
+# --- Navigation ---
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# --- Convenience ---
+alias c='clear'
+alias q='exit'
+
+# --- QOL ---
+alias which='type -a'
+alias please='sudo $(fc -ln -1)'
+
+# --- Editors ---
+alias v='nvim'
+alias m='micro'
+alias sm='sudo micro'
