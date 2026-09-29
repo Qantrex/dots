@@ -50,6 +50,7 @@ pacman -Qq pipewire-pulse &>/dev/null || info "No PipeWire; waybar's volume modu
 
 link_dotfiles
 setup_shell
+setup_micro
 
 step "Login"
 if systemctl is-enabled --quiet display-manager.service 2>/dev/null; then

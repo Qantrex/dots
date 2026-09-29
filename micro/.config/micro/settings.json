@@ -1,7 +1,7 @@
 {
     "basename": true,
     "colorscheme": "monochrome",
-    "fileformat": "dos",
+    "fileformat": "unix",
     "hlsearch": true,
     "mkparents": true,
     "scrollmargin": 20,
@@ -10,7 +10,9 @@
     "statusformatr": "",
     "sucmd": "doas",
     "tabhighlight": true,
-    "tabsize": 80,
+    "tabsize": 4,
     "wordwrap": true,
-    "xterm": true
+    "xterm": true,
+    "lsp.server": "c=clangd,c++=clangd",
+    "lsp.formatOnSave": false
 }

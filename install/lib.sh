@@ -297,6 +297,19 @@ setup_shell() {
   ok "zsh ready"
 }
 
+setup_micro() {
+  step "micro plugins"
+  # Installed from micro's plugin channel rather than kept in the repo;
+  # bindings.json and init.lua use all three.
+  local plugin
+  for plugin in filemanager fzf lsp; do
+    [[ -d $HOME/.config/micro/plug/$plugin ]] \
+      || run micro -plugin install "$plugin" \
+      || FAILED+=("micro plugin $plugin")
+  done
+  ok "micro plugins ready"
+}
+
 enable_services() {  # enable_services [--now] UNIT...
   run sudo systemctl enable "$@" || FAILED+=("systemctl enable $*")
 }

@@ -46,6 +46,7 @@ check_hyprland_version
 
 link_dotfiles
 setup_shell
+setup_micro
 
 step "Services"
 # archinstall may have set up systemd-networkd or iwd instead of NetworkManager.

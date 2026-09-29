@@ -38,6 +38,8 @@
 ########################################
 */.config/micro/backups/
 */.config/micro/buffers/
+# Plugins come from micro's channel (install/lib.sh: setup_micro)
+*/.config/micro/plug/
 
 ########################################
 # Fish -- machine-specific universal variables
