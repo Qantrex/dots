@@ -28,5 +28,5 @@ return {
     bar         = "waybar",
 
     -- Absolute path: hyprpaper does not expand `~`.
-    wallpaperImage = "/home/kbauer/Pictures/Wallpapers/wallpaperflare.com_wallpaper.jpg",
+    wallpaperImage = "/home/kbauer/Pictures/Wallpapers/synthwave-mountain-sun.jpg",
 }
