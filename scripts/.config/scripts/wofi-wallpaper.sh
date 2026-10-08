@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Thumbnail wallpaper picker for Hyprland (wofi + hyprpaper)
 # - Shows image grid (thumbnails) in wofi
-# - Sets wallpaper via hyprpaper reload (fast, low-memory)
+# - Sets wallpaper via hyprpaper IPC (`hyprctl hyprpaper wallpaper`)
 # - Applies to all monitors by default, or a chosen one
 
 set -Eeuo pipefail
@@ -9,13 +9,12 @@ IFS=$'\n\t'
 
 # ----------------------- Config (tweakables) -----------------------
 WALLPAPER_DIR="${WALLPAPER_DIR:-$HOME/Pictures/Wallpapers}"
-THUMB_SIZE="${THUMB_SIZE:-256}"               # px, square
-COLUMNS="${COLUMNS:-2}"                       # wofi columns
-IMAGE_GLOBS="${IMAGE_GLOBS:-jpg jpeg png webp gif bmp avif}"
+THUMB_W="${THUMB_W:-520}"                     # px, thumbnails are 16:9
+THUMB_H="${THUMB_H:-293}"
+WOFI_COLUMNS="${WOFI_COLUMNS:-2}"             # not COLUMNS: shells set that to the terminal width
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/wofi-wallpapers"
 THUMB_DIR="$CACHE_ROOT/thumbs"
 CACHE_FILE="$CACHE_ROOT/wofi-cache"           # wofi cache file
-WOFI_PROMPT="${WOFI_PROMPT:-Select wallpaper}"
 # ------------------------------------------------------------------
 
 script_path="$(readlink -f "$0")"
@@ -34,7 +33,7 @@ pick_thumb_tool() {
 
 THUMBER="$(pick_thumb_tool)"
 
-# Render helper: given a path, emit "img:<thumb>:text:<label>"
+# Render helper: given a path, emit "img:<thumb>" (image only, no label)
 render_entry() {
   local src="$1"
   # Hash path into a stable thumbnail name
@@ -45,24 +44,25 @@ render_entry() {
   if [[ ! -s "$out" || "$src" -nt "$out" ]]; then
     case "$THUMBER" in
       vipsthumbnail)
-        # Center-crop square
-        vipsthumbnail "$src" -s "${THUMB_SIZE}x${THUMB_SIZE}" -o "$out" >/dev/null 2>&1 || true
+        # Center-crop to 16:9
+        vipsthumbnail "$src" -s "${THUMB_W}x${THUMB_H}" --smartcrop centre -o "$out" >/dev/null 2>&1 || true
         ;;
       magick)
-        magick "$src" -auto-orient -thumbnail "${THUMB_SIZE}x${THUMB_SIZE}^" \
-               -gravity center -extent "${THUMB_SIZE}x${THUMB_SIZE}" -strip "$out" >/dev/null 2>&1 || true
+        magick "$src" -auto-orient -thumbnail "${THUMB_W}x${THUMB_H}^" \
+               -gravity center -extent "${THUMB_W}x${THUMB_H}" -strip "$out" >/dev/null 2>&1 || true
         ;;
       convert)
-        convert "$src" -auto-orient -thumbnail "${THUMB_SIZE}x${THUMB_SIZE}^" \
-                -gravity center -extent "${THUMB_SIZE}x${THUMB_SIZE}" -strip "$out" >/dev/null 2>&1 || true
+        convert "$src" -auto-orient -thumbnail "${THUMB_W}x${THUMB_H}^" \
+                -gravity center -extent "${THUMB_W}x${THUMB_H}" -strip "$out" >/dev/null 2>&1 || true
         ;;
     esac
     # Fallback: if thumbnail failed, symlink to source (wofi will try to render it)
     [[ -s "$out" ]] || ln -sf "$src" "$out"
   fi
 
-  # Display uses thumbnail + basename; output of wofi remains the original line
-  printf 'img:%s:text:%s\n' "$out" "$(basename "$src")"
+  # Display is the thumbnail only; output of wofi remains the original line
+  # No trailing newline: wofi would read it as part of the image path
+  printf 'img:%s' "$out"
 }
 
 # Mode: pre-display transformer for wofi
@@ -95,8 +95,11 @@ done
 if ! pgrep -x hyprpaper >/dev/null 2>&1; then
   # Prefer running with IPC enabled (default in recent hyprpaper)
   ( hyprpaper >/dev/null 2>&1 & disown ) || die "Failed to start hyprpaper"
-  # tiny wait to ensure the socket is ready
-  sleep 0.25
+  # wait (up to ~2s) for its IPC socket to come up
+  for _ in $(seq 20); do
+    hyprctl hyprpaper listactive >/dev/null 2>&1 && break
+    sleep 0.1
+  done
 fi
 
 # Build image list (absolute paths) safely
@@ -120,9 +123,11 @@ SEL="$(
   wofi --dmenu \
        --allow-images \
        --pre-display-cmd "$script_path --render %s" \
-       --image-size "$THUMB_SIZE" \
-       --columns "$COLUMNS" \
-       --prompt "$WOFI_PROMPT" \
+       --define "image_size=$THUMB_W" \
+       --columns "$WOFI_COLUMNS" \
+       --width $(( (THUMB_W + 28) * WOFI_COLUMNS + 24 )) \
+       --height 760 \
+       --hide-search \
        --cache-file "$CACHE_FILE"
 )"
 
@@ -133,16 +138,14 @@ SEL="$(
 SEL_ABS="$(readlink -f -- "$SEL")" || SEL_ABS="$SEL"
 
 # Apply wallpaper:
-# - Using 'reload' sets immediately (no preload)
+# - hyprpaper 0.8 removed the `reload`/`preload`/`unload` requests;
+#   `wallpaper` now loads and sets in one step.
 # - ",PATH" applies to all monitors; otherwise we set monitor,PATH
 if [[ "$TARGET_MONITOR" == "all" ]]; then
-  hyprctl -q hyprpaper reload ",$SEL_ABS" || die "hyprpaper reload failed"
+  hyprctl -q hyprpaper wallpaper ",$SEL_ABS" || die "hyprpaper wallpaper failed"
 else
-  hyprctl -q hyprpaper reload "$TARGET_MONITOR,$SEL_ABS" || die "hyprpaper reload failed for $TARGET_MONITOR"
+  hyprctl -q hyprpaper wallpaper "$TARGET_MONITOR,$SEL_ABS" || die "hyprpaper wallpaper failed for $TARGET_MONITOR"
 fi
-
-# Free memory from old preloads if any
-hyprctl -q hyprpaper unload unused || true
 
 # Persist last choice
 echo "$SEL_ABS" > "$CACHE_ROOT/last"
