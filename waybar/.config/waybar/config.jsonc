@@ -113,7 +113,8 @@
     "signal": 9,
     "tooltip": true,
     "on-click": "~/.config/scripts/ai-webui.sh toggle",
-    "on-click-right": "~/.config/scripts/ai-webui.sh open"
+    "on-click-right": "~/.config/scripts/ai-webui.sh open",
+    "on-click-middle": "~/.config/scripts/ai-webui.sh images"
   },
   "custom/powerprofile": {
     "format": "{}",

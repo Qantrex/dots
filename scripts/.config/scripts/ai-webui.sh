@@ -5,16 +5,21 @@
 # model loads. Open WebUI and SearXNG (its web search) are started and stopped
 # here. ComfyUI (images) is not: comfyui-proxy.socket starts it on the first
 # image request and it stops after 10 idle minutes. Images go to ~/Pictures/AI.
+# SwarmUI (the image-only UI, ~/ai/SwarmUI) works the same way through
+# swarmui-proxy.socket: opening it starts it, and it stops 10 minutes after its
+# last tab closes. It renders on the same ComfyUI and doesn't need Open WebUI.
 #
 # Usage:
 #   ai-webui.sh toggle     off: start, then open in Firefox; on: stop   (click)
 #   ai-webui.sh open       open Open WebUI in Firefox                    (right-click)
+#   ai-webui.sh images     open SwarmUI in Firefox                       (middle-click)
 #   ai-webui.sh status     print waybar JSON
 #   ai-webui.sh autostop   stop after IDLE_MINUTES unused (ai-autostop.timer)
 
 set -uo pipefail
 
 readonly URL=http://127.0.0.1:8080
+readonly SWARM_URL=http://127.0.0.1:7801
 readonly OLLAMA=http://127.0.0.1:11434
 readonly CONTAINERS=(searxng open-webui)
 readonly IDLE_MINUTES=45
@@ -29,6 +34,8 @@ readonly IMAGE_ICON=$'\U000f02e9'  # nf-md-image
 webui_up()      { curl -sf -m 1 -o /dev/null "$URL/health"; }
 # Never probe ComfyUI's port here: any connection to it starts ComfyUI.
 comfy_running() { systemctl --user is-active -q comfyui.service; }
+# Same for SwarmUI's port.
+swarm_running() { systemctl --user is-active -q swarmui.service; }
 loaded_model()  { curl -sf -m 1 "$OLLAMA/api/ps" | jq -r '.models[0].name // empty' 2>/dev/null; }
 starting()      { [[ -f $STARTING ]] && kill -0 "$(<"$STARTING")" 2>/dev/null; }
 
@@ -41,9 +48,22 @@ notify() {
 }
 
 open_ui() {
-    firefox --new-tab "$URL" >/dev/null 2>&1
+    firefox --new-tab "${1:-$URL}" >/dev/null 2>&1
     # Firefox opens the tab but doesn't take focus.
     hyprctl dispatch 'hl.dsp.focus({ window = "class:firefox" })' >/dev/null
+}
+
+open_images() {
+    if ! swarm_running; then
+        notify "Starting SwarmUI…" "Opens in Firefox when ready."
+        # The first connection starts it; wait so Firefox doesn't hit a blank page.
+        curl -sf -m 150 -o /dev/null "$SWARM_URL/" || {
+            notify "SwarmUI failed to start" "journalctl --user -u swarmui" critical
+            return 1
+        }
+    fi
+    refresh_waybar
+    open_ui "$SWARM_URL"
 }
 
 fail() {
@@ -82,12 +102,12 @@ stop() {
     local model
     systemctl --user stop ai-autostop.timer
     docker stop -t 10 "${CONTAINERS[@]}" >/dev/null 2>&1
-    systemctl --user stop comfyui-proxy.service comfyui.service 2>/dev/null
+    systemctl --user stop swarmui-proxy.service swarmui.service comfyui-proxy.service comfyui.service 2>/dev/null
     model=$(loaded_model)
     [[ -n $model ]] && curl -sf -m 30 -o /dev/null "$OLLAMA/api/generate" \
         -d "{\"model\":\"$model\",\"keep_alive\":0}"
     refresh_waybar
-    notify "AI stopped" "${1:-Open WebUI and SearXNG are off.}"
+    notify "AI stopped" "${1:-Open WebUI, SearXNG and SwarmUI are off.}"
 }
 
 toggle() {
@@ -119,9 +139,10 @@ autostop() {
 }
 
 status_json() {
-    local state text model comfy tooltip
+    local state text model comfy swarm tooltip
     model=$(loaded_model)
     comfy=0; comfy_running && comfy=1
+    swarm=0; swarm_running && swarm=1
 
     if starting; then state=starting
     elif webui_up; then state=on
@@ -130,26 +151,28 @@ status_json() {
 
     text=$ICON
     [[ -n $model ]] && text+=" ${model%%:*}" && text=${text/huihui_ai\//}
-    (( comfy )) && text+=" $IMAGE_ICON"
+    (( comfy || swarm )) && text+=" $IMAGE_ICON"
 
     case $state in
         off)      tooltip="AI: off\n\nClick: start and open in Firefox" ;;
         starting) tooltip="AI: starting…" ;;
-        on)       tooltip="AI: on\nModel: ${model:-none loaded}\nImages: $( ((comfy)) && echo rendering || echo 'ComfyUI asleep, wakes on first image')\nStops after $IDLE_MINUTES min unused\n\nClick: stop   Right-click: open in Firefox" ;;
+        on)       tooltip="AI: on\nModel: ${model:-none loaded}\nImages: $( ((comfy)) && echo 'ComfyUI loaded' || echo 'ComfyUI asleep, wakes on first image')\nStops after $IDLE_MINUTES min unused\n\nClick: stop   Right-click: open in Firefox" ;;
     esac
+    tooltip+="\nSwarmUI: $( ((swarm)) && echo 'open (stops 10 min after its tab closes)' || echo off)\nMiddle-click: open SwarmUI (image generator)"
     [[ -d /sys/module/nvidia ]] || tooltip+="\n⚠ GPU is off (gpumode hybrid)"
 
     printf '{"text":"%s","class":["%s"%s],"tooltip":"%s"}\n' \
-        "$text" "$state" "$( [[ -n $model || $comfy == 1 ]] && printf ',"busy"')" "$tooltip"
+        "$text" "$state" "$( [[ -n $model || $comfy == 1 || $swarm == 1 ]] && printf ',"busy"')" "$tooltip"
 }
 
 case "${1:-status}" in
     toggle)   toggle ;;
     open)     if webui_up; then open_ui; else start; fi ;;
+    images)   open_images ;;
     status)   status_json ;;
     autostop) autostop ;;
     *)
-        echo "usage: ${0##*/} {toggle|open|status|autostop}" >&2
+        echo "usage: ${0##*/} {toggle|open|images|status|autostop}" >&2
         exit 2
         ;;
 esac
