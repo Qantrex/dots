@@ -318,7 +318,9 @@ has *master password re-prompt* on, so `rbw` asks for the master password on
 every unlock, even while it is otherwise unlocked. The key goes straight from
 `rbw` into gocryptfs and is never shown or copied.
 
-Unlock with `SUPER+SHIFT+V` (opens Dolphin) or `vault`; `vault lock` closes it.
+Unlock with `SUPER+SHIFT+V` (opens Dolphin), a click on the lock icon in
+waybar, or `vault`. `vault lock` or a right-click on the icon closes it; the icon
+is dimmed and closed while locked, white and open while unlocked.
 
 One-time setup (needs `gocryptfs` and a logged-in `rbw`):
 

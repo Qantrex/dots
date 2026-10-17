@@ -15,6 +15,7 @@
     "bluetooth",
     "pulseaudio",
     "custom/touchpad",
+    "custom/vault",
     "battery",
     "custom/ai",
     "custom/powerprofile",
@@ -137,5 +138,17 @@
     "signal": 10,
     "tooltip": true,
     "on-click": "~/.config/scripts/touchpad.sh toggle"
+  },
+  "custom/vault": {
+    "format": "{}",
+    "return-type": "json",
+    "exec": "~/.config/scripts/vault.sh status",
+    // vault.sh signals on lock/unlock; the interval catches anything else,
+    // e.g. a manual fusermount3 -u.
+    "interval": 30,
+    "signal": 11,
+    "tooltip": true,
+    "on-click": "~/.config/scripts/vault.sh open && dolphin ~/Vault",
+    "on-click-right": "~/.config/scripts/vault.sh lock"
   }
 }

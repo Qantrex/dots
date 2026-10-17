@@ -17,13 +17,15 @@
 #   vault init     create the vault and its Bitwarden entry (once)
 #   vault [open]   unlock if needed
 #   vault lock     close it again
-#   vault status   print locked/unlocked
+#   vault get      print locked/unlocked
+#   vault status   print waybar JSON (lock icon)
 
 set -uo pipefail
 
 readonly CIPHER=${VAULT_CIPHER:-$HOME/.vault}
 readonly PLAIN=${VAULT_DIR:-$HOME/Vault}
 readonly ENTRY=${VAULT_ENTRY:-"Vault (gocryptfs)"}
+readonly WAYBAR_SIGNAL=11
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 readonly SELF
 
@@ -45,6 +47,25 @@ say() {
 }
 
 is_open() { mountpoint -q "$PLAIN"; }
+
+current() { if is_open; then echo unlocked; else echo locked; fi; }
+
+icon_for() {
+    case $1 in
+        locked)   printf '󰌾' ;;   # lock
+        unlocked) printf '󰿆' ;;   # lock-open-variant
+    esac
+}
+
+refresh_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
+
+status_json() {
+    local s hint
+    s=$(current)
+    if [[ $s == locked ]]; then hint="Click: unlock and open"; else hint="Click: open\nRight-click: lock"; fi
+    printf '{"text":"%s","alt":"%s","class":"%s","tooltip":"%s"}\n' \
+        "$(icon_for "$s")" "$s" "$s" "Vault: ${s}\n\n${hint}"
+}
 
 init() {
     if [[ -e $CIPHER/gocryptfs.conf ]]; then
@@ -113,6 +134,7 @@ unlock() {
         fi
         return 1
     fi
+    refresh_waybar
     [[ -t 1 ]] && echo "vault: unlocked at $PLAIN"
     return 0
 }
@@ -127,6 +149,7 @@ lock() {
         return 1
     fi
     rmdir "$PLAIN"
+    refresh_waybar
     say "locked"
 }
 
@@ -134,9 +157,10 @@ case "${1:-open}" in
     init)        init ;;
     open|unlock) unlock ;;
     lock)        lock ;;
-    status)      if is_open; then echo unlocked; else echo locked; fi ;;
+    get)         current ;;
+    status)      status_json ;;
     *)
-        echo "usage: ${0##*/} {init|open|lock|status}" >&2
+        echo "usage: ${0##*/} {init|open|lock|get|status}" >&2
         exit 2
         ;;
 esac
