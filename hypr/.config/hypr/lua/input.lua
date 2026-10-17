@@ -12,7 +12,9 @@ hl.config({
 
         touchpad = {
             natural_scroll = true,
-            tap_to_click   = true,
+            -- Off while the pad registers phantom ~13 ms touches (Oct 2026);
+            -- each one became a click. Re-enable after the hardware is fixed.
+            tap_to_click   = false,
         },
     },
 })
