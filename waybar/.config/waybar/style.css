@@ -56,6 +56,7 @@ window#waybar {
 #mpris,
 #custom-powerprofile,
 #custom-ai,
+#custom-touchpad,
 #workspaces {
     padding: 0 10px;
     margin: 2px 0;
@@ -137,7 +138,8 @@ window#waybar {
 
 #pulseaudio.muted,
 #network.disconnected,
-#bluetooth.disabled {
+#bluetooth.disabled,
+#custom-touchpad.off {
     color: rgba(255, 255, 255, 0.45);
 }
 

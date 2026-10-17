@@ -154,6 +154,10 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
 | `SHIFT+R` | Reload config and restart the bar |
 
+`Fn+F6` (no `SUPER`) turns the touchpad on and off, as does clicking the mouse
+icon in waybar. The state survives reloads and reboots
+(`~/.config/scripts/touchpad.sh`).
+
 ---
 
 ## 🔋 Power profiles

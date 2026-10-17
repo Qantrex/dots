@@ -23,6 +23,7 @@ return {
     wallpaper   = "~/.config/scripts/wofi-wallpaper.sh",
     screenshot  = "~/.config/scripts/wofi-screenshot.sh",
     powerprofile = "~/.config/scripts/powerprofile.sh",
+    touchpad    = "~/.config/scripts/touchpad.sh",
     idle        = "~/.config/scripts/idle.sh",
 
     lock        = "hyprlock",

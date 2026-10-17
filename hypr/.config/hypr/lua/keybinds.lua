@@ -147,6 +147,11 @@ hl.bind("XF86AudioMicMute",      hl.dsp.exec_cmd("swayosd-client --input-volume 
 hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("swayosd-client --brightness raise"),          osd)
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("swayosd-client --brightness lower"),          osd)
 
+-- Fn+F6. The firmware only sends the key; touchpad.sh does the switching and
+-- updates the waybar icon.
+hl.bind("XF86TouchpadToggle", hl.dsp.exec_cmd(apps.touchpad .. " toggle"),
+    { description = "Toggle touchpad" })
+
 -- Player controls (playerctl).
 hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("playerctl next"),       { locked = true })
 hl.bind("XF86AudioPause", hl.dsp.exec_cmd("playerctl play-pause"), { locked = true })

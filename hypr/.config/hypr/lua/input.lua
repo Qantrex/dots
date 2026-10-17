@@ -38,3 +38,12 @@ hl.gesture({
 --   at-translated-set-2-keyboard
 --
 -- hl.device({ name = "logitech-wireless-mouse-mx-master-3", sensitivity = -0.2 })
+
+-- Touchpad on/off (Fn+F6 and the waybar icon) is switched live by
+-- scripts/touchpad.sh. Reading its state file here keeps a reload or restart
+-- from turning the touchpad back on. Keep the path and names in sync with it.
+local touchpadOff = io.open(os.getenv("HOME") .. "/.local/state/touchpad-off")
+if touchpadOff then touchpadOff:close() end
+for _, name in ipairs({ "asue1a00:00-04f3:31de-touchpad", "asue1a00:00-04f3:31de-mouse" }) do
+    hl.device({ name = name, enabled = touchpadOff == nil })
+end

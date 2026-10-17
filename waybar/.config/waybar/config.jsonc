@@ -14,6 +14,7 @@
     "network",
     "bluetooth",
     "pulseaudio",
+    "custom/touchpad",
     "battery",
     "custom/ai",
     "custom/powerprofile",
@@ -126,5 +127,15 @@
     "on-click": "~/.config/scripts/powerprofile.sh toggle",
     "on-scroll-up": "~/.config/scripts/powerprofile.sh cycle",
     "on-scroll-down": "~/.config/scripts/powerprofile.sh cycle"
+  },
+  "custom/touchpad": {
+    "format": "{}",
+    "return-type": "json",
+    "exec": "~/.config/scripts/touchpad.sh status",
+    // Only touchpad.sh changes the state, and it sends the signal.
+    "interval": "once",
+    "signal": 10,
+    "tooltip": true,
+    "on-click": "~/.config/scripts/touchpad.sh toggle"
   }
 }
