@@ -21,6 +21,14 @@ hl.bind(mod .. " + H", hl.dsp.exec_cmd(apps.mailHelp),    { description = "Toggl
 hl.bind(mod .. " + SHIFT + E", hl.dsp.exec_cmd(apps.emoji),     { description = "Emoji picker" })
 hl.bind(mod .. " + SHIFT + W", hl.dsp.exec_cmd(apps.wallpaper), { description = "Wallpaper picker" })
 
+-- rbw asks for the Bitwarden master password, then the vault opens in the
+-- file manager. Already unlocked: just opens it.
+hl.bind(
+    mod .. " + SHIFT + V",
+    hl.dsp.exec_cmd(apps.vault .. " open && " .. apps.fileManager .. " ~/Vault"),
+    { description = "Unlock vault and open it" }
+)
+
 -- Reload Hyprland and restart the bar.
 --
 -- The old bind ran `hyprctl reload && pkill waybar waybar &`. pkill rejects a

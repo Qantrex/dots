@@ -24,6 +24,7 @@ return {
     screenshot  = "~/.config/scripts/wofi-screenshot.sh",
     powerprofile = "~/.config/scripts/powerprofile.sh",
     touchpad    = "~/.config/scripts/touchpad.sh",
+    vault       = "~/.config/scripts/vault.sh",
     idle        = "~/.config/scripts/idle.sh",
 
     lock        = "hyprlock",

@@ -153,6 +153,7 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `CTRL+S` | Screenshot region → file + clipboard |
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
 | `SHIFT+R` | Reload config and restart the bar |
+| `SHIFT+V` | Unlock `~/Vault` and open it ([Vault](#-vault)) |
 
 `Fn+F6` (no `SUPER`) turns the touchpad on and off, as does clicking the mouse
 icon in waybar. The state survives reloads and reboots
@@ -302,6 +303,35 @@ through and the realtime "dealer" connection was blocked. Check it with:
 ```bash
 env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify | grep '^\[-\]'
 ```
+
+---
+
+## 🔐 Vault
+
+`~/Vault` is a password-protected folder (gocryptfs). Its files are stored
+encrypted in `~/.vault`; `~/Vault` only exists while it is unlocked, and it
+stays unlocked until `vault lock` or shutdown.
+
+The password is a random 256-bit key that lives only in the Bitwarden entry
+**Vault (gocryptfs)**, next to the gocryptfs master key for recovery. The entry
+has *master password re-prompt* on, so `rbw` asks for the master password on
+every unlock, even while it is otherwise unlocked. The key goes straight from
+`rbw` into gocryptfs and is never shown or copied.
+
+Unlock with `SUPER+SHIFT+V` (opens Dolphin) or `vault`; `vault lock` closes it.
+
+One-time setup (needs `gocryptfs` and a logged-in `rbw`):
+
+```bash
+vault init
+```
+
+Then open the entry in the Bitwarden app, tick *Master password re-prompt*,
+save, and run `rbw sync`.
+
+`~/.vault` is not part of these dotfiles. Back it up like any other data; it is
+encrypted, so any backup location is fine. After a reinstall, restore it and the
+key is still in Bitwarden.
 
 ---
 

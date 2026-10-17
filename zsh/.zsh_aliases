@@ -21,6 +21,7 @@ alias reload='exec zsh'
 
 # --- System / Scripts ---
 alias wallpaper='~/.config/scripts/wofi-wallpaper.sh -m eDP-1'
+alias vault='~/.config/scripts/vault.sh'
 
 # --- Networking ---
 alias pa='ping archlinux.org'
