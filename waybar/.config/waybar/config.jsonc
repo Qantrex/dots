@@ -62,7 +62,7 @@
     "format": " {status}",
     "format-on": " On",
     "format-off": " Off",
-    "format-connected": " {device_alias}",
+    "format-connected": "",
     "format-disabled": " Off",
     "on-click": "blueman-manager",
     "on-click-right": "rfkill toggle bluetooth",
