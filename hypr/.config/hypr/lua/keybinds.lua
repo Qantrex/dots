@@ -36,6 +36,9 @@ hl.bind(
 -- Screenshots
 --------------------------------------------------------------------------
 
+-- Menu: region / window / monitor / all screens, in wofi's style.
+hl.bind(mod .. " + SHIFT + S", hl.dsp.exec_cmd(apps.screenshot), { description = "Screenshot menu" })
+
 -- grimblast is not installed on this machine, so the old bind was dead. grim,
 -- slurp and wl-copy are installed, so this does the same job: select a region,
 -- save it, and put it on the clipboard.
@@ -97,7 +100,8 @@ end
 -- Scratchpad.
 hl.bind(mod .. " + S", hl.dsp.workspace.toggle_special("magic"),
     { description = "Toggle scratchpad" })
-hl.bind(mod .. " + SHIFT + S", hl.dsp.window.move({ workspace = "special:magic" }),
+-- ALT, not SHIFT: SUPER+SHIFT+S is the screenshot menu.
+hl.bind(mod .. " + ALT + S", hl.dsp.window.move({ workspace = "special:magic" }),
     { description = "Move window to scratchpad" })
 
 -- Cycle workspaces with the scroll wheel.

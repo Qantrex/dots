@@ -21,6 +21,7 @@ return {
     emoji       = "wofimoji",
     clipboard   = "~/.config/scripts/wofi-cliphist.sh",
     wallpaper   = "~/.config/scripts/wofi-wallpaper.sh",
+    screenshot  = "~/.config/scripts/wofi-screenshot.sh",
     powerprofile = "~/.config/scripts/powerprofile.sh",
     idle        = "~/.config/scripts/idle.sh",
 
