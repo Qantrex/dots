@@ -58,6 +58,11 @@ hl.bind(mod .. " + CTRL + S", hl.dsp.exec_cmd([[
     notify-send -i "$f" "Screenshot saved" "$f"
 ]]), { description = "Screenshot region to file and clipboard" })
 
+-- Region with flameshot, ask Claude Code about it, answer opens in a floating
+-- foot and lands on the clipboard. Screenshots and answers: ~/.cache/claude-screen
+hl.bind(mod .. " + SHIFT + F", hl.dsp.exec_cmd(apps.claudeScreen),
+    { description = "Ask Claude about a screenshot" })
+
 -- Whole screen, clipboard only.
 hl.bind(mod .. " + CTRL + SHIFT + S", hl.dsp.exec_cmd(
     'grim - | wl-copy && notify-send "Screenshot" "Full screen copied to clipboard"'
@@ -78,7 +83,7 @@ hl.bind(
     { description = "Toggle fullscreen" }
 )
 hl.bind(
-    mod .. " + SHIFT + F",
+    mod .. " + ALT + F",
     hl.dsp.window.fullscreen({ action = "toggle", mode = "maximized" }),
     { description = "Toggle maximized" }
 )

@@ -150,7 +150,9 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `arrows` | Move focus (`+SHIFT` moves the window) |
 | `1`–`0` | Workspace (`+SHIFT` moves the window there) |
 | `S` | Scratchpad |
+| `ALT+F` | Maximize |
 | `CTRL+S` | Screenshot region → file + clipboard |
+| `SHIFT+F` | Screenshot region (flameshot) → ask Claude Code → answer in a floating window + clipboard (`~/.config/scripts/claude-screen/`) |
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
 | `SHIFT+R` | Reload config and restart the bar |
 | `SHIFT+V` | Unlock `~/Vault` and open it ([Vault](#-vault)) |

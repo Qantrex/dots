@@ -26,6 +26,7 @@ return {
     touchpad    = "~/.config/scripts/touchpad.sh",
     vault       = "~/.config/scripts/vault.sh",
     idle        = "~/.config/scripts/idle.sh",
+    claudeScreen = "~/.config/scripts/claude-screen/capture.py",
 
     lock        = "hyprlock",
     bar         = "waybar",
