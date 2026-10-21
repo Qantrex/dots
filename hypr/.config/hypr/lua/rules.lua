@@ -71,16 +71,6 @@ hl.on("window.open", function(win)
     end
 end)
 
--- Claude's screenshot answer (SUPER+SHIFT+F) floats over whatever you asked about.
-hl.window_rule({
-    name  = "claude-screen-float",
-    match = { class = "^(claude-screen)$" },
-
-    float  = true,
-    size   = "900 640",
-    center = true,
-})
-
 -- Notifications (mako) get blurred, and see through to the wallpaper.
 hl.layer_rule({
     name  = "blur-notifications",

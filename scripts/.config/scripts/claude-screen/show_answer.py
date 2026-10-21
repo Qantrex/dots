@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Receives Claude's answer from capture.py as JSON on stdin:
 #   {"question", "image", "answer", "session_id", "is_error"}
-# Saves it next to the screenshot, copies it, and opens it in a floating foot.
+# Saves it next to the screenshot, copies it, and shows it in overlay.py.
 
 import json
 import subprocess
@@ -31,8 +31,14 @@ def main():
     subprocess.run(["wl-copy"], input=answer, text=True)
     notify("Claude answered", "Copied to clipboard.")
 
-    subprocess.Popen(["foot", "--app-id=claude-screen", "less", str(md)],
-                     start_new_session=True)
+    # One overlay at a time: a new answer replaces the old one.
+    subprocess.run(["pkill", "-f", "claude-screen/overlay.py"])
+    overlay = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve().parent / "overlay.py")],
+        stdin=subprocess.PIPE, text=True, start_new_session=True,
+    )
+    overlay.stdin.write(answer)
+    overlay.stdin.close()
     return 0
 
 

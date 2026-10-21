@@ -46,7 +46,7 @@ def run_claude(image, question):
     prompt = (
         f"{question}\n\n"
         f"The screenshot is the image file ./{image.name}. Read it with the Read tool, "
-        "then answer concisely in Markdown."
+        "then answer concisely in plain text with no Markdown formatting."
     )
     r = subprocess.run(
         [CLAUDE, "-p", prompt,
