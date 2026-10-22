@@ -8,10 +8,12 @@ decide — toss a real 3D coin in your terminal to choose between two things.
 A metallic coin is tossed into the air and tumbles in 3D, rendered with a
 software ray-intersector: per-pixel Lambert + specular shading mapped onto an
 ASCII luminance ramp. Each face is engraved with an option's initial. The spin
-decelerates on an ease-out curve and lands on a face, which lights up in rose.
+decelerates on an ease-out curve and lands on a face, whose letter lights up
+in rose.
 
-Pure standard library — no dependencies. Built for a true-black terminal:
-greyscale shading throughout, a single sparse Rosé Pine 'rose' for the winner.
+Pure standard library — no dependencies. Built for a true-black terminal: a
+high-contrast greyscale coin (domed faces, polished rim, reeded edge) and a
+single sparse Rosé Pine Moon rose for the winner.
 """
 
 import math
@@ -32,7 +34,7 @@ ALT_OFF = f"{ESC}[?1049l"
 RESET = f"{ESC}[0m"
 BOLD = f"{ESC}[1m"
 
-__version__ = "1.1"
+__version__ = "1.2"
 _COLOR = True
 
 
@@ -86,23 +88,21 @@ def clip(text, n):
 
 
 # ─── palette ────────────────────────────────────────────────────────────────
-HEADER = (96, 96, 96)
 WHISPER = (64, 64, 64)
 LABEL = (120, 120, 120)
-TITLE = (214, 176, 133)   # warm gold for the 'decide' header
+TITLE = (248, 248, 248)
 
-# Rosé Pine accents (warm, never blue) — one per side
-ROSE = (235, 188, 186)
-GOLD = (246, 193, 119)
-FACE_ACCENT = (ROSE, GOLD)
+# The one colour: Rosé Pine Moon rose, only for the winner.
+ROSE = (234, 154, 151)
 
-# Warm rose-gold metal: the coin body shades along this gradient.
+# Neutral grey metal from near-black to pure white. The shadow end stays
+# above #000 so the coin's dark side still stands out from the background.
 METAL = (
-    (0.00, (26, 22, 20)),
-    (0.28, (92, 64, 42)),
-    (0.55, (176, 128, 72)),
-    (0.78, (236, 197, 143)),
-    (1.00, (252, 240, 224)),
+    (0.00, (20, 20, 20)),
+    (0.30, (66, 66, 66)),
+    (0.55, (138, 138, 138)),
+    (0.80, (222, 222, 222)),
+    (1.00, (255, 255, 255)),
 )
 
 RAMP = " .:-=+*#%@"       # dark → bright luminance ramp
@@ -136,8 +136,12 @@ H = 0.12                  # coin half-thickness
 R2 = R * R
 TILT_Y = 0.42             # constant lean so the disc reads as 3D
 TOSS = 0.65               # height of the toss arc
-LIGHT = (-0.42, 0.72, 0.68)
+LIGHT = (-0.2, 0.8, 0.55)
 VIEW = (0.0, 0.0, 1.0)
+AMBIENT = 0.04
+DOME = 0.45               # how far face normals lean out towards the rim
+GROOVE2 = 0.72 * R2       # r² where the groove inside the rim starts
+RIM2 = 0.82 * R2          # r² where the raised rim starts
 
 # ─── 5x7 engraving font (A–Z, 0–9) ──────────────────────────────────────────
 _FONT_SRC = {
@@ -295,49 +299,58 @@ def render_grid(wc, hc, angle, toss_y, emblems, reveal_face, rose_scale):
                 nx, ny, nz = px / R, py / R, 0.0
             else:
                 sign = 1.0 if cap_sign > 0 else -1.0
-                nx, ny, nz = 0.0, 0.0, sign
+                # slightly domed faces: the highlight sweeps across them as
+                # the coin turns, instead of the whole face flashing at once
+                nx, ny, nz = normalize((DOME * px, DOME * py, sign))
                 face = 0 if sign > 0 else 1
                 u = px / R if face == 0 else -px / R   # back face reads mirrored
                 v = py / R
                 is_text = glyph_hit(u, v, m1 if face == 0 else m2)
 
-            # Lambert + specular
+            # Lambert + specular, little ambient so shadows go deep
             nl = nx * Ll[0] + ny * Ll[1] + nz * Ll[2]
             if nl < 0.0:
                 nl = 0.0
-            lum = 0.12 + 0.88 * nl
+            lum = AMBIENT + (1.0 - AMBIENT) * nl
             if nl > 0.0:
                 rx = 2.0 * nl * nx - Ll[0]
                 ry = 2.0 * nl * ny - Ll[1]
                 rz = 2.0 * nl * nz - Ll[2]
                 rv = rx * Vl[0] + ry * Vl[1] + rz * Vl[2]
                 if rv > 0.0:
-                    lum += (rv ** 24) * 0.55
-            if kind == "cap":
+                    lum += (rv ** 22) * 0.9
+            if kind == "side":                        # reeded edge
+                lum *= 0.45 + 0.55 * abs(math.cos(math.atan2(py, px) * 40.0))
+            else:
                 rr = px * px + py * py
-                if rr > 0.86 * R2:                    # beveled rim
-                    lum *= 0.5
+                if rr > RIM2:                         # raised polished rim
+                    lum = lum * 1.2 + 0.12
+                elif rr > GROOVE2:                    # groove inside the rim
+                    lum *= 0.3
 
             if lum > 1.0:
                 lum = 1.0
+            lum = lum * lum * (3.0 - 2.0 * lum)       # S-curve: harder contrast
             nramp = len(RAMP) - 1
 
             if is_text:
-                accent = FACE_ACCENT[face]
-                if reveal_face == face:                # winner: bright glow
-                    k = 0.6 + 0.4 * rose_scale
-                    col = _scale(accent, max(lum, 0.5) * k + 0.18)
-                    ch = RAMP[min(nramp, int(lum * nramp) + 2)]
-                else:                                  # recessed enamel inlay
-                    tl = 0.34 + 0.42 * lum
-                    col = _scale(accent, tl)
+                if reveal_face == face:                # winner: letter glows rose
+                    k = 0.55 + 0.45 * rose_scale
+                    col = _scale(ROSE, k * (0.9 + 0.25 * lum))
+                    ch = RAMP[-1] if rose_scale >= 1.0 else RAMP[-3]
+                else:
+                    # engraved: shaded well away from the metal around it, so
+                    # the letter reads at every angle of the spin
+                    tl = lum - 0.6 if lum > 0.5 else lum + 0.6
+                    tl = min(1.0, max(0.08, tl))
+                    col = _ramp_color(tl, METAL)
                     ch = RAMP[max(2, int(tl * nramp))]
                 row.append((ch, col))
                 continue
 
             col = _ramp_color(lum, METAL)
-            if reveal_face == face and kind == "cap":  # colour bloom on winner
-                col = _blend(col, FACE_ACCENT[face], 0.30 * (0.6 + 0.4 * rose_scale))
+            if reveal_face == face and kind == "cap":  # dim the field so the
+                col = _scale(col, 1.0 - 0.62 * rose_scale)  # rose letter pops
             row.append((RAMP[int(lum * nramp)], col))
         grid.append(row)
     return grid
@@ -381,7 +394,6 @@ def compose(size, coin_lines, coin_w, emblems, labels, winner, reveal):
 
     m1, m2 = emblems
     a, b = labels
-    cA, cB = FACE_ACCENT
     maxlabel = max(3, (width - 18) // 2)
     la = clip(a.upper(), maxlabel)
     lb = clip(b.upper(), maxlabel)
@@ -390,18 +402,17 @@ def compose(size, coin_lines, coin_w, emblems, labels, winner, reveal):
     segA, segB = f"{m1}  {la}", f"{m2}  {lb}"
     lw = text_width(seg_plain)
     if reveal and winner == 0:
-        legend = (lw,f"{BOLD}{fg(cA)}{segA}{RESET}"
+        legend = (lw, f"{BOLD}{fg(ROSE)}{segA}{RESET}"
                   f"{fg(WHISPER)}{gap}{segB}{RESET}")
     elif reveal and winner == 1:
-        legend = (lw,f"{fg(WHISPER)}{segA}{gap}{RESET}"
-                  f"{BOLD}{fg(cB)}{segB}{RESET}")
+        legend = (lw, f"{fg(WHISPER)}{segA}{gap}{RESET}"
+                  f"{BOLD}{fg(ROSE)}{segB}{RESET}")
     else:
-        legend = (lw,f"{fg(cA)}{segA}{RESET}"
-                  f"{fg(LABEL)}{gap}{RESET}{fg(cB)}{segB}{RESET}")
+        legend = (lw, f"{fg(TITLE)}{segA}{gap}{segB}{RESET}")
 
     if reveal:
         wlabel = clip((a if winner == 0 else b).upper(), max(6, width - 6))
-        status = plain("→  " + wlabel, FACE_ACCENT[winner], bold=True)
+        status = plain("→  " + wlabel, ROSE, bold=True)
     else:
         status = plain("the coin is in the air", WHISPER)
 
@@ -461,7 +472,7 @@ def run(a, b):
         if dt < target_dt:
             time.sleep(target_dt - dt)
 
-    # reveal: the up-face engraving pulses in rose
+    # reveal: the up-face letter pulses in rose
     for j in range(9):
         scale = 1.0 if j % 2 == 0 else 0.35
         grid = render_grid(wc, hc, rest, 0.0, emblems, winner, scale)
@@ -470,10 +481,10 @@ def run(a, b):
     grid = render_grid(wc, hc, rest, 0.0, emblems, winner, 1.0)
     out(compose(size, grid_to_lines(grid), wc, emblems, (a, b), winner, True))
     time.sleep(0.9)
-    return (a if winner == 0 else b), FACE_ACCENT[winner]
+    return a if winner == 0 else b
 
 
-def final_result(label, accent=ROSE):
+def final_result(label):
     cols = shutil.get_terminal_size((80, 24)).columns
     pad = clip(label.upper(), max(6, cols - 10))   # 2 indent + 2 border + 6 pad
     pw = text_width(pad)
@@ -482,9 +493,9 @@ def final_result(label, accent=ROSE):
     left = (inner - pw) // 2
     centered = " " * left + pad + " " * (inner - pw - left)
     out("\n"
-        "  " + fg(accent) + "╭" + bar + "╮" + RESET + "\n"
-        "  " + fg(accent) + "│" + BOLD + centered + RESET + fg(accent) + "│" + RESET + "\n"
-        "  " + fg(accent) + "╰" + bar + "╯" + RESET + "\n"
+        "  " + fg(ROSE) + "╭" + bar + "╮" + RESET + "\n"
+        "  " + fg(ROSE) + "│" + BOLD + centered + RESET + fg(ROSE) + "│" + RESET + "\n"
+        "  " + fg(ROSE) + "╰" + bar + "╯" + RESET + "\n"
         "  " + fg(WHISPER) + "decided." + RESET + "\n\n")
 
 
@@ -497,10 +508,9 @@ def print_help():
     A = fg((248, 248, 248))
     D = fg(LABEL)
     W = fg(WHISPER)
-    RS = fg(ROSE)
     lines = [
         "",
-        f"  {RS}decide{RESET} {D}— toss a 3D coin to choose between two things{RESET}",
+        f"  {A}decide{RESET} {D}— toss a 3D coin to choose between two things{RESET}",
         "",
         f"  {A}USAGE{RESET}",
         f"    {name} <option 1> <option 2>",
@@ -575,8 +585,7 @@ def parse_args(argv):
 
 def decide_static(a, b):
     """Pick a winner without the animation (piped / dumb / tiny terminal)."""
-    idx = random.randint(0, 1)
-    winner = (a, b)[idx]
+    winner = random.choice((a, b))
     if not sys.stdout.isatty():
         try:
             print(winner)
@@ -586,7 +595,7 @@ def decide_static(a, b):
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stdout.fileno())
         return 0
-    final_result(winner, FACE_ACCENT[idx])
+    final_result(winner)
     return 0
 
 
@@ -662,8 +671,7 @@ def main():
 
     if result is None:
         return 130
-    label, accent = result
-    final_result(label, accent)
+    final_result(result)
     return 0
 
 
