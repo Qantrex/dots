@@ -7,9 +7,12 @@ decide — toss a real 3D coin in your terminal to choose between two things.
 
 A metallic coin is tossed into the air and tumbles in 3D, rendered with a
 software ray-intersector: per-pixel Lambert + specular shading mapped onto an
-ASCII luminance ramp. Each face is engraved with an option's initial. The spin
-decelerates on an ease-out curve and lands on a face, whose letter lights up
-in rose.
+ASCII luminance ramp. One face is silver, the other blackened, each engraved
+with an option's initial, so the spin can be followed as it slows.
+
+Paced like regulated casino software: the result comes from `secrets` before
+the coin moves, the toss is long and cannot be skipped, the settling wobble
+never shows the losing face, and the reveal fades instead of flashing.
 
 Pure standard library — no dependencies. Built for a true-black terminal: a
 high-contrast greyscale coin (domed faces, polished rim, reeded edge) and a
@@ -18,7 +21,7 @@ single sparse Rosé Pine Moon rose for the winner.
 
 import math
 import os
-import random
+import secrets
 import shutil
 import sys
 import time
@@ -34,7 +37,7 @@ ALT_OFF = f"{ESC}[?1049l"
 RESET = f"{ESC}[0m"
 BOLD = f"{ESC}[1m"
 
-__version__ = "1.2"
+__version__ = "1.3"
 _COLOR = True
 
 
@@ -95,6 +98,9 @@ TITLE = (248, 248, 248)
 # The one colour: Rosé Pine Moon rose, only for the winner.
 ROSE = (234, 154, 151)
 
+# Swatches for the two coin faces in the legend (silver, blackened).
+SWATCH = (((228, 228, 228), "█"), ((82, 82, 82), "▒"))
+
 # Neutral grey metal from near-black to pure white. The shadow end stays
 # above #000 so the coin's dark side still stands out from the background.
 METAL = (
@@ -142,6 +148,23 @@ AMBIENT = 0.04
 DOME = 0.45               # how far face normals lean out towards the rim
 GROOVE2 = 0.72 * R2       # r² where the groove inside the rim starts
 RIM2 = 0.82 * R2          # r² where the raised rim starts
+FACE_TONE = ((0.40, 1.00),   # face 0: silver, never darker than mid-grey
+             (0.03, 0.40))   # face 1: blackened, never brighter than it
+
+# ─── timeline (seconds) ─────────────────────────────────────────────────────
+# Paced along casino game-design rules: the result is drawn before the toss,
+# the toss runs well past the 2.5 s minimum game cycle (UKGC RTS 14), there
+# is no skip or turbo, the coin never fakes a near miss, and the reveal fades
+# in instead of strobing (WCAG 2.3.1: at most 3 flashes a second).
+INTRO = 1.6               # coin turns once slowly: learn which face is which
+FLIGHT = 5.0              # toss: fast spin that slows to readable flips
+SETTLE = 1.5              # lands and wobbles out, winner face already up
+PAUSE = 0.4               # stillness before the result
+REVEAL = 1.0              # winner letter fades to rose
+HOLD = 1.4                # result stays on screen before the summary box
+FPS = 30
+FLIGHT_TURNS = 6          # full turns during the toss
+WOBBLE = 1.0              # rad; < π/2, so the losing face never shows again
 
 # ─── 5x7 engraving font (A–Z, 0–9) ──────────────────────────────────────────
 _FONT_SRC = {
@@ -319,38 +342,40 @@ def render_grid(wc, hc, angle, toss_y, emblems, reveal_face, rose_scale):
                 rv = rx * Vl[0] + ry * Vl[1] + rz * Vl[2]
                 if rv > 0.0:
                     lum += (rv ** 22) * 0.9
+            rr = px * px + py * py
             if kind == "side":                        # reeded edge
                 lum *= 0.45 + 0.55 * abs(math.cos(math.atan2(py, px) * 40.0))
-            else:
-                rr = px * px + py * py
-                if rr > RIM2:                         # raised polished rim
-                    lum = lum * 1.2 + 0.12
-                elif rr > GROOVE2:                    # groove inside the rim
-                    lum *= 0.3
+            elif rr > RIM2:                           # raised polished rim
+                lum = lum * 1.2 + 0.12
+            elif rr > GROOVE2:                        # groove inside the rim
+                lum *= 0.3
 
             if lum > 1.0:
                 lum = 1.0
             lum = lum * lum * (3.0 - 2.0 * lum)       # S-curve: harder contrast
             nramp = len(RAMP) - 1
 
+            # Two-tone coin, so you can follow which side is up mid-spin:
+            # face 0 polished silver with a dark letter, face 1 blackened
+            # with a bright letter. The rim and edge stay bare metal.
+            if kind == "cap" and rr <= RIM2:
+                lo, hi = FACE_TONE[face]
+                lum = lo + (hi - lo) * lum
+
             if is_text:
-                if reveal_face == face:                # winner: letter glows rose
-                    k = 0.55 + 0.45 * rose_scale
-                    col = _scale(ROSE, k * (0.9 + 0.25 * lum))
-                    ch = RAMP[-1] if rose_scale >= 1.0 else RAMP[-3]
-                else:
-                    # engraved: shaded well away from the metal around it, so
-                    # the letter reads at every angle of the spin
-                    tl = lum - 0.6 if lum > 0.5 else lum + 0.6
-                    tl = min(1.0, max(0.08, tl))
-                    col = _ramp_color(tl, METAL)
-                    ch = RAMP[max(2, int(tl * nramp))]
+                tl = 0.08 + 0.14 * lum if face == 0 else 0.78 + 0.22 * lum
+                col = _ramp_color(tl, METAL)
+                ch = RAMP[max(2, int(tl * nramp))]
+                if reveal_face == face:                # winner: fades to rose
+                    col = _blend(col, _scale(ROSE, 0.95 + 0.2 * lum), rose_scale)
+                    if rose_scale > 0.5:
+                        ch = RAMP[-1]
                 row.append((ch, col))
                 continue
 
             col = _ramp_color(lum, METAL)
             if reveal_face == face and kind == "cap":  # dim the field so the
-                col = _scale(col, 1.0 - 0.62 * rose_scale)  # rose letter pops
+                col = _scale(col, 1.0 - 0.55 * rose_scale)  # rose letter pops
             row.append((RAMP[int(lum * nramp)], col))
         grid.append(row)
     return grid
@@ -384,7 +409,10 @@ def grid_to_plain(grid):
 
 
 # ─── scene composition ────────────────────────────────────────────────────────
-def compose(size, coin_lines, coin_w, emblems, labels, winner, reveal):
+def compose(size, coin_lines, coin_w, emblems, labels, up, winner, phase, k):
+    """One screen. `up` is the face currently facing the viewer (-1 while
+    edge-on); it lights that option in the legend so the result can be
+    followed as the spin slows. `k` is the reveal fade, 0 → 1."""
     cols, lines = size
     width = max(10, cols - 1)
     avail = max(1, lines - 1)
@@ -394,30 +422,38 @@ def compose(size, coin_lines, coin_w, emblems, labels, winner, reveal):
 
     m1, m2 = emblems
     a, b = labels
-    maxlabel = max(3, (width - 18) // 2)
-    la = clip(a.upper(), maxlabel)
-    lb = clip(b.upper(), maxlabel)
+    maxlabel = max(3, (width - 20) // 2)
     gap = "      "
-    seg_plain = f"{m1}  {la}{gap}{m2}  {lb}"
-    segA, segB = f"{m1}  {la}", f"{m2}  {lb}"
-    lw = text_width(seg_plain)
-    if reveal and winner == 0:
-        legend = (lw, f"{BOLD}{fg(ROSE)}{segA}{RESET}"
-                  f"{fg(WHISPER)}{gap}{segB}{RESET}")
-    elif reveal and winner == 1:
-        legend = (lw, f"{fg(WHISPER)}{segA}{gap}{RESET}"
-                  f"{BOLD}{fg(ROSE)}{segB}{RESET}")
-    else:
-        legend = (lw, f"{fg(TITLE)}{segA}{gap}{segB}{RESET}")
+    segs = [f"{m}  {clip(s.upper(), maxlabel)}" for m, s in ((m1, a), (m2, b))]
+    lw = text_width(f"x {segs[0]}{gap}x {segs[1]}")
+    parts = []
+    for i, seg in enumerate(segs):
+        tone, mark = SWATCH[i]
+        if phase == "reveal":
+            if i == winner:
+                tone = text = _blend(TITLE, ROSE, k)
+                bold = True
+            else:
+                tone, text, bold = _blend(tone, WHISPER, k), WHISPER, False
+        else:
+            bold = i == up
+            text = TITLE if bold else LABEL
+        parts.append(f"{fg(tone)}{mark}{RESET} "
+                     f"{BOLD if bold else ''}{fg(text)}{seg}{RESET}")
+    legend = (lw, parts[0] + gap + parts[1])
 
-    if reveal:
+    if phase == "reveal":
         wlabel = clip((a if winner == 0 else b).upper(), max(6, width - 6))
-        status = plain("→  " + wlabel, ROSE, bold=True)
+        status = plain("→  " + wlabel, _blend(LABEL, ROSE, k), bold=True)
+    elif phase == "intro":
+        status = plain(f"{m1} on silver  ·  {m2} on black", LABEL)
+    elif phase == "flight":
+        status = plain("in the air", WHISPER)
     else:
-        status = plain("the coin is in the air", WHISPER)
+        status = plain("settling", WHISPER)
 
     rows = [plain("d e c i d e", TITLE, bold=True),
-            plain("let physics settle it", WHISPER),
+            plain("fair 50/50 · drawn before the toss", WHISPER),
             (0, ""), (0, "")]
     rows += [(coin_w, cl) for cl in coin_lines]
     rows += [(0, ""), legend, (0, ""), status]
@@ -446,6 +482,48 @@ def pick_emblems(a, b):
 
 
 # ─── the show ─────────────────────────────────────────────────────────────────
+TOTAL = INTRO + FLIGHT + SETTLE + PAUSE + REVEAL + HOLD
+
+
+def _smooth(s):
+    return s * s * (3.0 - 2.0 * s)
+
+
+def pose(t, winner):
+    """Coin state at t seconds: (angle, toss_y, phase, reveal fade 0..1).
+
+    The winner is an input: the animation only plays out a result that was
+    already drawn, it never decides anything itself."""
+    rest = 0.0 if winner == 0 else math.pi
+    if t < INTRO:                          # one slow turn: silver, black, silver
+        return 2.0 * math.pi * _smooth(t / INTRO), 0.0, "intro", 0.0
+    t -= INTRO
+    if t < FLIGHT:                         # toss: decelerating spin on an arc
+        p = t / FLIGHT
+        start = 2.0 * math.pi
+        end = rest + WOBBLE + 2.0 * math.pi * (1 + FLIGHT_TURNS)
+        angle = start + (end - start) * (1.0 - (1.0 - p) ** 3.0)
+        return angle, TOSS * math.sin(math.pi * p), "flight", 0.0
+    t -= FLIGHT
+    if t < SETTLE:                         # landed: wobble dies out, faster
+        s = t / SETTLE
+        amp = WOBBLE * (1.0 - s) ** 2
+        angle = rest + amp * math.cos(2.0 * math.pi * (1.0 * t + 1.6 * t * t))
+        hop = 0.14 * (1.0 - s) ** 3 * abs(math.sin(math.pi * t / 0.32))
+        return angle, hop, "settle", 0.0
+    t -= SETTLE
+    if t < PAUSE:
+        return rest, 0.0, "settle", 0.0
+    t -= PAUSE
+    return rest, 0.0, "reveal", _smooth(min(1.0, t / REVEAL))
+
+
+def up_face(angle):
+    """Which face looks at the viewer, or -1 while the coin is edge-on."""
+    c = math.cos(angle)
+    return 0 if c > 0.2 else 1 if c < -0.2 else -1
+
+
 def run(a, b):
     sz = shutil.get_terminal_size((90, 30))
     wc = max(24, min(sz.columns - 2, 96))
@@ -453,34 +531,30 @@ def run(a, b):
     size = (sz.columns, sz.lines)
     emblems = pick_emblems(a, b)
 
-    winner = random.randint(0, 1)
-    rest = 0.0 if winner == 0 else math.pi
-    turns = 4
-    spin_total = turns * 2.0 * math.pi
-
-    N = 96
-    target_dt = 0.028
-    for i in range(N):
-        t0 = time.perf_counter()
-        p = i / (N - 1)
-        ease = 1.0 - (1.0 - p) ** 3                 # fast → slow
-        angle = rest + spin_total * (1.0 - ease)
-        toss_y = TOSS * math.sin(math.pi * min(p / 0.82, 1.0))
-        grid = render_grid(wc, hc, angle, toss_y, emblems, -1, 0.0)
-        out(compose(size, grid_to_lines(grid), wc, emblems, (a, b), winner, False))
-        dt = time.perf_counter() - t0
-        if dt < target_dt:
-            time.sleep(target_dt - dt)
-
-    # reveal: the up-face letter pulses in rose
-    for j in range(9):
-        scale = 1.0 if j % 2 == 0 else 0.35
-        grid = render_grid(wc, hc, rest, 0.0, emblems, winner, scale)
-        out(compose(size, grid_to_lines(grid), wc, emblems, (a, b), winner, True))
-        time.sleep(0.1)
-    grid = render_grid(wc, hc, rest, 0.0, emblems, winner, 1.0)
-    out(compose(size, grid_to_lines(grid), wc, emblems, (a, b), winner, True))
-    time.sleep(0.9)
+    winner = secrets.randbelow(2)          # drawn before anything moves
+    frame = 1.0 / FPS
+    last = None
+    start = time.perf_counter()
+    while True:
+        # Wall-clock timeline: a slow terminal drops frames, it never
+        # shortens the toss.
+        t = min(time.perf_counter() - start, TOTAL)
+        angle, toss_y, phase, k = pose(t, winner)
+        state = (angle, toss_y, phase, k)
+        if state != last:                  # still frames are drawn once
+            rf = winner if phase == "reveal" else -1
+            grid = render_grid(wc, hc, angle, toss_y, emblems, rf, k)
+            # light the up option only once the spin is followable: below
+            # 3 face changes a second, so the legend never strobes
+            spin = abs(pose(min(t + 0.01, TOTAL), winner)[0] - angle) / 0.01
+            up = up_face(angle) if spin < 3.0 * math.pi else -1
+            out(compose(size, grid_to_lines(grid), wc, emblems, (a, b),
+                        up, winner, phase, k))
+            last = state
+        if t >= TOTAL:
+            break
+        nxt = start + (math.floor(t / frame) + 1) * frame
+        time.sleep(max(0.0, nxt - time.perf_counter()))
     return a if winner == 0 else b
 
 
@@ -526,13 +600,17 @@ def print_help():
         f"    {D}    --no-color{RESET}   {W}disable colour (also honours NO_COLOR){RESET}",
         "",
         f"  {A}HOW IT WORKS{RESET}",
-        f"    {W}A metallic coin is tossed and tumbles in 3D, then lands on a{RESET}",
-        f"    {W}face — the winner glows rose. Each face is engraved with an{RESET}",
-        f"    {W}option's initial. The choice is a fair 50/50.{RESET}",
+        f"    {W}The winner is drawn first, a fair 50/50 from the OS's secure{RESET}",
+        f"    {W}random source; the coin then plays it out over about 10 s.{RESET}",
+        f"    {W}One face is silver, the other black, each engraved with an{RESET}",
+        f"    {W}option's initial. It turns once so you can see which is which,{RESET}",
+        f"    {W}is tossed, slows to readable flips (the option facing up is{RESET}",
+        f"    {W}lit below the coin), lands, and the winning letter fades to rose.{RESET}",
         "",
         f"    {W}Piped or non-interactive, it just prints the chosen option,{RESET}",
         f"    {W}so it is safe in scripts: {RESET}{D}pick=$({name} tea coffee){RESET}",
-        f"    {W}A tiny or TERM=dumb terminal skips the animation. Ctrl-C aborts.{RESET}",
+        f"    {W}A tiny or TERM=dumb terminal skips the animation. There is no{RESET}",
+        f"    {W}skip; Ctrl-C aborts without showing a result.{RESET}",
         "",
     ]
     out("\n".join(lines) + "\n")
@@ -585,7 +663,7 @@ def parse_args(argv):
 
 def decide_static(a, b):
     """Pick a winner without the animation (piped / dumb / tiny terminal)."""
-    winner = random.choice((a, b))
+    winner = secrets.choice((a, b))
     if not sys.stdout.isatty():
         try:
             print(winner)
@@ -607,6 +685,20 @@ def selftest():
         grid = render_grid(wc, hc, angle, 0.3, emblems, -1, 0.0)
         print(f"--- angle={angle:.2f} ---")
         print("\n".join(grid_to_plain(grid)))
+
+    # timeline: ends on the winner, the landing never shows the loser,
+    # and the last flips are slow enough to follow
+    for winner in (0, 1):
+        ts = [i / 200.0 for i in range(int(TOTAL * 200) + 1)]
+        poses = [pose(t, winner) for t in ts]
+        assert up_face(poses[-1][0]) == winner and poses[-1][3] == 1.0
+        landed = [p for t, p in zip(ts, poses) if t >= INTRO + FLIGHT]
+        assert all(up_face(p[0]) == winner for p in landed), "near miss"
+        flips = [t for t, p, q in zip(ts, poses, poses[1:])
+                 if up_face(p[0]) != up_face(q[0]) and up_face(q[0]) != -1]
+        gaps = [round(b - a, 2) for a, b in zip(flips, flips[1:])]
+        print(f"winner {winner}: {TOTAL:.1f} s total, last face-up spans "
+              f"{gaps[-4:]} s")
     n = 24
     t0 = time.perf_counter()
     for i in range(n):
