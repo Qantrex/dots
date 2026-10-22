@@ -35,6 +35,7 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 🎵 `spicetify` | Spotify theme (Ziro + `monochrome` scheme) |
 | 🚫 `spotify-adblock` | Ad/tracking filter + `spotify.desktop` that loads it |
 | ⚙️ `scripts` | Helper scripts |
+| 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` tosses an ASCII 3D coin to pick one |
 
 ---
 

@@ -25,6 +25,7 @@ LINKS=(
   ".config/kdeglobals|kde"
   ".config/swayosd|swayosd"
   ".config/scripts|scripts"
+  ".local/bin/decide|bin"
   ".config/zsh|zsh"
   ".zshrc|zsh"
   ".zsh_aliases|zsh"

@@ -1,0 +1,647 @@
+#!/usr/bin/env python3
+"""
+decide — toss a real 3D coin in your terminal to choose between two things.
+
+    decide <option 1> <option 2>
+    decide "stay in" "go out"
+
+A metallic coin is tossed into the air and tumbles in 3D, rendered with a
+software ray-intersector: per-pixel Lambert + specular shading mapped onto an
+ASCII luminance ramp. Each face is engraved with an option's initial. The spin
+decelerates on an ease-out curve and lands on a face, which lights up in rose.
+
+Pure standard library — no dependencies. Built for a true-black terminal:
+greyscale shading throughout, a single sparse Rosé Pine 'rose' for the winner.
+"""
+
+import math
+import os
+import random
+import shutil
+import sys
+import time
+
+# ─── terminal control ──────────────────────────────────────────────────────
+ESC = "\033"
+HOME = f"{ESC}[H"
+HIDE = f"{ESC}[?25l"
+SHOW = f"{ESC}[?25h"
+ALT_ON = f"{ESC}[?1049h"
+ALT_OFF = f"{ESC}[?1049l"
+RESET = f"{ESC}[0m"
+BOLD = f"{ESC}[1m"
+
+__version__ = "1.1"
+_COLOR = True
+
+
+def set_color(on):
+    """Toggle colour output. Cursor/screen control codes stay; only the
+    24-bit SGR colour is dropped, so the ASCII shading still animates."""
+    global _COLOR, RESET, BOLD
+    _COLOR = on
+    RESET = f"{ESC}[0m" if on else ""
+    BOLD = f"{ESC}[1m" if on else ""
+
+
+def fg(rgb):
+    if not _COLOR:
+        return ""
+    return f"{ESC}[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
+
+
+def out(s):
+    try:
+        sys.stdout.write(s)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        raise SystemExit(0)
+
+
+def clip(text, n):
+    """Clip to n visible columns, with an ellipsis when truncated."""
+    if n <= 0:
+        return ""
+    return text if len(text) <= n else text[: max(1, n - 1)] + "…"
+
+
+# ─── palette ────────────────────────────────────────────────────────────────
+HEADER = (96, 96, 96)
+WHISPER = (64, 64, 64)
+LABEL = (120, 120, 120)
+TITLE = (214, 176, 133)   # warm gold for the 'decide' header
+
+# Rosé Pine accents (warm, never blue) — one per side
+ROSE = (235, 188, 186)
+GOLD = (246, 193, 119)
+FACE_ACCENT = (ROSE, GOLD)
+
+# Warm rose-gold metal: the coin body shades along this gradient.
+METAL = (
+    (0.00, (26, 22, 20)),
+    (0.28, (92, 64, 42)),
+    (0.55, (176, 128, 72)),
+    (0.78, (236, 197, 143)),
+    (1.00, (252, 240, 224)),
+)
+
+RAMP = " .:-=+*#%@"       # dark → bright luminance ramp
+
+
+def _scale(c, k):
+    return (min(255, max(0, int(c[0] * k))),
+            min(255, max(0, int(c[1] * k))),
+            min(255, max(0, int(c[2] * k))))
+
+
+def _blend(c1, c2, t):
+    return (int(c1[0] + (c2[0] - c1[0]) * t),
+            int(c1[1] + (c2[1] - c1[1]) * t),
+            int(c1[2] + (c2[2] - c1[2]) * t))
+
+
+def _ramp_color(t, stops):
+    if t <= stops[0][0]:
+        return stops[0][1]
+    for i in range(1, len(stops)):
+        p1, c1 = stops[i - 1]
+        p2, c2 = stops[i]
+        if t <= p2:
+            return _blend(c1, c2, (t - p1) / (p2 - p1))
+    return stops[-1][1]
+
+# ─── coin geometry & scene ──────────────────────────────────────────────────
+R = 1.0                   # coin radius
+H = 0.12                  # coin half-thickness
+R2 = R * R
+TILT_Y = 0.42             # constant lean so the disc reads as 3D
+TOSS = 0.65               # height of the toss arc
+LIGHT = (-0.42, 0.72, 0.68)
+VIEW = (0.0, 0.0, 1.0)
+
+# ─── 5x7 engraving font (A–Z, 0–9) ──────────────────────────────────────────
+_FONT_SRC = {
+    "A": ".###.|#...#|#...#|#####|#...#|#...#|#...#",
+    "B": "####.|#...#|#...#|####.|#...#|#...#|####.",
+    "C": ".####|#....|#....|#....|#....|#....|.####",
+    "D": "####.|#...#|#...#|#...#|#...#|#...#|####.",
+    "E": "#####|#....|#....|####.|#....|#....|#####",
+    "F": "#####|#....|#....|####.|#....|#....|#....",
+    "G": ".####|#....|#....|#.###|#...#|#...#|.####",
+    "H": "#...#|#...#|#...#|#####|#...#|#...#|#...#",
+    "I": ".###.|..#..|..#..|..#..|..#..|..#..|.###.",
+    "J": "..###|...#.|...#.|...#.|#..#.|#..#.|.##..",
+    "K": "#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#",
+    "L": "#....|#....|#....|#....|#....|#....|#####",
+    "M": "#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#",
+    "N": "#...#|##..#|#.#.#|#.#.#|#..##|#...#|#...#",
+    "O": ".###.|#...#|#...#|#...#|#...#|#...#|.###.",
+    "P": "####.|#...#|#...#|####.|#....|#....|#....",
+    "Q": ".###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#",
+    "R": "####.|#...#|#...#|####.|#.#..|#..#.|#...#",
+    "S": ".####|#....|#....|.###.|....#|....#|####.",
+    "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..",
+    "U": "#...#|#...#|#...#|#...#|#...#|#...#|.###.",
+    "V": "#...#|#...#|#...#|#...#|.#.#.|.#.#.|..#..",
+    "W": "#...#|#...#|#...#|#.#.#|#.#.#|##.##|#...#",
+    "X": "#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#",
+    "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..",
+    "Z": "#####|....#|...#.|..#..|.#...|#....|#####",
+    "0": ".###.|#...#|#..##|#.#.#|##..#|#...#|.###.",
+    "1": "..#..|.##..|..#..|..#..|..#..|..#..|.###.",
+    "2": ".###.|#...#|....#|..##.|.#...|#....|#####",
+    "3": "####.|....#|....#|.###.|....#|....#|####.",
+    "4": "#..#.|#..#.|#..#.|#####|...#.|...#.|...#.",
+    "5": "#####|#....|#....|####.|....#|....#|####.",
+    "6": ".###.|#....|#....|####.|#...#|#...#|.###.",
+    "7": "#####|....#|...#.|..#..|.#...|.#...|.#...",
+    "8": ".###.|#...#|#...#|.###.|#...#|#...#|.###.",
+    "9": ".###.|#...#|#...#|.####|....#|....#|.###.",
+}
+FONT = {c: s.split("|") for c, s in _FONT_SRC.items()}
+
+
+def glyph_hit(u, v, ch):
+    """True if local face coord (u,v in unit disc) lands on an engraved pixel."""
+    rows = FONT.get(ch)
+    if rows is None:
+        return False
+    gx = (u + 0.52) / 1.04 * 5.0      # 5 columns across |u|<=0.52
+    gy = (0.72 - v) / 1.44 * 7.0      # 7 rows across |v|<=0.72
+    if 0.0 <= gx < 5.0 and 0.0 <= gy < 7.0:
+        return rows[int(gy)][int(gx)] == "#"
+    return False
+
+
+# ─── tiny 3D math (3x3 row-major tuples) ─────────────────────────────────────
+def rot_x(a):
+    c, s = math.cos(a), math.sin(a)
+    return ((1.0, 0.0, 0.0), (0.0, c, -s), (0.0, s, c))
+
+
+def rot_y(b):
+    c, s = math.cos(b), math.sin(b)
+    return ((c, 0.0, s), (0.0, 1.0, 0.0), (-s, 0.0, c))
+
+
+def mat_mul(A, B):
+    return tuple(
+        tuple(sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3))
+        for i in range(3)
+    )
+
+
+def mat_vec(M, v):
+    return (
+        M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2],
+        M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2],
+        M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2],
+    )
+
+
+def transpose(M):
+    return ((M[0][0], M[1][0], M[2][0]),
+            (M[0][1], M[1][1], M[2][1]),
+            (M[0][2], M[1][2], M[2][2]))
+
+
+def normalize(v):
+    m = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) or 1.0
+    return (v[0] / m, v[1] / m, v[2] / m)
+
+
+# ─── the renderer ─────────────────────────────────────────────────────────────
+def render_grid(wc, hc, angle, toss_y, emblems, reveal_face, rose_scale):
+    """Return a wc×hc grid of (char, rgb_or_None) for one frame."""
+    M = mat_mul(rot_y(TILT_Y), rot_x(angle))
+    Mi = transpose(M)
+    Ll = normalize(mat_vec(Mi, normalize(LIGHT)))
+    Vl = mat_vec(Mi, VIEW)
+    dlx, dly, dlz = mat_vec(Mi, (0.0, 0.0, -1.0))   # ray direction (local)
+
+    halfh = 1.95
+    halfw = halfh * (wc / hc) * 0.5                  # correct for 2:1 cells
+    m1, m2 = emblems
+
+    grid = []
+    for sy in range(hc):
+        wy = (1.0 - 2.0 * (sy + 0.5) / hc) * halfh - toss_y
+        row = []
+        for sx in range(wc):
+            wx = (2.0 * (sx + 0.5) / wc - 1.0) * halfw
+            # ray origin (local), camera far along +z looking down -z
+            ox = Mi[0][0] * wx + Mi[0][1] * wy + Mi[0][2] * 20.0
+            oy = Mi[1][0] * wx + Mi[1][1] * wy + Mi[1][2] * 20.0
+            oz = Mi[2][0] * wx + Mi[2][1] * wy + Mi[2][2] * 20.0
+
+            # nearest intersection with the finite cylinder (the coin)
+            best_t = 1e18
+            kind = None
+            cap_sign = 0.0
+            a = dlx * dlx + dly * dly
+            if a > 1e-9:
+                b = 2.0 * (ox * dlx + oy * dly)
+                c = ox * ox + oy * oy - R2
+                disc = b * b - 4.0 * a * c
+                if disc >= 0.0:
+                    s = math.sqrt(disc)
+                    inv = 0.5 / a
+                    for t in ((-b - s) * inv, (-b + s) * inv):
+                        if 1e-4 < t < best_t:
+                            z = oz + t * dlz
+                            if -H <= z <= H:
+                                best_t = t
+                                kind = "side"
+            if abs(dlz) > 1e-9:
+                for zc in (H, -H):
+                    t = (zc - oz) / dlz
+                    if 1e-4 < t < best_t:
+                        x = ox + t * dlx
+                        y = oy + t * dly
+                        if x * x + y * y <= R2:
+                            best_t = t
+                            kind = "cap"
+                            cap_sign = zc
+
+            if kind is None:
+                row.append((" ", None))
+                continue
+
+            px = ox + best_t * dlx
+            py = oy + best_t * dly
+            is_text = False
+            face = -1
+            if kind == "side":
+                nx, ny, nz = px / R, py / R, 0.0
+            else:
+                sign = 1.0 if cap_sign > 0 else -1.0
+                nx, ny, nz = 0.0, 0.0, sign
+                face = 0 if sign > 0 else 1
+                u = px / R if face == 0 else -px / R   # back face reads mirrored
+                v = py / R
+                is_text = glyph_hit(u, v, m1 if face == 0 else m2)
+
+            # Lambert + specular
+            nl = nx * Ll[0] + ny * Ll[1] + nz * Ll[2]
+            if nl < 0.0:
+                nl = 0.0
+            lum = 0.12 + 0.88 * nl
+            if nl > 0.0:
+                rx = 2.0 * nl * nx - Ll[0]
+                ry = 2.0 * nl * ny - Ll[1]
+                rz = 2.0 * nl * nz - Ll[2]
+                rv = rx * Vl[0] + ry * Vl[1] + rz * Vl[2]
+                if rv > 0.0:
+                    lum += (rv ** 24) * 0.55
+            if kind == "cap":
+                rr = px * px + py * py
+                if rr > 0.86 * R2:                    # beveled rim
+                    lum *= 0.5
+
+            if lum > 1.0:
+                lum = 1.0
+            nramp = len(RAMP) - 1
+
+            if is_text:
+                accent = FACE_ACCENT[face]
+                if reveal_face == face:                # winner: bright glow
+                    k = 0.6 + 0.4 * rose_scale
+                    col = _scale(accent, max(lum, 0.5) * k + 0.18)
+                    ch = RAMP[min(nramp, int(lum * nramp) + 2)]
+                else:                                  # recessed enamel inlay
+                    tl = 0.34 + 0.42 * lum
+                    col = _scale(accent, tl)
+                    ch = RAMP[max(2, int(tl * nramp))]
+                row.append((ch, col))
+                continue
+
+            col = _ramp_color(lum, METAL)
+            if reveal_face == face and kind == "cap":  # colour bloom on winner
+                col = _blend(col, FACE_ACCENT[face], 0.30 * (0.6 + 0.4 * rose_scale))
+            row.append((RAMP[int(lum * nramp)], col))
+        grid.append(row)
+    return grid
+
+
+def grid_to_lines(grid):
+    """Colour rows with run-length-collapsed escapes."""
+    lines = []
+    for row in grid:
+        parts = []
+        last = None
+        for ch, col in row:
+            if col is None:
+                if last is not None:
+                    parts.append(RESET)
+                    last = None
+                parts.append(" ")
+            else:
+                if col != last:
+                    parts.append(fg(col))
+                    last = col
+                parts.append(ch)
+        if last is not None:
+            parts.append(RESET)
+        lines.append("".join(parts))
+    return lines
+
+
+def grid_to_plain(grid):
+    return ["".join(ch for ch, _ in row) for row in grid]
+
+
+# ─── scene composition ────────────────────────────────────────────────────────
+def compose(size, coin_lines, coin_w, emblems, labels, winner, reveal):
+    cols, lines = size
+    width = max(10, cols - 1)
+    avail = max(1, lines - 1)
+
+    def plain(text, rgb, bold=False):
+        return len(text), (BOLD if bold else "") + fg(rgb) + text + RESET
+
+    m1, m2 = emblems
+    a, b = labels
+    cA, cB = FACE_ACCENT
+    maxlabel = max(3, (width - 18) // 2)
+    la = clip(a.upper(), maxlabel)
+    lb = clip(b.upper(), maxlabel)
+    gap = "      "
+    seg_plain = f"{m1}  {la}{gap}{m2}  {lb}"
+    segA, segB = f"{m1}  {la}", f"{m2}  {lb}"
+    if reveal and winner == 0:
+        legend = (len(seg_plain), f"{BOLD}{fg(cA)}{segA}{RESET}"
+                  f"{fg(WHISPER)}{gap}{segB}{RESET}")
+    elif reveal and winner == 1:
+        legend = (len(seg_plain), f"{fg(WHISPER)}{segA}{gap}{RESET}"
+                  f"{BOLD}{fg(cB)}{segB}{RESET}")
+    else:
+        legend = (len(seg_plain), f"{fg(cA)}{segA}{RESET}"
+                  f"{fg(LABEL)}{gap}{RESET}{fg(cB)}{segB}{RESET}")
+
+    if reveal:
+        wlabel = clip((a if winner == 0 else b).upper(), max(6, width - 6))
+        status = plain("→  " + wlabel, FACE_ACCENT[winner], bold=True)
+    else:
+        status = plain("the coin is in the air", WHISPER)
+
+    rows = [plain("d e c i d e", TITLE, bold=True),
+            plain("let physics settle it", WHISPER),
+            (0, ""), (0, "")]
+    rows += [(coin_w, cl) for cl in coin_lines]
+    rows += [(0, ""), legend, (0, ""), status]
+
+    top = max(0, (avail - len(rows)) // 2)
+    buf = [" " * width for _ in range(top)]
+    for vw, colored in rows:
+        left = max(0, (width - vw) // 2)
+        right = max(0, width - vw - left)
+        buf.append(" " * left + colored + RESET + " " * right)
+    while len(buf) < avail:
+        buf.append(" " * width)
+    return HOME + "\n".join(buf[:avail])
+
+
+def pick_emblems(a, b):
+    def initial(s):
+        for ch in s.upper():
+            if ch in FONT:
+                return ch
+        return None
+    m1, m2 = initial(a), initial(b)
+    if m1 is None or m2 is None or m1 == m2:
+        return "1", "2"
+    return m1, m2
+
+
+# ─── the show ─────────────────────────────────────────────────────────────────
+def run(a, b):
+    sz = shutil.get_terminal_size((90, 30))
+    wc = max(24, min(sz.columns - 2, 96))
+    hc = max(9, min(sz.lines - 11, 48))
+    size = (sz.columns, sz.lines)
+    emblems = pick_emblems(a, b)
+
+    winner = random.randint(0, 1)
+    rest = 0.0 if winner == 0 else math.pi
+    turns = 4
+    spin_total = turns * 2.0 * math.pi
+
+    N = 96
+    target_dt = 0.028
+    for i in range(N):
+        t0 = time.perf_counter()
+        p = i / (N - 1)
+        ease = 1.0 - (1.0 - p) ** 3                 # fast → slow
+        angle = rest + spin_total * (1.0 - ease)
+        toss_y = TOSS * math.sin(math.pi * min(p / 0.82, 1.0))
+        grid = render_grid(wc, hc, angle, toss_y, emblems, -1, 0.0)
+        out(compose(size, grid_to_lines(grid), wc, emblems, (a, b), winner, False))
+        dt = time.perf_counter() - t0
+        if dt < target_dt:
+            time.sleep(target_dt - dt)
+
+    # reveal: the up-face engraving pulses in rose
+    for j in range(9):
+        scale = 1.0 if j % 2 == 0 else 0.35
+        grid = render_grid(wc, hc, rest, 0.0, emblems, winner, scale)
+        out(compose(size, grid_to_lines(grid), wc, emblems, (a, b), winner, True))
+        time.sleep(0.1)
+    grid = render_grid(wc, hc, rest, 0.0, emblems, winner, 1.0)
+    out(compose(size, grid_to_lines(grid), wc, emblems, (a, b), winner, True))
+    time.sleep(0.9)
+    return (a if winner == 0 else b), FACE_ACCENT[winner]
+
+
+def final_result(label, accent=ROSE):
+    cols = shutil.get_terminal_size((80, 24)).columns
+    pad = clip(label.upper(), max(6, cols - 10))   # 2 indent + 2 border + 6 pad
+    inner = min(max(len(pad) + 6, 14), max(10, cols - 4))
+    bar = "─" * inner
+    left = (inner - len(pad)) // 2
+    centered = " " * left + pad + " " * (inner - len(pad) - left)
+    out("\n"
+        "  " + fg(accent) + "╭" + bar + "╮" + RESET + "\n"
+        "  " + fg(accent) + "│" + BOLD + centered + RESET + fg(accent) + "│" + RESET + "\n"
+        "  " + fg(accent) + "╰" + bar + "╯" + RESET + "\n"
+        "  " + fg(WHISPER) + "decided." + RESET + "\n\n")
+
+
+def prog():
+    return os.path.basename(sys.argv[0]) or "decide"
+
+
+def print_help():
+    name = prog()
+    A = fg((248, 248, 248))
+    D = fg(LABEL)
+    W = fg(WHISPER)
+    RS = fg(ROSE)
+    lines = [
+        "",
+        f"  {RS}decide{RESET} {D}— toss a 3D coin to choose between two things{RESET}",
+        "",
+        f"  {A}USAGE{RESET}",
+        f"    {name} <option 1> <option 2>",
+        "",
+        f"  {A}EXAMPLES{RESET}",
+        f"    {D}{name} pizza sushi{RESET}",
+        f'    {D}{name} "stay in" "go out"{RESET}',
+        f"    {D}{name} -- -wine -beer{RESET}   {W}# -- lets options start with '-'{RESET}",
+        "",
+        f"  {A}FLAGS{RESET}",
+        f"    {D}-h, --help{RESET}       {W}show this help{RESET}",
+        f"    {D}-V, --version{RESET}    {W}print version and exit{RESET}",
+        f"    {D}    --no-color{RESET}   {W}disable colour (also honours NO_COLOR){RESET}",
+        "",
+        f"  {A}HOW IT WORKS{RESET}",
+        f"    {W}A metallic coin is tossed and tumbles in 3D, then lands on a{RESET}",
+        f"    {W}face — the winner glows rose. Each face is engraved with an{RESET}",
+        f"    {W}option's initial. The choice is a fair 50/50.{RESET}",
+        "",
+        f"    {W}Piped or non-interactive, it just prints the chosen option,{RESET}",
+        f"    {W}so it is safe in scripts: {RESET}{D}pick=$({name} tea coffee){RESET}",
+        f"    {W}A tiny or TERM=dumb terminal skips the animation. Ctrl-C aborts.{RESET}",
+        "",
+    ]
+    out("\n".join(lines) + "\n")
+
+
+def print_version():
+    out(f"{prog()} {__version__}\n")
+
+
+def print_error(msg, hint=True):
+    name = prog()
+    sys.stderr.write(f"{fg((248, 248, 248))}{name}:{RESET} {msg}\n")
+    if hint:
+        sys.stderr.write(f"try '{name} --help' for usage.\n")
+
+
+def parse_args(argv):
+    """Return (action, payload). action ∈ {help, version, error, run}."""
+    opts = []
+    no_color = False
+    end_of_flags = False
+    for tok in argv:
+        if not end_of_flags:
+            if tok in ("-h", "--help", "help"):
+                return "help", None
+            if tok in ("-V", "--version", "version"):
+                return "version", None
+            if tok == "--no-color":
+                no_color = True
+                continue
+            if tok == "--":
+                end_of_flags = True
+                continue
+            if tok.startswith("-") and tok != "-":
+                return "error", f"unknown flag: {tok}"
+        opts.append(tok)
+    return "run", (opts, no_color)
+
+
+def decide_static(a, b):
+    """Pick a winner without the animation (piped / dumb / tiny terminal)."""
+    idx = random.randint(0, 1)
+    winner = (a, b)[idx]
+    if not sys.stdout.isatty():
+        try:
+            print(winner)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            # reader went away; silence the interpreter's shutdown flush
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        return 0
+    final_result(winner, FACE_ACCENT[idx])
+    return 0
+
+
+def selftest():
+    """Headless sanity check: dump plain frames + timing, no TTY needed."""
+    wc, hc = 72, 34
+    emblems = pick_emblems("pizza", "sushi")
+    for angle in (0.0, math.pi / 2, math.pi):
+        grid = render_grid(wc, hc, angle, 0.3, emblems, -1, 0.0)
+        print(f"--- angle={angle:.2f} ---")
+        print("\n".join(grid_to_plain(grid)))
+    n = 24
+    t0 = time.perf_counter()
+    for i in range(n):
+        render_grid(wc, hc, i * 0.3, 0.2, emblems, -1, 0.0)
+    dt = (time.perf_counter() - t0) / n
+    print(f"\nmean frame compute: {dt*1000:.1f} ms  (~{1/dt:.0f} fps) at {wc}x{hc}")
+
+
+def main():
+    if os.environ.get("DECIDE_SELFTEST"):
+        selftest()
+        return 0
+
+    if os.environ.get("NO_COLOR") is not None or "--no-color" in sys.argv[1:]:
+        set_color(False)
+
+    action, payload = parse_args(sys.argv[1:])
+    if action == "help":
+        print_help()
+        return 0
+    if action == "version":
+        print_version()
+        return 0
+    if action == "error":
+        print_error(payload)
+        return 2
+
+    opts, _ = payload   # --no-color already applied before dispatch
+    opts = [o.strip() for o in opts]
+    if len(opts) == 0:
+        print_error("need two options to decide between, e.g. "
+                    f"{prog()} pizza sushi")
+        return 2
+    if len(opts) == 1:
+        print_error(f"need two options, only one given: '{opts[0]}'")
+        return 2
+    if len(opts) > 2:
+        print_error(f"need exactly two options, got {len(opts)} — "
+                    'quote multi-word options: decide "stay in" "go out"')
+        return 2
+    a, b = opts
+    if not a or not b:
+        print_error("options must not be empty")
+        return 2
+
+    term = os.environ.get("TERM", "")
+    sz = shutil.get_terminal_size((90, 30))
+    animate = (sys.stdout.isatty() and term not in ("", "dumb")
+               and sz.columns >= 40 and sz.lines >= 18)
+    if not animate:
+        return decide_static(a, b)
+
+    out(ALT_ON + HIDE)
+    result = None
+    try:
+        result = run(a, b)
+    except KeyboardInterrupt:
+        result = None
+    finally:
+        out(SHOW + ALT_OFF)
+
+    if result is None:
+        return 130
+    label, accent = result
+    final_result(label, accent)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        out(SHOW + ALT_OFF)
+        sys.exit(130)
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        sys.exit(0)
