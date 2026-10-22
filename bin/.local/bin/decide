@@ -20,6 +20,7 @@ import random
 import shutil
 import sys
 import time
+import unicodedata
 
 # ─── terminal control ──────────────────────────────────────────────────────
 ESC = "\033"
@@ -58,11 +59,30 @@ def out(s):
         raise SystemExit(0)
 
 
+def text_width(text):
+    """Visible terminal columns: wide chars (CJK, emoji) take 2, combining 0."""
+    w = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        w += 2 if unicodedata.east_asian_width(ch) in "WF" else 1
+    return w
+
+
 def clip(text, n):
     """Clip to n visible columns, with an ellipsis when truncated."""
     if n <= 0:
         return ""
-    return text if len(text) <= n else text[: max(1, n - 1)] + "…"
+    if text_width(text) <= n:
+        return text
+    kept, w = [], 0
+    for ch in text:
+        cw = text_width(ch)
+        if w + cw > n - 1:
+            break
+        kept.append(ch)
+        w += cw
+    return "".join(kept) + "…"
 
 
 # ─── palette ────────────────────────────────────────────────────────────────
@@ -357,7 +377,7 @@ def compose(size, coin_lines, coin_w, emblems, labels, winner, reveal):
     avail = max(1, lines - 1)
 
     def plain(text, rgb, bold=False):
-        return len(text), (BOLD if bold else "") + fg(rgb) + text + RESET
+        return text_width(text), (BOLD if bold else "") + fg(rgb) + text + RESET
 
     m1, m2 = emblems
     a, b = labels
@@ -368,14 +388,15 @@ def compose(size, coin_lines, coin_w, emblems, labels, winner, reveal):
     gap = "      "
     seg_plain = f"{m1}  {la}{gap}{m2}  {lb}"
     segA, segB = f"{m1}  {la}", f"{m2}  {lb}"
+    lw = text_width(seg_plain)
     if reveal and winner == 0:
-        legend = (len(seg_plain), f"{BOLD}{fg(cA)}{segA}{RESET}"
+        legend = (lw,f"{BOLD}{fg(cA)}{segA}{RESET}"
                   f"{fg(WHISPER)}{gap}{segB}{RESET}")
     elif reveal and winner == 1:
-        legend = (len(seg_plain), f"{fg(WHISPER)}{segA}{gap}{RESET}"
+        legend = (lw,f"{fg(WHISPER)}{segA}{gap}{RESET}"
                   f"{BOLD}{fg(cB)}{segB}{RESET}")
     else:
-        legend = (len(seg_plain), f"{fg(cA)}{segA}{RESET}"
+        legend = (lw,f"{fg(cA)}{segA}{RESET}"
                   f"{fg(LABEL)}{gap}{RESET}{fg(cB)}{segB}{RESET}")
 
     if reveal:
@@ -455,10 +476,11 @@ def run(a, b):
 def final_result(label, accent=ROSE):
     cols = shutil.get_terminal_size((80, 24)).columns
     pad = clip(label.upper(), max(6, cols - 10))   # 2 indent + 2 border + 6 pad
-    inner = min(max(len(pad) + 6, 14), max(10, cols - 4))
+    pw = text_width(pad)
+    inner = min(max(pw + 6, 14), max(10, cols - 4))
     bar = "─" * inner
-    left = (inner - len(pad)) // 2
-    centered = " " * left + pad + " " * (inner - len(pad) - left)
+    left = (inner - pw) // 2
+    centered = " " * left + pad + " " * (inner - pw - left)
     out("\n"
         "  " + fg(accent) + "╭" + bar + "╮" + RESET + "\n"
         "  " + fg(accent) + "│" + BOLD + centered + RESET + fg(accent) + "│" + RESET + "\n"
@@ -512,32 +534,43 @@ def print_version():
 
 def print_error(msg, hint=True):
     name = prog()
-    sys.stderr.write(f"{fg((248, 248, 248))}{name}:{RESET} {msg}\n")
+    if _COLOR and sys.stderr.isatty():
+        name_col = f"{fg((248, 248, 248))}{name}:{RESET}"
+    else:                                   # stderr redirected: no escapes
+        name_col = f"{name}:"
+    sys.stderr.write(f"{name_col} {msg}\n")
     if hint:
         sys.stderr.write(f"try '{name} --help' for usage.\n")
 
 
 def parse_args(argv):
-    """Return (action, payload). action ∈ {help, version, error, run}."""
+    """Return (action, payload, no_color). action ∈ {help, version, error, run}.
+
+    Only dashed flags count, so 'help' or 'version' can be options. Every
+    token is read (not just up to the first flag) so --no-color also applies
+    to --help and errors, but nothing after '--' is ever a flag.
+    """
     opts = []
+    action, payload = "run", None
     no_color = False
     end_of_flags = False
     for tok in argv:
-        if not end_of_flags:
-            if tok in ("-h", "--help", "help"):
-                return "help", None
-            if tok in ("-V", "--version", "version"):
-                return "version", None
-            if tok == "--no-color":
-                no_color = True
-                continue
-            if tok == "--":
-                end_of_flags = True
-                continue
-            if tok.startswith("-") and tok != "-":
-                return "error", f"unknown flag: {tok}"
-        opts.append(tok)
-    return "run", (opts, no_color)
+        if end_of_flags or tok == "-" or not tok.startswith("-"):
+            opts.append(tok)
+        elif tok == "--":
+            end_of_flags = True
+        elif tok == "--no-color":
+            no_color = True
+        elif action == "run":                  # the first other flag wins
+            if tok in ("-h", "--help"):
+                action = "help"
+            elif tok in ("-V", "--version"):
+                action = "version"
+            else:
+                action, payload = "error", f"unknown flag: {tok}"
+    if action == "run":
+        payload = opts
+    return action, payload, no_color
 
 
 def decide_static(a, b):
@@ -578,10 +611,12 @@ def main():
         selftest()
         return 0
 
-    if os.environ.get("NO_COLOR") is not None or "--no-color" in sys.argv[1:]:
+    action, payload, no_color = parse_args(sys.argv[1:])
+    # NO_COLOR counts only when non-empty (no-color.org); a pipe gets plain
+    # text too, so `decide --help | less` shows no raw escapes.
+    if no_color or os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         set_color(False)
 
-    action, payload = parse_args(sys.argv[1:])
     if action == "help":
         print_help()
         return 0
@@ -592,8 +627,7 @@ def main():
         print_error(payload)
         return 2
 
-    opts, _ = payload   # --no-color already applied before dispatch
-    opts = [o.strip() for o in opts]
+    opts = [o.strip() for o in payload]
     if len(opts) == 0:
         print_error("need two options to decide between, e.g. "
                     f"{prog()} pizza sushi")
