@@ -42,6 +42,7 @@ install_pkgs "fonts"               "${PKG_FONTS[@]}"
 install_pkgs "themes"              "${PKG_THEME[@]}"
 install_pkgs "apps"                "${PKG_APPS[@]}"
 install_pkgs "system"              "${PKG_SYSTEM[@]}"
+setup_gaming
 check_hyprland_version
 
 link_dotfiles

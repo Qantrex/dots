@@ -248,6 +248,22 @@ detect_hardware() {
   return 0
 }
 
+# setup_gaming -- Steam and Prism Launcher, plus the 32-bit driver for this GPU.
+setup_gaming() {
+  step "Gaming"
+  ask "Install Steam and Prism Launcher (turns on the multilib repo)?" || return 0
+  if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
+    run sudo sed -i '/^#\[multilib\]/,/^#Include/ s/^#//' /etc/pacman.conf
+    run sudo pacman -Syu --noconfirm
+  fi
+  local gpus pkgs=("${PKG_GAMING[@]}")
+  gpus=$(lspci -nn 2>/dev/null | grep -E '\[03(00|02|80)\]' || true)
+  grep -q '\[10de:' <<<"$gpus" && pkgs+=(lib32-nvidia-utils)
+  grep -q '\[1002:' <<<"$gpus" && pkgs+=(lib32-vulkan-radeon)
+  grep -q '\[8086:' <<<"$gpus" && pkgs+=(lib32-vulkan-intel)
+  install_pkgs "gaming" "${pkgs[@]}"
+}
+
 # ----------------------------------------------------------------- dotfiles
 
 link_dotfiles() {

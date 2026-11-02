@@ -50,3 +50,6 @@ PKG_GPU_NVIDIA=(nvidia-utils nvidia-settings)   # + nvidia-open / -dkms, see lib
 PKG_GPU_HYBRID=(nvidia-prime envycontrol)       # iGPU + NVIDIA laptops (gpumode)
 PKG_LAPTOP=(tlp acpi)
 PKG_ASUS=(asusctl)                              # powerprofile.sh / waybar module
+
+# Optional, needs the multilib repo -- see setup_gaming() in lib.sh.
+PKG_GAMING=(steam prismlauncher)

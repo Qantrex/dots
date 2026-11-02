@@ -65,7 +65,8 @@ or, with the repo already cloned, `~/dotfiles/install.sh`. It:
 4. links the dotfiles (anything in the way goes to `~/.dotfiles-backup/<date>/`)
 5. sets up oh-my-zsh and its plugins and makes zsh the login shell
 6. enables the services and the greetd + tuigreet login screen
-7. applies the Discord, Spotify and (optionally) Firefox themes
+7. applies the Discord, Spotify and (optionally) Firefox themes, and offers
+   Steam and Prism Launcher (`setup_gaming`, turns on multilib)
 8. offers the one-time root scripts: firewall, ASUS power profiles,
    maintenance, boot tuning (off by default -- written for this laptop)
 
