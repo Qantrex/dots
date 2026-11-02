@@ -334,11 +334,20 @@ setup_greetd() {
   step "Login screen (greetd + tuigreet)"
   local session=Hyprland
   [[ -x /usr/bin/start-hyprland ]] && session=start-hyprland
+  local command="tuigreet --time --remember --asterisks --cmd $session"
+  # A machine with its own file in install/greeter/ gets tuigreet inside Hyprland,
+  # which can pick the monitor and font size that the kernel console can't.
+  local host_greeter
+  host_greeter=$DOTFILES/install/greeter/$(cat /etc/hostname 2>/dev/null).lua
+  if [[ -f $host_greeter ]]; then
+    run sudo install -m 644 "$host_greeter" /etc/greetd/hyprland-greeter.lua
+    command="env HOME=/tmp XDG_CACHE_HOME=/tmp/greeter-cache Hyprland --config /etc/greetd/hyprland-greeter.lua"
+  fi
   root_write /etc/greetd/config.toml "[terminal]
 vt = 1
 
 [default_session]
-command = \"tuigreet --time --remember --asterisks --cmd $session\"
+command = \"$command\"
 user = \"greeter\""
   enable_services greetd.service
 }
