@@ -3,10 +3,10 @@ alias t='tmux attach 2>/dev/null || tmux'
 alias bare='TMUX= /bin/zsh'  # open a raw shell without tmux
 
 # --- File Management ---
-alias ls='eza --icons'
-alias la='eza -a --icons'
-alias ll='eza -l --icons'
-alias lt='eza --tree --icons'
+alias ls='eza --icons auto'
+alias la='eza -a --icons auto'
+alias ll='eza -l --icons auto'
+alias lt='eza --tree --icons auto'
 alias catt='bat --paging=never'
 alias dl='cd ~/Downloads'
 alias dc='cd ~/Documents'
