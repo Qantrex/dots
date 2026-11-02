@@ -12,17 +12,17 @@ local function hostname()
 end
 
 if hostname() == "bauarch-pc" then
-    -- Main screen: AOC Q27G2G4.
+    -- Main screen, matched by model so it stays right whichever port it's on.
     hl.monitor({
-        output   = "HDMI-A-1",
+        output   = "desc:AOC Q27G2G4",
         mode     = "2560x1440@144",
         position = "0x0",
         scale    = 1,
     })
 
-    -- Side screen: AOC 27G2G8, in reversed portrait (transform 3 = 270 degrees).
+    -- Side screen, in reversed portrait (transform 3 = 270 degrees).
     hl.monitor({
-        output    = "DP-1",
+        output    = "desc:AOC 27G2G8",
         mode      = "1920x1080@240",
         position  = "2560x0",
         scale     = 1,
