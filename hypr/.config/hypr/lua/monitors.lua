@@ -27,6 +27,7 @@ if hostname() == "bauarch-pc" then
         position  = "2560x0",
         scale     = 1,
         transform = 3,
+        vrr       = 2, -- adaptive sync in fullscreen only
     })
 else
     -- Internal laptop panel (Samsung, 2880x1800). scale 2 gives a 1440x900 logical
