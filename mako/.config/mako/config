@@ -1,0 +1,34 @@
+# Basic appearance settings
+font=JetBrainsMono Nerd Font 11
+# Mako TUI Style Config (Black & White)
+
+# General Appearance
+font=JetBrainsMono Nerd Font 11
+width=380
+height=200
+padding=12
+anchor=top-right
+
+# Border
+border-size=1
+border-radius=5
+
+# Colors
+background-color=#000000
+text-color=#FFFFFF
+border-color=#FFFFFF
+
+# Behavior
+default-timeout=5000
+
+## --- URGENCY ---
+# Low urgency notifications
+[urgency=low]
+border-color=#555555
+
+# High urgency notifications (inverted theme)
+[urgency=high]
+background-color=#FFFFFF
+text-color=#000000
+border-color=#000000
+default-timeout=3

@@ -24,7 +24,8 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 🐟 `fish` | Fish config (zsh is the login shell) |
 | 🖼 `foot` | Terminal emulator |
 | ✍️ `micro` | Terminal editor |
-| 🔔 `fnott` | Notification daemon config (mako is what actually runs) |
+| 🔔 `mako` | Notification daemon: true-black monochrome |
+| 🔕 `fnott` | Older notification config, not running |
 | 🔍 `wofi` | Application launcher |
 | 🎨 `gtk` | GTK 3/4 theming |
 | 🎛 `qt5ct` / `qt6ct` | Qt5 / Qt6 theming (monochrome palette in `colors/`) |

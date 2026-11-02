@@ -17,6 +17,7 @@ LINKS=(
   ".config/micro|micro"
   ".config/fish|fish"
   ".config/fnott|fnott"
+  ".config/mako|mako"
   ".config/gtk-3.0|gtk"
   ".config/gtk-4.0|gtk"
   ".local/share/themes/Monochrome|gtk"
