@@ -35,9 +35,9 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 💬 `vesktop` | Discord theme (`themes/` only) |
 | 🎵 `spicetify` | Spotify theme (Ziro + `monochrome` scheme) |
 | 🚫 `spotify-adblock` | Ad/tracking filter + `spotify.desktop` that loads it |
-| ⌨️ `homerow` | Typing test app: built page, launcher entry and icon. Source in its own repo; `npm run deploy` there updates the copy here |
+| ⌨️ `homerow` | Launcher entry and icon for the homerow typing test, a Rust TUI in its own foot window (`scripts/homerow.sh`). The binary is built from `~/Projects/homerow` with `npm run deploy` |
 | ⚙️ `scripts` | Helper scripts |
-| 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` tosses an ASCII 3D coin to pick one, `homerow` opens the typing test |
+| 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` tosses an ASCII 3D coin to pick one |
 
 ---
 
