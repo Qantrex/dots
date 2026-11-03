@@ -1,49 +1,1208 @@
 #!/usr/bin/env python3
 """
-decide — toss a real 3D coin in your terminal to choose between two things.
+decide — let a coin choose between two things.
 
     decide <option 1> <option 2>
-    decide "stay in" "go out"
+    decide "watch x movie" "watch y movie"
 
-A metallic coin is tossed into the air and tumbles in 3D, rendered with a
-software ray-intersector: per-pixel Lambert + specular shading mapped onto an
-ASCII luminance ramp. One face is silver, the other blackened, each engraved
-with an option's initial, so the spin can be followed as it slows.
+A pixel-rendered metal coin (sixel or kitty graphics, half-blocks otherwise) on
+a table in the dark. One face stands for each option. You hold space to pick the
+coin up and let go to throw. It flies, it is caught under a cover, and you lift
+the cover yourself. Whatever it shows is what you do.
 
-Paced like regulated casino software: the result comes from `secrets` before
-the coin moves, the toss is long and cannot be skipped, the settling wobble
-never shows the losing face, and the reveal fades instead of flashing.
+The pacing borrows from published casino software standards, as design
+references only (nothing here is tested or approved by anyone):
+  fair draw     one bit from the OS CSPRNG, before anything moves (GLI-19 3.3)
+  no turbo      nothing shortens the toss (UKGC RTS 14E); lifting the cover
+                faster is allowed, it is a reveal-all
+  fresh press   holding a key never starts a toss (UKGC RTS 14D)
+  no staging    the flight is the same film for either result (GLI-19 4.5.2),
+                and the hold and throw change nothing (GLI-19 4.6.1)
+  no flashing   at most 3 flashes a second (WCAG 2.3.1), checked by the selftest
 
-Pure standard library — no dependencies. Built for a true-black terminal: a
-high-contrast greyscale coin (domed faces, polished rim, reeded edge) and a
-single sparse Rosé Pine Moon rose for the winner.
+Game logic is standard library only. numpy and PIL are optional: without numpy
+the coin is drawn coarser with half-blocks. Piped, it just prints an option.
 """
 
+import atexit
+import contextlib
+import fcntl
+import glob
+import json
 import math
+import mmap
+import multiprocessing
 import os
+import re
 import secrets
+import select
 import shutil
+import signal
+import struct
+import subprocess
 import sys
+import tempfile
+import termios
 import time
+import tty
 import unicodedata
 
-# ─── terminal control ──────────────────────────────────────────────────────
+__version__ = "2.0"
+SOUND_REV = 2                # bump when the sounds change: they are cached on disk
+
+np = None                       # numpy, loaded only when a coin is drawn
+
+
+def load_numpy():
+    global np
+    try:
+        import numpy
+        np = numpy
+    except ImportError:
+        np = None
+    return np
+
+
+def _worker_signals():
+    """Render and audio children leave signals and the terminal to the parent."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTSTP, signal.SIG_IGN)
+    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGWINCH, signal.SIGCONT):
+        signal.signal(s, signal.SIG_DFL)
+
+
+# ═══ the coin renderer ═════════════════════════════════════════════════════
+# The renderer decides nothing: the caller passes angle, height and reveal
+# state. Sealed pixels can't depend on the face, the emblems or the winner.
+ROSE = (234, 154, 151)
+TILT_Y = 0.34                # same idea as the ASCII coin's constant lean
+LEAN_X = -0.20               # seen slightly from above, so edge-on keeps depth
+THICK = 0.13                 # half thickness, coin radius 1
+CAM = 7.0                    # camera distance, mild perspective
+LIGHT = (-0.38, 0.72, 0.58)
+N_ANGLES = 90                # cached angles, 4 degree step, blended between
+NGREY = 56                   # grey registers
+NROSE = 16                   # letter registers used during the reveal
+MAX_SUB_DEG = 8.0            # motion blur sub-frame spacing
+SPIN_FLOOR = 0.075           # tone of a spinning coin, in linear light: darkest...
+SPIN_CEIL = 0.74             # ...brightest...
+SPIN_GAMMA = 0.9             # ...and the curve between
+PULSE_MAX = 5.0              # selftest: brightest/dimmest spin frame. 6.0 before the
+                             # spin tone. What's left is the coin going thin edge-on
+SHUTTER = 0.0                # motion blur, fraction of the frame interval; off:
+                             # it raised the flash count and costs the most
+HEADROOM = 1.14              # canvas margin so the coin can zoom without cropping
+
+# Per-frame effect inputs, all cheap (applied to cached sprites, no re-shading).
+# To add one: give it a default here and read it in Coin.frame(). Stage passes
+# them through, so callers just add a keyword.
+FX = dict(
+    zoom=1.0,        # camera scale about the canvas centre
+    impact_y=0.0,    # downward jolt of coin and floor, in coin radii
+    shadow_h=None,   # height driving the floor pool; None follows toss_y
+    light=1.0,       # overall lighting intensity
+    seal=0.0,        # fraction of the coin's height still covered, lifts top-down
+    tone=1.0,        # uncovered face: 0 neutral engraved (squeeze), 1 true silver/black
+    shutter=SHUTTER, # motion blur, fraction of the frame interval; 0 is sharp
+    floor=1.0,       # brightness of the pool of light on the table
+    floor_r=1.0,     # width of that pool
+    spin=0.0,        # 0 true metal, 1 evened out so a spinning coin doesn't pulse
+)
+
+
+def edge_on_angle():
+    """Angle where the coin's face is exactly edge-on to the viewer. With the
+    constant lean that is about 102 degrees, not 90."""
+    return math.atan2(math.cos(LEAN_X) * math.cos(TILT_Y), math.sin(LEAN_X)) % math.pi
+
+
+def flight_angle(p, flight, hi=2.0, lo=0.5):
+    """Spin falling linearly from hi to lo turns/s, p = t/flight in 0..1, scaled
+    down slightly so it lands exactly edge-on. Never depends on the winner."""
+    total = flight * (hi + lo) / 2
+    edge = edge_on_angle() / (2 * math.pi)
+    target = total - ((total - edge) % 0.5)
+    return 2 * math.pi * flight * (hi * p - (hi - lo) / 2 * p * p) * (target / total)
+
+
+_FONT_SRC = {
+    "A": ".###.|#...#|#...#|#####|#...#|#...#|#...#", "B": "####.|#...#|#...#|####.|#...#|#...#|####.",
+    "C": ".####|#....|#....|#....|#....|#....|.####", "D": "####.|#...#|#...#|#...#|#...#|#...#|####.",
+    "E": "#####|#....|#....|####.|#....|#....|#####", "F": "#####|#....|#....|####.|#....|#....|#....",
+    "G": ".####|#....|#....|#.###|#...#|#...#|.####", "H": "#...#|#...#|#...#|#####|#...#|#...#|#...#",
+    "I": ".###.|..#..|..#..|..#..|..#..|..#..|.###.", "J": "..###|...#.|...#.|...#.|#..#.|#..#.|.##..",
+    "K": "#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#", "L": "#....|#....|#....|#....|#....|#....|#####",
+    "M": "#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#", "N": "#...#|##..#|#.#.#|#.#.#|#..##|#...#|#...#",
+    "O": ".###.|#...#|#...#|#...#|#...#|#...#|.###.", "P": "####.|#...#|#...#|####.|#....|#....|#....",
+    "Q": ".###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#", "R": "####.|#...#|#...#|####.|#.#..|#..#.|#...#",
+    "S": ".####|#....|#....|.###.|....#|....#|####.", "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..",
+    "U": "#...#|#...#|#...#|#...#|#...#|#...#|.###.", "V": "#...#|#...#|#...#|#...#|.#.#.|.#.#.|..#..",
+    "W": "#...#|#...#|#...#|#.#.#|#.#.#|##.##|#...#", "X": "#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#",
+    "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..", "Z": "#####|....#|...#.|..#..|.#...|#....|#####",
+    "0": ".###.|#...#|#..##|#.#.#|##..#|#...#|.###.", "1": "..#..|.##..|..#..|..#..|..#..|..#..|.###.",
+    "2": ".###.|#...#|....#|..##.|.#...|#....|#####", "3": "####.|....#|....#|.###.|....#|....#|####.",
+    "4": "#..#.|#..#.|#..#.|#####|...#.|...#.|...#.", "5": "#####|#....|#....|####.|....#|....#|####.",
+    "6": ".###.|#....|#....|####.|#...#|#...#|.###.", "7": "#####|....#|...#.|..#..|.#...|.#...|.#...",
+    "8": ".###.|#...#|#...#|.###.|#...#|#...#|.###.", "9": ".###.|#...#|#...#|.####|....#|....#|.###.",
+}
+FONT = {c: s.split("|") for c, s in _FONT_SRC.items()}
+
+
+# ─── relief textures ───────────────────────────────────────────────────────
+def _find_font():
+    for pat in ("/usr/share/fonts/**/DejaVuSerif-Bold.ttf",
+                "/usr/share/fonts/**/LiberationSerif-Bold.ttf",
+                "/usr/share/fonts/**/NotoSerif-Bold.ttf",
+                "/usr/share/fonts/**/DejaVuSans-Bold.ttf"):
+        hits = glob.glob(pat, recursive=True)
+        if hits:
+            return hits[0]
+    try:
+        p = subprocess.run(["fc-match", "-f", "%{file}", "serif:bold"],
+                           capture_output=True, text=True, timeout=1).stdout.strip()
+        return p if p.lower().endswith((".ttf", ".otf")) else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _box(a, r):
+    """Separable box blur (radius r), three passes approximate a Gaussian."""
+    if r < 1:
+        return a
+    k = 2 * r + 1
+    for _ in range(3):
+        for axis in (0, 1):
+            c = np.cumsum(np.pad(a, [(r + 1, r) if i == axis else (0, 0) for i in (0, 1)], mode="edge"), axis=axis)
+            a = (np.take(c, range(k, c.shape[axis]), axis) - np.take(c, range(0, c.shape[axis] - k), axis)) / k
+    return a
+
+
+def _glyph_mask(ch, T):
+    """Coverage 0..1 of the letter on a T×T face. PIL if present, else bitmap."""
+    size = int(T * 0.56)
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        path = _find_font()
+        if path is None:
+            raise OSError
+        font = ImageFont.truetype(path, size)
+        img = Image.new("L", (T, T), 0)
+        d = ImageDraw.Draw(img)
+        l, t, r, b = d.textbbox((0, 0), ch, font=font)
+        d.text(((T - (r - l)) / 2 - l, (T - (b - t)) / 2 - t), ch, fill=255, font=font)
+        return np.asarray(img, dtype=np.float32) / 255.0
+    except (ImportError, OSError):
+        pass
+    m = np.zeros((T, T), dtype=np.float32)
+    rows = FONT.get(ch)
+    if rows:
+        cell = int(T * 0.54 / 7)
+        x0, y0 = (T - 5 * cell) // 2, (T - 7 * cell) // 2
+        for j, row in enumerate(rows):
+            for i, c in enumerate(row):
+                if c == "#":
+                    m[y0 + j * cell:y0 + (j + 1) * cell, x0 + i * cell:x0 + (i + 1) * cell] = 1.0
+        m = np.clip((_box(m, max(1, T // 180)) - 0.5) * 6.0 + 0.5, 0, 1)
+    return m
+
+
+def _smooth(a, b, x):
+    t = np.clip((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def _face_tex(ch, T, tone):
+    """(dh/du, dh/dv, albedo, letter) for one face. v points up. tone is 'silver',
+    'black' or 'neutral'. ch None leaves the face blank. Neutral faces share one
+    albedo and relief direction, so only the glyph's shape can differ."""
+    ax = (np.arange(T, dtype=np.float32) + 0.5) / T * 2 - 1
+    u, v = np.meshgrid(ax, -ax)
+    r = np.hypot(u, v)
+    th = np.arctan2(v, u)
+    if ch is None:
+        letter = soft = wide = np.zeros((T, T), dtype=np.float32)
+    else:
+        letter = _glyph_mask(ch, T)
+        soft = _box(letter, max(1, T // 260))
+        wide = _box(letter, max(2, T // 90))
+    h = 0.045 * (1 - r * r)                           # dome
+    h += 0.040 * _smooth(0.845, 0.885, r)             # raised rim
+    h -= 0.070 * _smooth(0.965, 1.0, r)               # outer bevel
+    h -= 0.012 * np.exp(-((r - 0.815) / 0.012) ** 2)  # groove
+    bead = _smooth(0.2, 0.9, np.cos(th * 84)) * np.exp(-((r - 0.915) / 0.022) ** 2)
+    h += 0.010 * bead                                 # denticles on the rim
+    relief = 0.040 * soft + 0.012 * wide
+    h += -relief if tone == "silver" else relief      # silver engraved, others struck
+    du = 2.0 / T
+    gv, gu = np.gradient(h, du)
+    gv = -gv                                          # image rows run downwards
+    rim = _smooth(0.83, 0.86, r)
+    if tone == "black":
+        alb = 0.075 + (0.42 - 0.075) * rim
+        alb = alb + (1.05 - alb) * soft
+    elif tone == "neutral":
+        alb = 0.26 + (0.46 - 0.26) * rim
+        alb = alb + (1.0 - alb) * soft
+    else:
+        alb = 0.92 + 0.0 * r
+        alb = alb + (0.10 - alb) * soft
+        alb = alb * (1 - 0.35 * (wide - soft).clip(0, 1))   # cavity shading
+    return (gu.astype(np.float32), gv.astype(np.float32),
+            alb.astype(np.float32), soft.astype(np.float32))
+
+
+def _rot(angle):
+    """Plain Python 3x3 products: `@` would wake BLAS threads in every worker."""
+    cx, sx = math.cos(angle), math.sin(angle)
+    cy, sy = math.cos(TILT_Y), math.sin(TILT_Y)
+    cl, sl = math.cos(LEAN_X), math.sin(LEAN_X)
+    Rx = ((1, 0, 0), (0, cx, -sx), (0, sx, cx))
+    Ry = ((cy, 0, sy), (0, 1, 0), (-sy, 0, cy))
+    Rl = ((1, 0, 0), (0, cl, -sl), (0, sl, cl))
+    mul = lambda A, B: [[sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return np.array(mul(mul(Rl, Ry), Rx), dtype=np.float32)
+
+
+def _env(rx, ry, rz, L):
+    """Studio lighting as a reflection environment: what makes it read as metal."""
+    d = np.maximum(rx * L[0] + ry * L[1] + rz * L[2], 0)
+    d2 = d * d; d4 = d2 * d2; d8 = d4 * d4; d16 = d8 * d8
+    e = 0.10 + 0.16 * (ry * 0.5 + 0.5)
+    e = e + 0.55 * d4 + 0.95 * d16 + 2.2 * d16 * d16 * d16
+    e = e + 0.55 * np.exp(-((ry - 0.18 + 0.25 * rx) / 0.07) ** 2)    # strip light
+    e = e + 0.28 * np.exp(-((rx + 0.62) / 0.05) ** 2)                # edge kicker
+    return e
+
+
+def _shade(angle, S, D, tex, ss=2, side_alb=0.9, strip=24):
+    """Linear-light coin at `angle`: float32 S×S, coin diameter D px.
+
+    Rendered in strips of image rows that fit the CPU cache. Whole-frame numpy
+    arrays made parallel workers fight over memory bandwidth (8 workers ran 14x
+    slower per core); strips scale properly and need far less memory."""
+    N = S * ss
+    scale = 2.0 / (D * ss)
+    ax = (np.arange(N, dtype=np.float32) + 0.5 - N / 2) * scale
+    M = _rot(angle)
+    # only trace the silhouette's bounding box: an edge-on coin is nearly empty
+    th = np.linspace(0, 2 * np.pi, 48, endpoint=False, dtype=np.float32)
+    px_, py_ = np.cos(th), np.sin(th)
+    xs, ys = [], []
+    for zc in (THICK, -THICK):
+        wz = M[2, 0] * px_ + M[2, 1] * py_ + M[2, 2] * zc
+        k = CAM / (CAM - wz)
+        xs.append((M[0, 0] * px_ + M[0, 1] * py_ + M[0, 2] * zc) * k)
+        ys.append((M[1, 0] * px_ + M[1, 1] * py_ + M[1, 2] * zc) * k)
+    xs, ys = np.concatenate(xs), np.concatenate(ys)
+    pad = 3 * scale
+    x0 = max(0, int((xs.min() - pad - ax[0]) / scale))
+    x1 = min(N, int((xs.max() + pad - ax[0]) / scale) + 2)
+    y0 = max(0, int((-ys.max() - pad - ax[0]) / scale))
+    y1 = min(N, int((-ys.min() + pad - ax[0]) / scale) + 2)
+    out = np.zeros((N, N), dtype=np.float32)
+    for y in range(y0, y1, strip):
+        e = min(y + strip, y1)
+        out[y:e, x0:x1] = _shade_strip(ax[x0:x1], -ax[y:e], M, tex, side_alb)
+    if ss > 1:
+        out = out.reshape(S, ss, S, ss).mean(axis=(1, 3))
+    return out
+
+
+def _shade_strip(ax, ay, M, tex, side_alb):
+    wx, wy = np.meshgrid(ax, ay)
+    Mi = M.T
+    # rays through z=0 plane from a camera at (0,0,CAM); local frame
+    dx, dy, dz = wx, wy, np.full_like(wx, -CAM)
+    ln = np.sqrt(dx * dx + dy * dy + dz * dz)
+    dx, dy, dz = dx / ln, dy / ln, dz / ln
+    ldx = Mi[0, 0] * dx + Mi[0, 1] * dy + Mi[0, 2] * dz
+    ldy = Mi[1, 0] * dx + Mi[1, 1] * dy + Mi[1, 2] * dz
+    ldz = Mi[2, 0] * dx + Mi[2, 1] * dy + Mi[2, 2] * dz
+    ox, oy, oz = Mi[0, 2] * CAM, Mi[1, 2] * CAM, Mi[2, 2] * CAM
+    INF = 1e9
+    t_cap = np.full_like(wx, INF)
+    side = np.zeros_like(wx, dtype=bool)
+    face = np.zeros_like(wx, dtype=np.int8)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for zc, f in ((THICK, 0), (-THICK, 1)):
+            t = (zc - oz) / ldz
+            x = ox + t * ldx
+            y = oy + t * ldy
+            hit = (t > 0) & (x * x + y * y <= 1.0) & (t < t_cap)
+            t_cap = np.where(hit, t, t_cap)
+            face = np.where(hit, f, face)
+        a = ldx * ldx + ldy * ldy
+        b = 2 * (ox * ldx + oy * ldy)
+        c = ox * ox + oy * oy - 1.0
+        disc = b * b - 4 * a * c
+        ok = (disc >= 0) & (a > 1e-7)
+        ts = np.where(ok, (-b - np.sqrt(np.where(ok, disc, 0))) / (2 * np.where(ok, a, 1)), INF)
+        zs = oz + ts * ldz
+        side = ok & (ts > 0) & (np.abs(zs) <= THICK) & (ts < t_cap)
+    t_hit = np.where(side, ts, t_cap)
+    hitmask = t_hit < INF / 2
+    out = np.zeros(wx.shape, dtype=np.float32)
+    if hitmask.any():
+        idx = np.nonzero(hitmask)
+        t = t_hit[idx]
+        lx = ox + t * ldx[idx]
+        ly = oy + t * ldy[idx]
+        sd = side[idx]
+        fc = face[idx]
+        nx = np.zeros_like(lx); ny = np.zeros_like(lx); nz = np.zeros_like(lx)
+        alb = np.zeros_like(lx); fres_k = np.zeros_like(lx)
+        T = tex[0][0].shape[0]
+        SLOPE = 2.6                                # relief exaggeration
+        for f in (0, 1):
+            sel = (~sd) & (fc == f)
+            if not sel.any():
+                continue
+            gu, gv, ab, _ = tex[f]
+            # back face: u = x, v = -y, so the letter is upright at angle π
+            uu = lx[sel]
+            vv = ly[sel] if f == 0 else -ly[sel]
+            iu = np.clip(((uu + 1) * 0.5 * T).astype(np.int32), 0, T - 1)
+            iv = np.clip(((1 - vv) * 0.5 * T).astype(np.int32), 0, T - 1)
+            nu = -gu[iv, iu] * SLOPE
+            nv = -gv[iv, iu] * SLOPE
+            nx[sel] = nu
+            ny[sel] = nv if f == 0 else -nv
+            nz[sel] = 1.0 if f == 0 else -1.0
+            alb[sel] = ab[iv, iu]
+            fres_k[sel] = 0.45 if f == 1 else 0.15
+        if sd.any():
+            th = np.arctan2(ly[sd], lx[sd])
+            ph = th + 0.05 * np.sin(th * 96)        # reeded edge
+            nx[sd] = np.cos(ph); ny[sd] = np.sin(ph); nz[sd] = 0.0
+            alb[sd] = side_alb * (0.62 + 0.38 * np.abs(np.cos(th * 48)))
+        ln = np.sqrt(nx * nx + ny * ny + nz * nz)
+        nx, ny, nz = nx / ln, ny / ln, nz / ln
+        wnx = M[0, 0] * nx + M[0, 1] * ny + M[0, 2] * nz
+        wny = M[1, 0] * nx + M[1, 1] * ny + M[1, 2] * nz
+        wnz = M[2, 0] * nx + M[2, 1] * ny + M[2, 2] * nz
+        vx, vy, vz = -dx[idx], -dy[idx], -dz[idx]
+        nv = np.clip(wnx * vx + wny * vy + wnz * vz, 0, 1)
+        rx = 2 * nv * wnx - vx
+        ry = 2 * nv * wny - vy
+        rz = 2 * nv * wnz - vz
+        lv = np.array(LIGHT, dtype=np.float32)
+        lv = lv / np.linalg.norm(lv)
+        e = _env(rx, ry, rz, lv)
+        fres = (1 - nv) ** 4 * fres_k
+        out[idx] = alb * (0.16 + e) + fres
+    return out
+
+
+# ─── the frame cache and compositor ────────────────────────────────────────
+_S2L = None
+_L2S = None
+
+
+def _luts():
+    global _S2L, _L2S
+    if _L2S is None:
+        # 16-bit linear to 8-bit sRGB-ish grey
+        x = np.arange(65536, dtype=np.float32) / 65535.0
+        y = np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
+        _L2S = np.clip(y * 255 + 0.5, 0, 255).astype(np.uint8)
+    return _L2S
+
+
+_SPIN_LUT = None
+
+
+def _spin_tone(linear, s):
+    """Pull the silver face down and the black face up while the coin spins. Their
+    gap, with the coin going thin edge-on, is what the eye reads as flicker. Empty
+    pixels stay empty; a letter keeps its contrast because the curve only narrows
+    the range. The coin at rest and the reveal never go through this."""
+    global _SPIN_LUT
+    if _SPIN_LUT is None:
+        x = np.arange(65536, dtype=np.float32) / 65535.0
+        y = SPIN_FLOOR + (SPIN_CEIL - SPIN_FLOOR) * np.power(x, SPIN_GAMMA)
+        y[0] = 0.0
+        _SPIN_LUT = (np.clip(y, 0, 1) * 65535).astype(np.uint16)
+    t = _SPIN_LUT[linear]
+    if s >= 1.0:
+        return t
+    w = int(s * 256)
+    return ((t.astype(np.uint32) * w + linear.astype(np.uint32) * (256 - w)) >> 8).astype(np.uint16)
+
+
+class Frame:
+    """Palette image: idx (H,W,uint8) and palette (N,3,uint8)."""
+    __slots__ = ("idx", "palette")
+
+    def __init__(self, idx, palette):
+        self.idx, self.palette = idx, palette
+
+
+# cache slots: true spin, letter masks, blank neutral half-spin, engraved at rest
+_N_NEUTRAL = N_ANGLES // 2
+_SLOT_MASK = N_ANGLES
+_SLOT_NEUTRAL = N_ANGLES + 2
+_SLOT_ENGRAVED = _SLOT_NEUTRAL + _N_NEUTRAL
+_N_SLOTS = _SLOT_ENGRAVED + 2
+
+
+class Coin:
+    """Renders coin frames from a cache pre-rendered in parallel.
+
+    px: coin diameter in pixels; the canvas is larger, see .width/.height.
+    emblems: (char_face0, char_face1). Nothing here knows who wins.
+
+    Sealed pixels come only from the neutral slots. Those hold a blank coin and
+    are indexed by the angle folded by pi, so angle a and a+pi read the same cached
+    pixels. That makes sealed frames byte-identical for either winner by
+    construction, and they can't depend on the emblems either.
+    """
+
+    def __init__(self, px, emblems, workers=None, ss=2):
+        self.D = int(px)
+        self.emblems = emblems
+        self.S = int(px * 1.26) & ~1
+        self.toss_px = int(px * 0.5 * 0.66)
+        self.floor_h = max(8, int(px * 0.13))
+        self.width = int(self.S * HEADROOM) & ~1
+        h = int((self.S + self.toss_px + self.floor_h) * 1.06)
+        self.height = (h + 5) // 6 * 6
+        self.sprite_y = (self.height - self.S - self.toss_px - self.floor_h) // 2 + self.toss_px
+        T = self.D * 2
+        self.tex = (_face_tex(emblems[0], T, "silver"), _face_tex(emblems[1], T, "black"))
+        blank = _face_tex(None, T, "neutral")
+        self.blank = (blank, blank)
+        self._L2S = _luts()
+        self.cache = mmap.mmap(-1, _N_SLOTS * self.S * self.S * 2)
+        self.frames = np.frombuffer(self.cache, dtype=np.uint16).reshape(_N_SLOTS, self.S, self.S)
+        self._done_map = mmap.mmap(-1, _N_SLOTS)
+        self.done = np.frombuffer(self._done_map, dtype=np.uint8)
+        self._prerender(workers or min(os.cpu_count() or 4, 12), ss)
+        lm = self.frames[_SLOT_MASK:_SLOT_MASK + 2]
+        self.letters = [lm[0] > 32767, lm[1] > 32767]
+        self._grey_lut = ((np.arange(256) * (NGREY - 1) + 127) // 255).astype(np.uint8)
+        self._grey_pal = np.repeat(((np.arange(NGREY) * 255 + (NGREY - 1) // 2) // (NGREY - 1))[:, None], 3, axis=1).astype(np.uint8)
+        # linear light to register. Register 0 is exclusive to empty background
+        # (left unpainted, a translucent terminal keeps showing through); any
+        # coin pixel, however dark, gets at least register 1
+        self._L2I = self._grey_lut[self._L2S]
+        self._L2I[1:] = np.maximum(self._L2I[1:], 1)
+        self._seal_span = None
+        self._zoom_maps = {}
+
+    def _prerender(self, workers, ss):
+        """The true spin's pass (no supersampling) is waited for. Two background
+        processes then make the neutral frames and antialias both rest poses while
+        the show is already running; frame() renders any slot still missing."""
+        ctx = multiprocessing.get_context("fork")  # no pickling of a script module
+        first = list(range(N_ANGLES + 2))
+        jobs = [ctx.Process(target=self._work, args=(first[w::workers], 1), daemon=True)
+                for w in range(workers)]
+        for p in jobs:
+            p.start()
+        for p in jobs:
+            p.join()
+        if any(p.exitcode for p in jobs):
+            raise RuntimeError("coin pre-render failed")
+        # Only what is seen still gets antialiased: blur and blending already soften
+        # the spin, and a full pass cost the visible frames 3x (measured in foot:
+        # memory bandwidth, not cores, is the limit here)
+        n = 2
+        later = list(range(_SLOT_NEUTRAL, _N_SLOTS)) + ([0, N_ANGLES // 2] if ss > 1 else [])
+        self.upgraders = [ctx.Process(target=self._work, args=(later[w::n], ss), daemon=True)
+                          for w in range(n)]
+        for p in self.upgraders:
+            p.start()
+
+    def wait_upgrade(self):
+        for p in self.upgraders:
+            p.join()
+
+    def upgrading(self):
+        return any(p.is_alive() for p in self.upgraders)
+
+    def _work(self, slots, ss):
+        _worker_signals()
+        try:
+            os.nice(15 if ss > 1 else 0)         # the visible frames come first
+        except OSError:
+            pass
+        for i in slots:
+            self._render_slot(i, ss)
+
+    def _render_slot(self, i, ss):
+        if i < N_ANGLES:
+            g = _shade(i * 2 * math.pi / N_ANGLES, self.S, self.D, self.tex, ss)
+        elif i < _SLOT_NEUTRAL:
+            self.frames[i] = self._letter_mask(i - _SLOT_MASK)
+            self.done[i] = 1
+            return
+        elif i < _SLOT_ENGRAVED:
+            g = _shade((i - _SLOT_NEUTRAL) * math.pi / _N_NEUTRAL, self.S, self.D, self.blank, ss)
+        else:
+            # shaded at angle 0 whichever face it is: the geometry and lighting
+            # match the blank coin exactly, so the cover's edge shows no seam
+            t = _face_tex(self.emblems[i - _SLOT_ENGRAVED], self.D * 2, "neutral")
+            g = _shade(0.0, self.S, self.D, (t, t), ss)
+        self.frames[i] = np.clip(g, 0, 1) * 65535
+        self.done[i] = 1
+
+    def _letter_mask(self, f):
+        """Letter pixels at rest, by re-rendering at rest with the letter 0/1."""
+        a = 0.0 if f == 0 else math.pi
+        gu, gv, ab, soft = self.tex[f]
+        z = np.zeros_like(soft)
+        tex = list(self.tex)
+        tex[f] = (z, z, (soft > 0.5).astype(np.float32) * 100, soft)
+        tex[1 - f] = (z, z, z, z)
+        g = _shade(a, self.S, self.D, tex, 1, side_alb=0.0)
+        return (g > 1.0).astype(np.uint16) * 65535
+
+    def _blurred(self, a0, a1, neutral):
+        """Linear-light sprite over angles a0..a1, blending neighbouring cached
+        angles. Neutral frames repeat every pi; angles are quantised first so
+        floating-point noise can't tell a from a+pi."""
+        base, count, period = ((_SLOT_NEUTRAL, _N_NEUTRAL, math.pi) if neutral
+                               else (0, N_ANGLES, 2 * math.pi))
+        Q = 1 << 20
+        span = abs(a1 - a0)
+        n = max(1, min(16, int(math.ceil(round(span, 6) / math.radians(MAX_SUB_DEG)))))
+        w = {}
+        for k in range(n):
+            a = a0 + (a1 - a0) * ((k + 0.5) / n)
+            g = (round(a / period * Q) % Q) * count / Q
+            i = int(g)
+            fr = g - i
+            w[i % count] = w.get(i % count, 0.0) + (1 - fr)
+            w[(i + 1) % count] = w.get((i + 1) % count, 0.0) + fr
+        s = sum(w.values())
+        acc, tot = None, 0
+        for i in sorted(w):
+            wi = int(w[i] / s * 256 + 0.5)
+            if wi == 0:
+                continue
+            f = self._slot(base + i).astype(np.uint32) * wi
+            acc = f if acc is None else acc + f
+            tot += wi
+        return (acc // tot).astype(np.uint16)
+
+    def _slot(self, i):
+        if not self.done[i]:                     # background not there yet
+            self._render_slot(i, 1)
+        return self.frames[i]
+
+    def _seal_rows(self, seal):
+        """Per-row weights: open (0..256 of the uncovered layer) and shade (the
+        cover's soft shadow, 256 = none). Rows at 0 open are pure neutral pixels."""
+        if self._seal_span is None:
+            rows = np.flatnonzero(self._slot(_SLOT_NEUTRAL).any(axis=1))
+            self._seal_span = int(rows[0]), int(rows[-1]) + 1
+        top, bot = self._seal_span
+        band = max(4, self.D // 14)
+        edge = top + (1.0 - seal) * (bot - top + band)   # rows above the edge are open
+        y = np.arange(self.S, dtype=np.float32)
+        t = np.clip((edge - y) / band, 0, 1)
+        opened = (t * t * (3 - 2 * t) * 256).astype(np.uint32)
+        lift = min(1.0, (1.0 - seal) * 8)                # no shadow while fully sealed
+        below = np.clip((y - edge) / (band * 2), 0, 1)
+        shade = ((1 - 0.45 * lift * (1 - below)) * 256).astype(np.uint32)
+        return opened[:, None], shade[:, None]
+
+    def _zoomed(self, sprite, zoom):
+        """Bilinear rescale of a linear sprite, plus the nearest map for masks.
+        Maps are cached per quantised zoom."""
+        key = round(zoom * 256)
+        m = self._zoom_maps.get(key)
+        if m is None:
+            if len(self._zoom_maps) > 64:
+                self._zoom_maps.clear()
+            S = self.S
+            size = int(round(S * key / 256)) & ~1
+            p = np.clip((np.arange(size) + 0.5) * S / size - 0.5, 0, S - 1.001)
+            i0 = p.astype(np.int32)
+            fw = ((p - i0) * 256).astype(np.uint32)
+            nearest = np.clip((p + 0.5).astype(np.int32), 0, S - 1)
+            m = self._zoom_maps[key] = (i0, fw[:, None], fw[None, :], nearest)
+        i0, wy, wx, nearest = m
+        a = sprite.astype(np.uint32)
+        rows = (a[i0] * (256 - wy) + a[i0 + 1] * wy) >> 8
+        out = (rows[:, i0] * (256 - wx) + rows[:, i0 + 1] * wx) >> 8
+        return out.astype(np.uint16), nearest
+
+    def frame(self, angle, toss_y, reveal_face=-1, fade=0.0, blur_from=None, **fx):
+        """Composite a Frame. blur_from: the coin angle one frame interval ago.
+        Other inputs: see FX. Unknown keywords raise, so typos can't pass silently."""
+        bad = set(fx) - set(FX)
+        if bad:
+            raise TypeError("unknown coin effect: " + ", ".join(sorted(bad)))
+        o = {**FX, **fx}
+        zoom, seal, tone = o["zoom"], min(1.0, max(0.0, o["seal"])), o["tone"]
+        light, impact = o["light"], o["impact_y"]
+        shadow_h = toss_y if o["shadow_h"] is None else o["shadow_h"]
+        a0 = angle
+        if blur_from is not None and o["shutter"] > 0:
+            # shortest way round: pose() can drop whole turns when the coin lands
+            d = (blur_from - angle + math.pi) % (2 * math.pi) - math.pi
+            a0 = angle + round(d, 6) * o["shutter"]
+
+        mask = None
+        if seal >= 1.0:
+            linear = self._blurred(a0, angle, True)
+            reveal_face = -1                     # nothing about the result can show
+        else:
+            face = 0 if math.cos(angle) >= 0 else 1
+            linear = self._blurred(a0, angle, False)
+            if tone < 1.0:                       # squeeze: neutral engraving
+                w = int(max(0.0, tone) * 256)
+                eng = self._slot(_SLOT_ENGRAVED + face).astype(np.uint32)
+                linear = ((eng * (256 - w) + linear.astype(np.uint32) * w) >> 8).astype(np.uint16)
+            if reveal_face in (0, 1) and fade > 0:
+                mask = self.letters[reveal_face]
+            if seal > 0.0:
+                opened, shade = self._seal_rows(seal)
+                sealed = (self._blurred(a0, angle, True).astype(np.uint32) * shade) >> 8
+                linear = ((sealed * (256 - opened) + linear.astype(np.uint32) * opened) >> 8).astype(np.uint16)
+                if mask is not None:
+                    mask = mask & (opened >= 128)
+        if o["spin"] > 0.0:
+            linear = _spin_tone(linear, o["spin"])
+        if light != 1.0:
+            linear = np.minimum((linear.astype(np.uint32) * int(light * 256)) >> 8, 65535).astype(np.uint16)
+
+        size = self.S
+        if abs(zoom - 1.0) > 1 / 512:
+            linear, nearest = self._zoomed(linear, zoom)
+            size = linear.shape[0]
+            if mask is not None:
+                mask = mask[nearest][:, nearest]
+        else:
+            zoom = 1.0
+        idx = self._L2I[linear]
+
+        pal = self._grey_pal
+        if mask is not None:
+            pal = np.empty((NGREY + NROSE, 3), dtype=np.uint8)
+            pal[:NGREY] = (self._grey_pal * (1.0 - 0.45 * fade)).astype(np.uint8)
+            base = np.linspace(40, 255, NROSE)[:, None]
+            rose = np.array(ROSE, dtype=np.float32)[None, :] * np.linspace(0.94, 1.12, NROSE)[:, None]
+            pal[NGREY:] = np.clip(base + (rose - base) * fade, 0, 255).astype(np.uint8)
+            idx[mask] = NGREY + (idx[mask].astype(np.int32) * NROSE // NGREY).clip(0, NROSE - 1).astype(np.uint8)
+
+        # camera: zoom about the canvas centre, impact moves coin and floor together
+        W, H = self.width, self.height
+        cx, cy = W / 2, H / 2
+        jolt = impact * self.D * 0.5
+        coin_cy = self.sprite_y - toss_y * self.D * 0.5 + self.S / 2
+        top = int(round(cy + (coin_cy - cy) * zoom + jolt - size / 2))
+        left = int(round(cx - size / 2))
+        canvas = np.zeros((H, W), dtype=np.uint8)
+
+        # the floor: on true black a dark shadow can't show, so the coin sits over
+        # a pool of faint light that widens and fades as the coin climbs. It must not
+        # depend on the angle: a pool that breathes with each turn reads as flicker
+        lift = min(1.0, max(0.0, shadow_h / 0.66))
+        fcy = cy + (self.sprite_y + self.S + self.floor_h / 2 - cy) * zoom + jolt
+        rx = self.S * 0.48 * zoom * (1 + 0.25 * lift) * o["floor_r"]
+        ry = self.floor_h * 0.48 * zoom * 0.8
+        y0, y1 = max(0, int(fcy - ry) - 1), min(H, int(fcy + ry) + 2)
+        if y1 > y0:
+            xs = ((np.arange(W, dtype=np.float32) + 0.5 - cx) / rx) ** 2
+            ys = ((np.arange(y0, y1, dtype=np.float32) + 0.5 - fcy) / ry) ** 2
+            pool = np.clip(1 - xs[None, :] - ys[:, None], 0, 1) ** 2
+            level = 0.30 * (1 - 0.65 * lift) * light * o["floor"] * 255
+            canvas[y0:y1] = self._grey_lut[np.minimum(pool * level, 255).astype(np.uint8)]
+
+        # paste the coin over the floor, clipped to the canvas
+        sy0, sx0 = max(0, -top), max(0, -left)
+        dy0, dx0 = max(0, top), max(0, left)
+        h = min(size - sy0, H - dy0)
+        w = min(size - sx0, W - dx0)
+        if h > 0 and w > 0:
+            src = idx[sy0:sy0 + h, sx0:sx0 + w]
+            dst = canvas[dy0:dy0 + h, dx0:dx0 + w]
+            canvas[dy0:dy0 + h, dx0:dx0 + w] = np.where(src != 0, src, dst)
+        return Frame(canvas, pal)
+
+
+# ─── encoders ──────────────────────────────────────────────────────────────
+_ENC = {}
+
+
+def _tables(W):
+    t = _ENC.get(W)
+    if t:
+        return t
+    # fixed-width byte rows, zero bytes are dropped after assembly
+    gap = np.zeros((W + 2, 6), dtype=np.uint8)
+    rpt = np.zeros((W + 2, 6), dtype=np.uint8)
+    for n in range(1, W + 2):
+        g = b"?" * n if n <= 3 else b"!%d?" % n
+        r = b"" if n == 1 else b"!%d" % n
+        gap[n, :len(g)] = np.frombuffer(g, dtype=np.uint8)
+        rpt[n, :len(r)] = np.frombuffer(r, dtype=np.uint8)
+    col = np.zeros((256, 4), dtype=np.uint8)
+    for c in range(256):
+        b = b"#%d" % c
+        col[c, :len(b)] = np.frombuffer(b, dtype=np.uint8)
+    t = _ENC[W] = (gap, rpt, col)
+    return t
+
+
+def sixel_bytes(fr):
+    """Vectorised sixel encoder. Register 0 is left unpainted (P2=1), so a
+    translucent terminal background keeps showing round the coin."""
+    idx = fr.idx
+    H, W = idx.shape
+    if H % 6:
+        idx = np.pad(idx, ((0, 6 - H % 6), (0, 0)))
+    bands = idx.shape[0] // 6
+    used = np.flatnonzero(np.bincount(idx.ravel(), minlength=256))
+    used = used[used != 0]                  # register 0 stays unpainted
+    if used.size == 0:
+        return b'\033P0;1;0q"1;1;%d;%d\033\\' % (W, H)
+    remap = np.zeros(256, dtype=np.int32)
+    remap[used] = np.arange(used.size)
+    C = used.size
+    table = np.zeros((bands * C * W + 7) // 8 * 8, dtype=np.uint8)
+    xs = np.arange(W, dtype=np.int64)
+    base = (np.arange(bands, dtype=np.int64) * C * W)[:, None]
+    for r in range(6):
+        rows = idx[r::6]
+        key = base + remap[rows] * W + xs
+        on = rows != 0
+        table[key[on]] |= (1 << r)
+    # the table is mostly empty: scan 8 bytes at a time, then within the hits
+    words = np.flatnonzero(table.view(np.uint64))
+    sub = np.nonzero(table.reshape(-1, 8)[words])
+    sp = words[sub[0]] * 8 + sub[1]
+    val = table[sp]
+    row = sp // W                      # band*C + colour position
+    x = sp - row * W
+    new_row = np.empty(sp.size, dtype=bool)
+    new_row[0] = True
+    new_row[1:] = row[1:] != row[:-1]
+    new_run = new_row.copy()
+    new_run[1:] |= (x[1:] != x[:-1] + 1) | (val[1:] != val[:-1])
+    starts = np.flatnonzero(new_run)
+    lens = np.diff(np.append(starts, sp.size))
+    rs, xss, vs, nr = row[starts], x[starts], val[starts], new_row[starts]
+    prev_end = np.empty(starts.size, dtype=np.int64)
+    prev_end[1:] = xss[:-1] + lens[:-1]
+    prev_end[0] = 0
+    gaps = np.where(nr, xss, xss - prev_end)
+    band = rs // C
+    pos = rs % C
+    gap_t, rpt_t, col_t = _tables(W)
+    m = np.zeros((starts.size, 1 + 4 + 6 + 6 + 1), dtype=np.uint8)
+    # row separator: '-' for a new band, '$' for the next colour in a band
+    sep = np.zeros(starts.size, dtype=np.uint8)
+    newb = nr.copy()
+    newb[1:] &= band[1:] != band[:-1]
+    newb[0] = False
+    sep[nr] = ord("$")
+    sep[newb] = ord("-")
+    sep[0] = 0
+    m[:, 0] = sep
+    # empty bands (nothing but background) still need their '-' to advance
+    skip = np.zeros(starts.size, dtype=np.int64)
+    skip[0] = band[0]
+    skip[1:] = np.where(newb[1:], band[1:] - band[:-1] - 1, 0)
+    colbytes = col_t[used[pos]]
+    m[:, 1:5] = colbytes * nr[:, None]
+    m[:, 5:11] = gap_t[gaps] * (gaps > 0)[:, None]
+    m[:, 11:17] = rpt_t[lens]
+    m[:, 17] = vs + 63
+    body = m[m != 0]
+    if skip.any():                          # rare: insert the extra '-' bytes
+        lens_b = (m != 0).sum(axis=1)
+        at = np.cumsum(lens_b) - lens_b
+        hits = np.flatnonzero(skip)
+        body = np.insert(body, np.repeat(at[hits], skip[hits]), ord("-"))
+    body = body.tobytes()
+    pal = np.round(fr.palette[used].astype(np.float32) * 100 / 255).astype(int)
+    head = "".join("#%d;2;%d;%d;%d" % (c, p[0], p[1], p[2]) for c, p in zip(used.tolist(), pal.tolist()))
+    return (b'\033P0;1;0q"1;1;%d;%d' % (W, H)) + head.encode() + body + b"\033\\"
+
+
+def rgb_of(fr):
+    return fr.palette[fr.idx]
+
+
+def kitty_bytes(fr, image_id=7):
+    """Kitty graphics protocol, raw RGB, zlib, replacing the same image id."""
+    H, W = fr.idx.shape
+    rgba = np.dstack((rgb_of(fr), (fr.idx != 0) * np.uint8(255)))
+    data = base64.standard_b64encode(zlib.compress(rgba.tobytes(), 1))
+    out = []
+    first = True
+    for i in range(0, len(data), 4096):
+        chunk = data[i:i + 4096]
+        more = 1 if i + 4096 < len(data) else 0
+        if first:
+            ctrl = b"a=T,f=32,o=z,s=%d,v=%d,i=%d,p=1,q=2,C=1,m=%d" % (W, H, image_id, more)
+            first = False
+        else:
+            ctrl = b"m=%d" % more
+        out.append(b"\033_G" + ctrl + b";" + chunk + b"\033\\")
+    return b"".join(out)
+
+
+def halfblock_bytes(fr, left=0):
+    """Truecolor half-blocks: 2 image rows per text row, never an ASCII ramp."""
+    idx = fr.idx
+    H, W = idx.shape
+    pal = fr.palette.tolist()
+    fgc = ["38;2;%d;%d;%d" % tuple(p) for p in pal]
+    bgc = ["48;2;%d;%d;%d" % tuple(p) for p in pal]
+    pad = b"\033[%dC" % left if left else b""
+    lines = []
+    for y in range(0, H - 1, 2):
+        top, bot = idx[y].tolist(), idx[y + 1].tolist()
+        parts, last = [], None
+        for t, b in zip(top, bot):
+            key = (t, b)
+            if key != last:
+                if t == 0 and b == 0:
+                    parts.append("\033[0m")
+                elif t == 0:
+                    parts.append("\033[0;%sm" % fgc[b])
+                elif b == 0:
+                    parts.append("\033[0;%sm" % fgc[t])
+                else:
+                    parts.append("\033[%s;%sm" % (fgc[t], bgc[b]))
+                last = key
+            parts.append(" " if t == 0 and b == 0 else "▄" if t == 0 else "▀")
+        parts.append("\033[0m")
+        lines.append(pad + "".join(parts).encode())
+    return b"\r\n".join(lines)
+
+
+# ─── pure Python fallback (no numpy): half-blocks, shaded per pixel ────────
+def shade_py(wc, hc, angle, toss_y, emblems, reveal_face=-1, fade=0.0, blur_from=None, **fx):
+    """Rows of (r,g,b) for half-block output, without numpy. Takes the same inputs
+    as Coin.frame(); blur_from and shutter have no effect at this resolution.
+    Sealed rows use only row/column geometry and |cos|, never the face."""
+    o = {**FX, **fx}
+    seal = min(1.0, max(0.0, o["seal"]))
+    tone, light, zoom = o["tone"], o["light"], o["zoom"]
+    c = math.cos(angle)
+    tc = math.cos(TILT_Y)
+    R = min(wc, hc) * 0.40 * zoom
+    jolt = o["impact_y"] * R
+    cx, cy = wc / 2, hc * 0.46 - toss_y * R + jolt
+    fc, fs = max(0.02, tc), max(0.06, abs(round(c, 9)))
+    face = 0 if c >= 0 else 1
+    gl = FONT.get(emblems[face])
+    top = cy - R * fs                          # top of the disc, for the cover's edge
+    edge = top + (1.0 - seal) * 2 * R * fs
+    rows = []
+    for y in range(hc):
+        Y = (cy - y - 0.5) / R
+        covered = seal >= 1.0 or (seal > 0.0 and y + 0.5 >= edge)
+        row = []
+        for x in range(wc):
+            X = (x + 0.5 - cx) / R
+            lx, ly = X / fc, Y / fs
+            d2 = lx * lx + ly * ly
+            if d2 > 1.0:
+                row.append((0, 0, 0))
+                continue
+            shine = 0.35 + 0.65 * max(0.0, -0.45 * X + 0.75 * Y + 0.5) ** 3
+            col = None
+            if covered or tone < 1.0:
+                g = 0.20 + 0.28 * shine
+            elif face == 0:
+                g = 0.45 + 0.55 * shine
+            else:
+                g = 0.06 + 0.30 * shine
+            if d2 > 0.8:
+                g = min(1.0, g * 1.25 + 0.15)
+            if gl and not covered:
+                gx = (lx + 0.5) * 5.0
+                gy = (0.7 - ly) / 1.4 * 7.0
+                if 0 <= gx < 5 and 0 <= gy < 7 and gl[int(gy)][int(gx)] == "#":
+                    g = 0.92 if tone < 1.0 or face == 1 else 0.14
+                    if reveal_face == face and fade > 0:
+                        tint = ROSE
+                        col = tuple(int(g * 255 + (r - g * 255) * fade) for r in tint)
+            v = max(1, int(min(1.0, g * light) * 255))
+            row.append(col or (v, v, v))
+        rows.append(row)
+    return rows
+
+
+def halfblock_py(rows, left=0):
+    pad = "\033[%dC" % left if left else ""
+    empty = (0, 0, 0)
+    out = []
+    for y in range(0, len(rows) - 1, 2):
+        parts, last = [], None
+        for t, b in zip(rows[y], rows[y + 1]):
+            if (t, b) != last:
+                if t == empty and b == empty:
+                    parts.append("\033[0m")
+                elif t == empty:
+                    parts.append("\033[0;38;2;%d;%d;%dm" % b)
+                elif b == empty:
+                    parts.append("\033[0;38;2;%d;%d;%dm" % t)
+                else:
+                    parts.append("\033[38;2;%d;%d;%d;48;2;%d;%d;%dm" % (*t, *b))
+                last = (t, b)
+            parts.append(" " if t == empty and b == empty else "▄" if t == empty else "▀")
+        parts.append("\033[0m")
+        out.append(pad + "".join(parts))
+    return "\r\n".join(out).encode()
+
+# ─── drawing target: backend, layout, encoding ─────────────────────────────
+SYNC_ON = b"\033[?2026h"
+SYNC_OFF = b"\033[?2026l"
+PX_CAP = 400                    # coin diameter; 480 px missed 30 fps on battery
+FRAME_BUDGET = 0.024            # seconds to composite and encode one live frame
+
+
+def canvas_ratio():
+    """Canvas (width, height) per pixel of coin diameter, as Coin lays it out."""
+    return 1.26 * HEADROOM, (1.26 + 0.33 + 0.13) * 1.06
+
+
+def benchmark_px(limit):
+    """Largest coin this machine can composite and encode in the budget, right
+    now. Sampled on a small blank coin and scaled by area: costs about 50 ms."""
+    D = 160
+    S = int(D * 1.26) & ~1
+    blank = _face_tex(None, D, "neutral")
+    lin = np.clip(_shade(0.7, S, D, (blank, blank), 1), 0, 1)
+    idx = ((lin ** 0.45) * (NGREY - 1)).astype(np.uint8)
+    idx[lin > 0] = np.maximum(idx[lin > 0], 1)
+    pal = np.repeat(((np.arange(NGREY) * 255) // (NGREY - 1))[:, None], 3, axis=1).astype(np.uint8)
+    best = 1e9
+    for _ in range(3):
+        t0 = time.perf_counter()
+        canvas = np.zeros((S + S // 2, S + S // 8), dtype=np.uint8)
+        canvas[:S, :S] = idx
+        sixel_bytes(Frame(canvas, pal))
+        best = min(best, time.perf_counter() - t0)
+    return int(min(limit, max(120, D * math.sqrt(FRAME_BUDGET / max(best, 1e-4)))))
+
+
+class Stage:
+    """One coin in one rectangle of the terminal. px is the coin's diameter."""
+
+    def __init__(self, emblems, caps, cols, rows_avail):
+        self.emblems = emblems
+        self.cw, self.ch = caps["cell"]
+        self.backend = caps["backend"]
+        self.coin = None
+        self.row = self.col = 1
+        rw, rh = canvas_ratio()
+        if np is None:
+            self.backend = "halfblock"
+        if self.backend in ("sixel", "kitty") and not (self.cw and self.ch):
+            self.backend = "halfblock"
+        if self.backend in ("sixel", "kitty"):
+            fit = min((cols - 2) * self.cw / rw, rows_avail * self.ch / rh)
+            self.coin = Coin(benchmark_px(min(PX_CAP, max(80, int(fit)))), emblems)
+            self.wc = math.ceil(self.coin.width / self.cw)
+            self.hc = math.ceil(self.coin.height / self.ch)
+        elif np is not None:
+            fit = min(cols / rw, rows_avail * 2 / rh)
+            self.coin = Coin(max(24, int(fit)), emblems, ss=1)
+            self.wc = self.coin.width
+            self.hc = self.coin.height // 2
+        else:
+            self.wc = min(cols - 2, 72)
+            self.hc = max(4, min(rows_avail, 24))
+        self.erase = b""
+
+    @property
+    def ready(self):
+        return self.coin is None or not self.coin.upgrading()
+
+    def place(self, row, col):
+        self.row, self.col = row, col
+        self.erase = b"".join(b"\033[%d;%dH\033[%dX" % (row + r, col, self.wc)
+                              for r in range(self.hc))
+
+    def payload(self, angle, toss_y, reveal_face=-1, fade=0.0, **fx):
+        """Encoded frame without the cursor move. Workers call this too."""
+        if self.coin is None:
+            rows = shade_py(self.wc, self.hc * 2, angle, toss_y, self.emblems,
+                            reveal_face, fade, None, **fx)
+            return halfblock_py(rows, self.col - 1)
+        fr = self.coin.frame(angle, toss_y, reveal_face, fade, None, **fx)
+        if self.backend == "sixel":
+            return sixel_bytes(fr)
+        if self.backend == "kitty":
+            return kitty_bytes(fr)
+        return halfblock_bytes(fr, self.col - 1)
+
+    def wrap(self, payload):
+        """Foot keeps old sixel pixels under transparent ones, so frames would stack
+        into a ghost trail. Erasing drops the old image; inside the synchronized
+        update it is never seen blank."""
+        pos = b"\033[%d;%dH" % (self.row, self.col)
+        return (self.erase if self.backend == "sixel" else b"") + pos + payload
+
+
+class FrameBank:
+    """The throw to the catch is the same film every round and takes no winner,
+    so it is encoded ahead, during the table, and only written during the show.
+    That holds the frame rate on a slow machine."""
+
+    def __init__(self, stage):
+        self.stage = stage
+        self.n = int((FLIGHT + CATCH) * FPS) + 2
+        self.cap = max(1 << 18, stage.coin.width * stage.coin.height // 2)
+        self.data = mmap.mmap(-1, self.n * self.cap)
+        self.lens_map = mmap.mmap(-1, self.n * 4)
+        self.lens = np.frombuffer(self.lens_map, dtype=np.uint32)
+        self.jobs = []
+        self.started = False
+
+    def start(self):
+        self.started = True
+        ctx = multiprocessing.get_context("fork")
+        workers = max(1, min((os.cpu_count() or 2) - 1, 8))
+        idx = list(range(self.n))
+        self.jobs = [ctx.Process(target=self._work, args=(idx[w::workers],), daemon=True)
+                     for w in range(workers)]
+        for p in self.jobs:
+            p.start()
+
+    def _work(self, slots):
+        _worker_signals()
+        try:
+            os.nice(5)
+        except OSError:
+            pass
+        for i in slots:
+            b = self.stage.payload(*film_pose(i / FPS))
+            if len(b) <= self.cap:
+                self.data[i * self.cap:i * self.cap + len(b)] = b
+                self.lens[i] = len(b)
+
+    def busy(self):
+        return (not self.started) or any(p.is_alive() for p in self.jobs)
+
+    def get(self, i):
+        n = int(self.lens[i]) if 0 <= i < self.n else 0
+        return self.data[i * self.cap:i * self.cap + n] if n else None
+
+
+# ─── the film: every pose before the cover lifts. No winner goes in here. ──
+FPS = 30
+SPIN_HI, SPIN_LO = 1.5, 0.5     # turns/s; 2.0 at the start measured 4 flashes/s
+FLIGHT = 5.0                    # throw to catch
+CHARGE = 1.6                    # the hold before the coin is ready to throw
+SNAP = 0.08                     # cock pose releases
+HITSTOP = 0.10                  # the catch freezes, thud
+FOLLOW = 0.50                   # ring and jolt die out under the cover
+CATCH = HITSTOP + FOLLOW
+HOLD = 1.2                      # stillness, then the squeeze
+LIFT_TIME = 2.5                 # a full lift under the thumb, or unattended
+ENTER_TIME = 1.0                # Enter turns the rest over (RTS 14E reveal-all)
+IDLE_LIFT = 3.0                 # nothing pressed for this long: it lifts itself
+REVEAL = 1.0
+RESULT_HOLD = 1.2
+TOSS = 0.65                     # height of the arc
+COCK_TILT = math.radians(18)
+COCK_SINK = 0.06
+
+
+def _ease_out(x):
+    return 1 - (1 - x) * (1 - x)
+
+
+def _ease_in(x):
+    return x * x
+
+
+def _smoothstep(s):
+    return s * s * (3.0 - 2.0 * s)
+
+
+def flight_pose(t):
+    """(angle, height, fx) during the toss, t in seconds from the release."""
+    p = min(1.0, max(0.0, t / FLIGHT))
+    angle = flight_angle(p, FLIGHT, SPIN_HI, SPIN_LO)
+    y = TOSS * 4 * p * (1 - p)                 # gravity, not a sine: fastest at the catch
+    if t < SNAP:                               # the cock pose lets go
+        k = 1 - t / SNAP
+        angle -= COCK_TILT * k
+        y -= COCK_SINK * k
+    if p < 0.5:
+        zoom = 1.0 - 0.06 * _ease_out(p / 0.5)
+        floor, floor_r = 1.0, 1.0
+    else:
+        q = (p - 0.5) / 0.5
+        zoom = 0.94 + 0.16 * _ease_in(q)
+        floor, floor_r = 1.0 - 0.3 * q, 1.0 - 0.2 * q
+    return angle, y, dict(zoom=zoom, floor=floor, floor_r=floor_r, shadow_h=max(y, 0.0),
+                         spin=min(1.0, t / 0.25))
+
+
+def catch_pose(t):
+    """(angle, height, fx) from the catch on, t in seconds from the catch. Fully
+    covered throughout: the neutral coin has no face, no letter, no winner."""
+    edge = edge_on_angle()
+    base = dict(seal=1.0, floor=0.4, floor_r=0.8, shadow_h=0.0)
+    if t < HITSTOP:
+        return edge, 0.0, dict(base, zoom=1.14)
+    t -= HITSTOP
+    if t < FOLLOW:
+        s = t / FOLLOW
+        k = 1 - (1 - s) ** 3
+        wob = 0.30 * (1 - s) ** 2 * math.sin(s * 15)
+        jolt = 0.03 * max(0.0, 1 - t / 0.18) ** 2
+        return edge * (1 - k) + wob, 0.0, dict(base, zoom=1.14 - 0.04 * _ease_out(s), impact_y=jolt)
+    return 0.0, 0.0, dict(base, zoom=1.10)
+
+
+def film_pose(t):
+    """Throw to catch and the sealed hold. Takes only the clock."""
+    return flight_pose(t) if t < FLIGHT else catch_pose(t - FLIGHT)
+
+
+def still_pose(t):
+    """Reduced motion: a still, covered coin with the same timing (2.3.3, 14E)."""
+    return 0.0, 0.0, dict(seal=1.0, floor=0.4 if t >= FLIGHT else 1.0)
+
+
+def squeeze_pose(rest, lift):
+    return rest, 0.0, dict(seal=1.0 - lift, tone=0.0, zoom=1.10,
+                           floor=0.4 + 0.3 * lift, floor_r=0.8, shadow_h=0.0)
+
+
+def reveal_pose(rest, k):
+    return rest, 0.0, dict(seal=0.0, tone=k, zoom=1.10 - 0.10 * k,
+                           floor=0.7 + 0.3 * k, floor_r=0.8 + 0.2 * k, shadow_h=0.0)
+
+
+def up_face(angle):
+    """Which face looks at the viewer, or -1 near edge-on."""
+    c = math.cos(angle - edge_on_angle() + math.pi / 2)
+    return 0 if c > 0.2 else 1 if c < -0.2 else -1
+
+
+# ─── text helpers ──────────────────────────────────────────────────────────
 ESC = "\033"
-HOME = f"{ESC}[H"
 HIDE = f"{ESC}[?25l"
 SHOW = f"{ESC}[?25h"
 ALT_ON = f"{ESC}[?1049h"
 ALT_OFF = f"{ESC}[?1049l"
 RESET = f"{ESC}[0m"
 BOLD = f"{ESC}[1m"
-
-__version__ = "1.3"
 _COLOR = True
+
+WHISPER = (84, 84, 84)
+LABEL = (130, 130, 130)
+SOFT = (190, 190, 190)
+TITLE = (248, 248, 248)
+GOLD = (246, 193, 119)
+LOVE = (235, 111, 146)
+SWATCH = (((228, 228, 228), "█"), ((82, 82, 82), "▒"))
 
 
 def set_color(on):
-    """Toggle colour output. Cursor/screen control codes stay; only the
-    24-bit SGR colour is dropped, so the ASCII shading still animates."""
     global _COLOR, RESET, BOLD
     _COLOR = on
     RESET = f"{ESC}[0m" if on else ""
@@ -51,9 +1210,11 @@ def set_color(on):
 
 
 def fg(rgb):
-    if not _COLOR:
-        return ""
-    return f"{ESC}[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m"
+    return f"{ESC}[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m" if _COLOR else ""
+
+
+def _blend(c1, c2, t):
+    return tuple(int(a + (b - a) * t) for a, b in zip(c1, c2))
 
 
 def out(s):
@@ -90,527 +1251,1150 @@ def clip(text, n):
     return "".join(kept) + "…"
 
 
-# ─── palette ────────────────────────────────────────────────────────────────
-WHISPER = (64, 64, 64)
-LABEL = (120, 120, 120)
-TITLE = (248, 248, 248)
-
-# The one colour: Rosé Pine Moon rose, only for the winner.
-ROSE = (234, 154, 151)
-
-# Swatches for the two coin faces in the legend (silver, blackened).
-SWATCH = (((228, 228, 228), "█"), ((82, 82, 82), "▒"))
-
-# Neutral grey metal from near-black to pure white. The shadow end stays
-# above #000 so the coin's dark side still stands out from the background.
-METAL = (
-    (0.00, (20, 20, 20)),
-    (0.30, (66, 66, 66)),
-    (0.55, (138, 138, 138)),
-    (0.80, (222, 222, 222)),
-    (1.00, (255, 255, 255)),
-)
-
-RAMP = " .:-=+*#%@"       # dark → bright luminance ramp
-
-
-def _scale(c, k):
-    return (min(255, max(0, int(c[0] * k))),
-            min(255, max(0, int(c[1] * k))),
-            min(255, max(0, int(c[2] * k))))
-
-
-def _blend(c1, c2, t):
-    return (int(c1[0] + (c2[0] - c1[0]) * t),
-            int(c1[1] + (c2[1] - c1[1]) * t),
-            int(c1[2] + (c2[2] - c1[2]) * t))
-
-
-def _ramp_color(t, stops):
-    if t <= stops[0][0]:
-        return stops[0][1]
-    for i in range(1, len(stops)):
-        p1, c1 = stops[i - 1]
-        p2, c2 = stops[i]
-        if t <= p2:
-            return _blend(c1, c2, (t - p1) / (p2 - p1))
-    return stops[-1][1]
-
-# ─── coin geometry & scene ──────────────────────────────────────────────────
-R = 1.0                   # coin radius
-H = 0.12                  # coin half-thickness
-R2 = R * R
-TILT_Y = 0.42             # constant lean so the disc reads as 3D
-TOSS = 0.65               # height of the toss arc
-LIGHT = (-0.2, 0.8, 0.55)
-VIEW = (0.0, 0.0, 1.0)
-AMBIENT = 0.04
-DOME = 0.45               # how far face normals lean out towards the rim
-GROOVE2 = 0.72 * R2       # r² where the groove inside the rim starts
-RIM2 = 0.82 * R2          # r² where the raised rim starts
-FACE_TONE = ((0.40, 1.00),   # face 0: silver, never darker than mid-grey
-             (0.03, 0.40))   # face 1: blackened, never brighter than it
-
-# ─── timeline (seconds) ─────────────────────────────────────────────────────
-# Paced along casino game-design rules: the result is drawn before the toss,
-# the toss runs well past the 2.5 s minimum game cycle (UKGC RTS 14), there
-# is no skip or turbo, the coin never fakes a near miss, and the reveal fades
-# in instead of strobing (WCAG 2.3.1: at most 3 flashes a second).
-INTRO = 1.6               # coin turns once slowly: learn which face is which
-FLIGHT = 5.0              # toss: fast spin that slows to readable flips
-SETTLE = 1.5              # lands and wobbles out, winner face already up
-PAUSE = 0.4               # stillness before the result
-REVEAL = 1.0              # winner letter fades to rose
-HOLD = 1.4                # result stays on screen before the summary box
-FPS = 30
-FLIGHT_TURNS = 6          # full turns during the toss
-WOBBLE = 1.0              # rad; < π/2, so the losing face never shows again
-
-# ─── 5x7 engraving font (A–Z, 0–9) ──────────────────────────────────────────
-_FONT_SRC = {
-    "A": ".###.|#...#|#...#|#####|#...#|#...#|#...#",
-    "B": "####.|#...#|#...#|####.|#...#|#...#|####.",
-    "C": ".####|#....|#....|#....|#....|#....|.####",
-    "D": "####.|#...#|#...#|#...#|#...#|#...#|####.",
-    "E": "#####|#....|#....|####.|#....|#....|#####",
-    "F": "#####|#....|#....|####.|#....|#....|#....",
-    "G": ".####|#....|#....|#.###|#...#|#...#|.####",
-    "H": "#...#|#...#|#...#|#####|#...#|#...#|#...#",
-    "I": ".###.|..#..|..#..|..#..|..#..|..#..|.###.",
-    "J": "..###|...#.|...#.|...#.|#..#.|#..#.|.##..",
-    "K": "#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#",
-    "L": "#....|#....|#....|#....|#....|#....|#####",
-    "M": "#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#",
-    "N": "#...#|##..#|#.#.#|#.#.#|#..##|#...#|#...#",
-    "O": ".###.|#...#|#...#|#...#|#...#|#...#|.###.",
-    "P": "####.|#...#|#...#|####.|#....|#....|#....",
-    "Q": ".###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#",
-    "R": "####.|#...#|#...#|####.|#.#..|#..#.|#...#",
-    "S": ".####|#....|#....|.###.|....#|....#|####.",
-    "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..",
-    "U": "#...#|#...#|#...#|#...#|#...#|#...#|.###.",
-    "V": "#...#|#...#|#...#|#...#|.#.#.|.#.#.|..#..",
-    "W": "#...#|#...#|#...#|#.#.#|#.#.#|##.##|#...#",
-    "X": "#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#",
-    "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..",
-    "Z": "#####|....#|...#.|..#..|.#...|#....|#####",
-    "0": ".###.|#...#|#..##|#.#.#|##..#|#...#|.###.",
-    "1": "..#..|.##..|..#..|..#..|..#..|..#..|.###.",
-    "2": ".###.|#...#|....#|..##.|.#...|#....|#####",
-    "3": "####.|....#|....#|.###.|....#|....#|####.",
-    "4": "#..#.|#..#.|#..#.|#####|...#.|...#.|...#.",
-    "5": "#####|#....|#....|####.|....#|....#|####.",
-    "6": ".###.|#....|#....|####.|#...#|#...#|.###.",
-    "7": "#####|....#|...#.|..#..|.#...|.#...|.#...",
-    "8": ".###.|#...#|#...#|.###.|#...#|#...#|.###.",
-    "9": ".###.|#...#|#...#|.####|....#|....#|.###.",
-}
-FONT = {c: s.split("|") for c, s in _FONT_SRC.items()}
-
-
-def glyph_hit(u, v, ch):
-    """True if local face coord (u,v in unit disc) lands on an engraved pixel."""
-    rows = FONT.get(ch)
-    if rows is None:
-        return False
-    gx = (u + 0.52) / 1.04 * 5.0      # 5 columns across |u|<=0.52
-    gy = (0.72 - v) / 1.44 * 7.0      # 7 rows across |v|<=0.72
-    if 0.0 <= gx < 5.0 and 0.0 <= gy < 7.0:
-        return rows[int(gy)][int(gx)] == "#"
-    return False
-
-
-# ─── tiny 3D math (3x3 row-major tuples) ─────────────────────────────────────
-def rot_x(a):
-    c, s = math.cos(a), math.sin(a)
-    return ((1.0, 0.0, 0.0), (0.0, c, -s), (0.0, s, c))
-
-
-def rot_y(b):
-    c, s = math.cos(b), math.sin(b)
-    return ((c, 0.0, s), (0.0, 1.0, 0.0), (-s, 0.0, c))
-
-
-def mat_mul(A, B):
-    return tuple(
-        tuple(sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3))
-        for i in range(3)
-    )
-
-
-def mat_vec(M, v):
-    return (
-        M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2],
-        M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2],
-        M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2],
-    )
-
-
-def transpose(M):
-    return ((M[0][0], M[1][0], M[2][0]),
-            (M[0][1], M[1][1], M[2][1]),
-            (M[0][2], M[1][2], M[2][2]))
-
-
-def normalize(v):
-    m = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) or 1.0
-    return (v[0] / m, v[1] / m, v[2] / m)
-
-
-# ─── the renderer ─────────────────────────────────────────────────────────────
-def render_grid(wc, hc, angle, toss_y, emblems, reveal_face, rose_scale):
-    """Return a wc×hc grid of (char, rgb_or_None) for one frame."""
-    M = mat_mul(rot_y(TILT_Y), rot_x(angle))
-    Mi = transpose(M)
-    Ll = normalize(mat_vec(Mi, normalize(LIGHT)))
-    Vl = mat_vec(Mi, VIEW)
-    dlx, dly, dlz = mat_vec(Mi, (0.0, 0.0, -1.0))   # ray direction (local)
-
-    halfh = 1.95
-    halfw = halfh * (wc / hc) * 0.5                  # correct for 2:1 cells
-    m1, m2 = emblems
-
-    grid = []
-    for sy in range(hc):
-        wy = (1.0 - 2.0 * (sy + 0.5) / hc) * halfh - toss_y
-        row = []
-        for sx in range(wc):
-            wx = (2.0 * (sx + 0.5) / wc - 1.0) * halfw
-            # ray origin (local), camera far along +z looking down -z
-            ox = Mi[0][0] * wx + Mi[0][1] * wy + Mi[0][2] * 20.0
-            oy = Mi[1][0] * wx + Mi[1][1] * wy + Mi[1][2] * 20.0
-            oz = Mi[2][0] * wx + Mi[2][1] * wy + Mi[2][2] * 20.0
-
-            # nearest intersection with the finite cylinder (the coin)
-            best_t = 1e18
-            kind = None
-            cap_sign = 0.0
-            a = dlx * dlx + dly * dly
-            if a > 1e-9:
-                b = 2.0 * (ox * dlx + oy * dly)
-                c = ox * ox + oy * oy - R2
-                disc = b * b - 4.0 * a * c
-                if disc >= 0.0:
-                    s = math.sqrt(disc)
-                    inv = 0.5 / a
-                    for t in ((-b - s) * inv, (-b + s) * inv):
-                        if 1e-4 < t < best_t:
-                            z = oz + t * dlz
-                            if -H <= z <= H:
-                                best_t = t
-                                kind = "side"
-            if abs(dlz) > 1e-9:
-                for zc in (H, -H):
-                    t = (zc - oz) / dlz
-                    if 1e-4 < t < best_t:
-                        x = ox + t * dlx
-                        y = oy + t * dly
-                        if x * x + y * y <= R2:
-                            best_t = t
-                            kind = "cap"
-                            cap_sign = zc
-
-            if kind is None:
-                row.append((" ", None))
-                continue
-
-            px = ox + best_t * dlx
-            py = oy + best_t * dly
-            is_text = False
-            face = -1
-            if kind == "side":
-                nx, ny, nz = px / R, py / R, 0.0
-            else:
-                sign = 1.0 if cap_sign > 0 else -1.0
-                # slightly domed faces: the highlight sweeps across them as
-                # the coin turns, instead of the whole face flashing at once
-                nx, ny, nz = normalize((DOME * px, DOME * py, sign))
-                face = 0 if sign > 0 else 1
-                u = px / R if face == 0 else -px / R   # back face reads mirrored
-                v = py / R
-                is_text = glyph_hit(u, v, m1 if face == 0 else m2)
-
-            # Lambert + specular, little ambient so shadows go deep
-            nl = nx * Ll[0] + ny * Ll[1] + nz * Ll[2]
-            if nl < 0.0:
-                nl = 0.0
-            lum = AMBIENT + (1.0 - AMBIENT) * nl
-            if nl > 0.0:
-                rx = 2.0 * nl * nx - Ll[0]
-                ry = 2.0 * nl * ny - Ll[1]
-                rz = 2.0 * nl * nz - Ll[2]
-                rv = rx * Vl[0] + ry * Vl[1] + rz * Vl[2]
-                if rv > 0.0:
-                    lum += (rv ** 22) * 0.9
-            rr = px * px + py * py
-            if kind == "side":                        # reeded edge
-                lum *= 0.45 + 0.55 * abs(math.cos(math.atan2(py, px) * 40.0))
-            elif rr > RIM2:                           # raised polished rim
-                lum = lum * 1.2 + 0.12
-            elif rr > GROOVE2:                        # groove inside the rim
-                lum *= 0.3
-
-            if lum > 1.0:
-                lum = 1.0
-            lum = lum * lum * (3.0 - 2.0 * lum)       # S-curve: harder contrast
-            nramp = len(RAMP) - 1
-
-            # Two-tone coin, so you can follow which side is up mid-spin:
-            # face 0 polished silver with a dark letter, face 1 blackened
-            # with a bright letter. The rim and edge stay bare metal.
-            if kind == "cap" and rr <= RIM2:
-                lo, hi = FACE_TONE[face]
-                lum = lo + (hi - lo) * lum
-
-            if is_text:
-                tl = 0.08 + 0.14 * lum if face == 0 else 0.78 + 0.22 * lum
-                col = _ramp_color(tl, METAL)
-                ch = RAMP[max(2, int(tl * nramp))]
-                if reveal_face == face:                # winner: fades to rose
-                    col = _blend(col, _scale(ROSE, 0.95 + 0.2 * lum), rose_scale)
-                    if rose_scale > 0.5:
-                        ch = RAMP[-1]
-                row.append((ch, col))
-                continue
-
-            col = _ramp_color(lum, METAL)
-            if reveal_face == face and kind == "cap":  # dim the field so the
-                col = _scale(col, 1.0 - 0.55 * rose_scale)  # rose letter pops
-            row.append((RAMP[int(lum * nramp)], col))
-        grid.append(row)
-    return grid
-
-
-def grid_to_lines(grid):
-    """Colour rows with run-length-collapsed escapes."""
-    lines = []
-    for row in grid:
-        parts = []
-        last = None
-        for ch, col in row:
-            if col is None:
-                if last is not None:
-                    parts.append(RESET)
-                    last = None
-                parts.append(" ")
-            else:
-                if col != last:
-                    parts.append(fg(col))
-                    last = col
-                parts.append(ch)
-        if last is not None:
-            parts.append(RESET)
-        lines.append("".join(parts))
-    return lines
-
-
-def grid_to_plain(grid):
-    return ["".join(ch for ch, _ in row) for row in grid]
-
-
-# ─── scene composition ────────────────────────────────────────────────────────
-def compose(size, coin_lines, coin_w, emblems, labels, up, winner, phase, k):
-    """One screen. `up` is the face currently facing the viewer (-1 while
-    edge-on); it lights that option in the legend so the result can be
-    followed as the spin slows. `k` is the reveal fade, 0 → 1."""
-    cols, lines = size
-    width = max(10, cols - 1)
-    avail = max(1, lines - 1)
-
-    def plain(text, rgb, bold=False):
-        return text_width(text), (BOLD if bold else "") + fg(rgb) + text + RESET
-
-    m1, m2 = emblems
-    a, b = labels
-    maxlabel = max(3, (width - 20) // 2)
-    gap = "      "
-    segs = [f"{m}  {clip(s.upper(), maxlabel)}" for m, s in ((m1, a), (m2, b))]
-    lw = text_width(f"x {segs[0]}{gap}x {segs[1]}")
-    parts = []
-    for i, seg in enumerate(segs):
-        tone, mark = SWATCH[i]
-        if phase == "reveal":
-            if i == winner:
-                tone = text = _blend(TITLE, ROSE, k)
-                bold = True
-            else:
-                tone, text, bold = _blend(tone, WHISPER, k), WHISPER, False
-        else:
-            bold = i == up
-            text = TITLE if bold else LABEL
-        parts.append(f"{fg(tone)}{mark}{RESET} "
-                     f"{BOLD if bold else ''}{fg(text)}{seg}{RESET}")
-    legend = (lw, parts[0] + gap + parts[1])
-
-    if phase == "reveal":
-        wlabel = clip((a if winner == 0 else b).upper(), max(6, width - 6))
-        status = plain("→  " + wlabel, _blend(LABEL, ROSE, k), bold=True)
-    elif phase == "intro":
-        status = plain(f"{m1} on silver  ·  {m2} on black", LABEL)
-    elif phase == "flight":
-        status = plain("in the air", WHISPER)
-    else:
-        status = plain("settling", WHISPER)
-
-    rows = [plain("d e c i d e", TITLE, bold=True),
-            plain("fair 50/50 · drawn before the toss", WHISPER),
-            (0, ""), (0, "")]
-    rows += [(coin_w, cl) for cl in coin_lines]
-    rows += [(0, ""), legend, (0, ""), status]
-
-    top = max(0, (avail - len(rows)) // 2)
-    buf = [" " * width for _ in range(top)]
-    for vw, colored in rows:
-        left = max(0, (width - vw) // 2)
-        right = max(0, width - vw - left)
-        buf.append(" " * left + colored + RESET + " " * right)
-    while len(buf) < avail:
-        buf.append(" " * width)
-    return HOME + "\n".join(buf[:avail])
-
-
 def pick_emblems(a, b):
+    """The letter on each face must tell the options apart. Words they share say
+    nothing, so "watch x movie" and "watch y movie" get X and Y, not W and W."""
     def initial(s):
-        for ch in s.upper():
+        for ch in s:
             if ch in FONT:
                 return ch
         return None
-    m1, m2 = initial(a), initial(b)
-    if m1 is None or m2 is None or m1 == m2:
-        return "1", "2"
-    return m1, m2
-
-
-# ─── the show ─────────────────────────────────────────────────────────────────
-TOTAL = INTRO + FLIGHT + SETTLE + PAUSE + REVEAL + HOLD
-
-
-def _smooth(s):
-    return s * s * (3.0 - 2.0 * s)
-
-
-def pose(t, winner):
-    """Coin state at t seconds: (angle, toss_y, phase, reveal fade 0..1).
-
-    The winner is an input: the animation only plays out a result that was
-    already drawn, it never decides anything itself."""
-    rest = 0.0 if winner == 0 else math.pi
-    if t < INTRO:                          # one slow turn: silver, black, silver
-        return 2.0 * math.pi * _smooth(t / INTRO), 0.0, "intro", 0.0
-    t -= INTRO
-    if t < FLIGHT:                         # toss: decelerating spin on an arc
-        p = t / FLIGHT
-        start = 2.0 * math.pi
-        end = rest + WOBBLE + 2.0 * math.pi * (1 + FLIGHT_TURNS)
-        angle = start + (end - start) * (1.0 - (1.0 - p) ** 3.0)
-        return angle, TOSS * math.sin(math.pi * p), "flight", 0.0
-    t -= FLIGHT
-    if t < SETTLE:                         # landed: wobble dies out, faster
-        s = t / SETTLE
-        amp = WOBBLE * (1.0 - s) ** 2
-        angle = rest + amp * math.cos(2.0 * math.pi * (1.0 * t + 1.6 * t * t))
-        hop = 0.14 * (1.0 - s) ** 3 * abs(math.sin(math.pi * t / 0.32))
-        return angle, hop, "settle", 0.0
-    t -= SETTLE
-    if t < PAUSE:
-        return rest, 0.0, "settle", 0.0
-    t -= PAUSE
-    return rest, 0.0, "reveal", _smooth(min(1.0, t / REVEAL))
-
-
-def up_face(angle):
-    """Which face looks at the viewer, or -1 while the coin is edge-on."""
-    c = math.cos(angle)
-    return 0 if c > 0.2 else 1 if c < -0.2 else -1
-
-
-def run(a, b):
-    sz = shutil.get_terminal_size((90, 30))
-    wc = max(24, min(sz.columns - 2, 96))
-    hc = max(9, min(sz.lines - 11, 48))
-    size = (sz.columns, sz.lines)
-    emblems = pick_emblems(a, b)
-
-    winner = secrets.randbelow(2)          # drawn before anything moves
-    frame = 1.0 / FPS
-    last = None
-    start = time.perf_counter()
-    while True:
-        # Wall-clock timeline: a slow terminal drops frames, it never
-        # shortens the toss.
-        t = min(time.perf_counter() - start, TOTAL)
-        angle, toss_y, phase, k = pose(t, winner)
-        state = (angle, toss_y, phase, k)
-        if state != last:                  # still frames are drawn once
-            rf = winner if phase == "reveal" else -1
-            grid = render_grid(wc, hc, angle, toss_y, emblems, rf, k)
-            # light the up option only once the spin is followable: below
-            # 3 face changes a second, so the legend never strobes
-            spin = abs(pose(min(t + 0.01, TOTAL), winner)[0] - angle) / 0.01
-            up = up_face(angle) if spin < 3.0 * math.pi else -1
-            out(compose(size, grid_to_lines(grid), wc, emblems, (a, b),
-                        up, winner, phase, k))
-            last = state
-        if t >= TOTAL:
-            break
-        nxt = start + (math.floor(t / frame) + 1) * frame
-        time.sleep(max(0.0, nxt - time.perf_counter()))
-    return a if winner == 0 else b
-
-
-def final_result(label):
-    cols = shutil.get_terminal_size((80, 24)).columns
-    pad = clip(label.upper(), max(6, cols - 10))   # 2 indent + 2 border + 6 pad
-    pw = text_width(pad)
-    inner = min(max(pw + 6, 14), max(10, cols - 4))
-    bar = "─" * inner
-    left = (inner - pw) // 2
-    centered = " " * left + pad + " " * (inner - pw - left)
-    out("\n"
-        "  " + fg(ROSE) + "╭" + bar + "╮" + RESET + "\n"
-        "  " + fg(ROSE) + "│" + BOLD + centered + RESET + fg(ROSE) + "│" + RESET + "\n"
-        "  " + fg(ROSE) + "╰" + bar + "╯" + RESET + "\n"
-        "  " + fg(WHISPER) + "decided." + RESET + "\n\n")
+    wa, wb = a.upper().split(), b.upper().split()
+    while wa and wb and wa[0] == wb[0]:
+        wa.pop(0)
+        wb.pop(0)
+    for x, y in zip(wa, wb):
+        m1, m2 = initial(x), initial(y)
+        if m1 and m2 and m1 != m2:
+            return m1, m2
+    return "1", "2"
 
 
 def prog():
     return os.path.basename(sys.argv[0]) or "decide"
 
 
+def draw():
+    """The one draw. One unbiased bit from the OS CSPRNG, nothing else."""
+    return secrets.randbelow(2)
+
+
+# ─── terminal state ────────────────────────────────────────────────────────
+class Terminal:
+    """Owns everything that must be undone: cbreak, alt screen, cursor, keyboard
+    flags, audio children. restore() is safe to call any number of times."""
+
+    def __init__(self):
+        self.saved = None
+        self.in_alt = False
+        self.kb_on = False
+        self.paused = 0.0              # seconds spent stopped by Ctrl-Z
+        self.redraw = False
+        self.audio = None
+
+    def clock(self):
+        return time.perf_counter() - self.paused
+
+    def enter(self):
+        fd = sys.stdin.fileno()
+        if sys.stdin.isatty():
+            if self.saved is None:
+                self.saved = termios.tcgetattr(fd)
+            tty.setcbreak(fd, termios.TCSANOW)
+        out(ALT_ON + HIDE + f"{ESC}[2J")
+        self.in_alt = True
+
+    def kb_push(self):
+        # 2 event types + 8 all keys as escapes: Space gets a release event.
+        # The stack is per screen, so this must run inside the alt screen.
+        if not self.kb_on:
+            out(f"{ESC}[>10u")
+            self.kb_on = True
+
+    def kb_pop(self):
+        if self.kb_on:
+            out(f"{ESC}[<u")
+            self.kb_on = False
+
+    def flush_input(self):
+        if sys.stdin.isatty():
+            with contextlib.suppress(termios.error):
+                termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+
+    def restore(self):
+        if self.audio:
+            self.audio.stop_all()
+        if self.kb_on:
+            self.kb_pop()
+        if self.in_alt:
+            out(SHOW + ALT_OFF)
+            self.in_alt = False
+        if self.saved is not None and sys.stdin.isatty():
+            self.flush_input()
+            with contextlib.suppress(termios.error):
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, self.saved)
+            self.saved = None
+
+    def suspend(self):
+        """Ctrl-Z: hand a clean terminal back, freeze the show's clock meanwhile."""
+        t0 = time.perf_counter()
+        kb, alt = self.kb_on, self.in_alt
+        if self.audio:
+            self.audio.stop_all()
+        self.kb_pop()
+        if alt:
+            out(SHOW + ALT_OFF)
+            self.in_alt = False
+        saved = self.saved
+        if saved is not None:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, saved)
+        signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTSTP)   # stops here until fg
+        signal.signal(signal.SIGTSTP, _on_tstp)
+        self.paused += time.perf_counter() - t0
+        if alt:
+            self.enter()
+        if kb:
+            self.kb_push()
+        self.redraw = True
+
+
+TERM = Terminal()
+
+
+def _on_tstp(_sig, _frm):
+    TERM.suspend()
+
+
+def _on_exit_signal(sig, _frm):
+    raise SystemExit(128 + sig)
+
+
+def _on_winch(_sig, _frm):
+    TERM.redraw = True
+
+
+def install_handlers():
+    atexit.register(TERM.restore)
+    signal.signal(signal.SIGTERM, _on_exit_signal)
+    signal.signal(signal.SIGHUP, _on_exit_signal)
+    signal.signal(signal.SIGTSTP, _on_tstp)
+    signal.signal(signal.SIGWINCH, _on_winch)
+
+
+def probe_terminal():
+    """Ask once for all of it; never hangs. {'kitty_kb', 'backend', 'cell'}."""
+    caps = {"kitty_kb": False, "backend": "halfblock", "cell": (0, 0)}
+    try:
+        rows, cols, xp, yp = struct.unpack(
+            "HHHH", fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8))
+    except OSError:
+        return caps
+    if not sys.stdin.isatty():
+        if xp and yp and cols and rows:
+            caps["cell"] = (xp // cols, yp // rows)
+        return caps
+    seq = "\033[?u"
+    if os.environ.get("KITTY_WINDOW_ID") or os.environ.get("TERM") == "xterm-kitty":
+        seq += "\033_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\033\\"
+    if not (xp and yp):
+        seq += "\033[14t"
+    reply = _query((seq + "\033[c").encode())
+    caps["kitty_kb"] = re.search(r"\033\[\?\d+u", reply) is not None
+    m = re.search(r"\033\[\?([\d;]*)c", reply)
+    attrs = m.group(1).split(";") if m else []
+    if "_Gi=31;OK" in reply:
+        caps["backend"] = "kitty"
+    elif "4" in attrs:
+        caps["backend"] = "sixel"
+    m = re.search(r"\033\[4;(\d+);(\d+)t", reply)
+    if m:
+        yp, xp = int(m.group(1)), int(m.group(2))
+    if xp and yp and cols and rows:
+        caps["cell"] = (xp // cols, yp // rows)
+    want = os.environ.get("DECIDE_BACKEND")
+    if want in ("sixel", "kitty", "halfblock"):
+        caps["backend"] = want
+    return caps
+
+
+def _query(seq, timeout=0.25):
+    """Write a query, read until the DA1 answer ends it; '' on a silent terminal."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    buf = b""
+    try:
+        tty.setcbreak(fd, termios.TCSANOW)
+        os.write(sys.stdout.fileno(), seq)
+        end = time.perf_counter() + timeout
+        while time.perf_counter() < end:
+            r, _, _ = select.select([fd], [], [], max(0.0, end - time.perf_counter()))
+            if not r:
+                break
+            chunk = os.read(fd, 512)
+            if not chunk:
+                break
+            buf += chunk
+            if re.search(rb"\033\[\?[\d;]*c", buf):
+                break
+    except OSError:
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, old)
+    return buf.decode("latin-1", "replace")
+
+
+# ─── keys ──────────────────────────────────────────────────────────────────
+PRESS, REPEAT, RELEASE = 1, 2, 3
+_CSI = re.compile(rb"\033\[([0-?]*)[ -/]*([@-~])")
+_SS3 = re.compile(rb"\033O([@-~])")
+_ARROW = {b"A": "up", b"B": "down", b"C": "right", b"D": "left"}
+_CODES = {32: "space", 13: "enter", 27: "esc", 9: "tab", 127: "bs"}
+
+
+class Keys:
+    """Normalises both key dialects to (name, event). Only the kitty dialect can
+    report REPEAT and RELEASE; legacy bytes all arrive as PRESS."""
+
+    def __init__(self):
+        self.buf = b""
+        self.last_input = TERM.clock()
+
+    def poll(self, timeout):
+        fd = sys.stdin.fileno()
+        try:
+            r, _, _ = select.select([fd], [], [], max(0.0, timeout))
+        except InterruptedError:
+            return []
+        if r:
+            try:
+                data = os.read(fd, 4096)
+            except OSError:
+                data = b""
+            if not data:               # the terminal went away
+                raise SystemExit(129)
+            self.buf += data
+        return self._parse()
+
+    def _parse(self):
+        evs = []
+        while self.buf:
+            b = self.buf
+            if b[:1] == b"\033":
+                m = _CSI.match(b)
+                if m:
+                    self.buf = b[m.end():]
+                    self._csi(m.group(1), m.group(2), evs)
+                    continue
+                m = _SS3.match(b)
+                if m:
+                    self.buf = b[m.end():]
+                    if m.group(1) in _ARROW:
+                        evs.append((_ARROW[m.group(1)], PRESS))
+                    continue
+                if b == b"\033":       # a lone ESC, or the start of a sequence?
+                    r, _, _ = select.select([sys.stdin.fileno()], [], [], 0.02)
+                    if r:
+                        self.buf += os.read(sys.stdin.fileno(), 4096)
+                        continue
+                    self.buf = b""
+                    evs.append(("esc", PRESS))
+                    break
+                if b[:2] in (b"\033[", b"\033O") and len(b) < 32:
+                    break              # incomplete: wait for the rest
+                self.buf = b[1:]
+                continue
+            ch = b[:1]
+            self.buf = b[1:]
+            if ch == b" ":
+                evs.append(("space", PRESS))
+            elif ch in (b"\r", b"\n"):
+                evs.append(("enter", PRESS))
+            elif 32 < ch[0] < 127:
+                evs.append((ch.decode(), PRESS))
+        if evs:
+            self.last_input = TERM.clock()
+        return evs
+
+    def _csi(self, params, final, evs):
+        """CSI code ; mods : event u   and   CSI 1 ; mods : event A"""
+        if params[:1] in (b"?", b">", b"<", b"="):
+            return                     # a terminal's answer, not a key
+        parts = params.split(b";")
+        code = parts[0].split(b":")[0]
+        mods, event = 1, PRESS
+        if len(parts) > 1:
+            sub = parts[1].split(b":")
+            mods = int(sub[0] or b"1")
+            if len(sub) > 1 and sub[1]:
+                event = int(sub[1])
+        ctrl = bool((mods - 1) & 4)
+        name = None
+        if final in _ARROW:
+            name = _ARROW[final]
+        elif final == b"u" and code:
+            c = int(code)
+            if ctrl and event != RELEASE:
+                # with the keyboard flags on these are not signals any more
+                if c in (99, 92):
+                    raise KeyboardInterrupt
+                if c == 122:
+                    TERM.suspend()
+                return
+            name = _CODES.get(c) or (chr(c).lower() if 33 <= c < 127 else None)
+        if name:
+            evs.append((name, event))
+
+
+# ─── sound ─────────────────────────────────────────────────────────────────
+RATE = 22050
+PEAK = 0.2                      # about -14 dBFS
+AV_LEAD = 0.07                  # pw-play starts this late; the mix runs this early
+
+
+class _Noise:
+    """A small LCG. Texture only; nothing here touches the draw."""
+
+    def __init__(self, seed=12345):
+        self.s = seed
+
+    def __call__(self):
+        self.s = (self.s * 1103515245 + 12345) & 0x7fffffff
+        return self.s / 0x3fffffff - 1.0
+
+
+def _mix(buf, t, samples, amp=1.0):
+    i = max(0, int(t * RATE))
+    for j, v in enumerate(samples):
+        if i + j >= len(buf):
+            break
+        buf[i + j] += v * amp
+
+
+def _tone(freq, dur, decay):
+    return [math.sin(2 * math.pi * freq * n / RATE) * math.exp(-n / RATE / decay)
+            for n in range(int(dur * RATE))]
+
+
+def _ring(dur=0.5):
+    parts = [(1380, 1.0), (2210, 0.5), (3350, 0.25)]
+    return [sum(a * math.sin(2 * math.pi * f * n / RATE) for f, a in parts)
+            * math.exp(-n / RATE / 0.14) / 1.75 for n in range(int(dur * RATE))]
+
+
+def _thud():
+    noise = _Noise(7)
+    out_ = []
+    phase = 0.0
+    for n in range(int(0.15 * RATE)):
+        t = n / RATE
+        phase += 2 * math.pi * (90 - 200 * t) / RATE
+        out_.append(math.sin(phase) * math.exp(-t / 0.05) + 0.35 * noise() * math.exp(-t / 0.008))
+    return out_
+
+
+def _click(dur=0.015, seed=3, lp=0.5):
+    noise = _Noise(seed)
+    y = 0.0
+    res = []
+    for n in range(int(dur * RATE)):
+        y += lp * (noise() - y)
+        res.append(y * math.exp(-n / RATE / (dur / 3)))
+    return res
+
+
+def face_change_times():
+    """Times the coin passes edge-on during the toss. Fixed, like the film."""
+    edge = edge_on_angle()
+    times, last = [], None
+    n = int(FLIGHT * 1000)
+    for i in range(n + 1):
+        t = i / 1000
+        k = math.floor((flight_angle(t / FLIGHT, FLIGHT, SPIN_HI, SPIN_LO) - edge) / math.pi)
+        if last is not None and k != last:
+            times.append(t)
+        last = k
+    return times
+
+
+def flight_mix():
+    """Throw to ring as one take, so the ticks can't drift against the coin."""
+    length = FLIGHT + CATCH + 0.3
+    buf = [0.0] * int(length * RATE)
+    at = lambda t: max(0.0, t - AV_LEAD)
+    # the whirr tracks the spin, then falls away; the last 0.4 s has only ticks
+    noise = _Noise(99)
+    y = 0.0
+    for n in range(int((FLIGHT - 0.4) * RATE)):
+        t = n / RATE
+        p = t / FLIGHT
+        speed = SPIN_HI + (SPIN_LO - SPIN_HI) * p
+        y += (0.03 + 0.05 * speed) * (noise() - y)
+        env = min(1.0, t / 0.2) * min(1.0, (FLIGHT - 0.4 - t) / 0.6)
+        wob = 0.6 + 0.4 * math.sin(2 * math.pi * 2 * speed * t)
+        i = int(at(t) * RATE)
+        buf[i] += y * env * wob * 0.5
+    _mix(buf, at(0.0), _click(0.05, 11, 0.8), 0.8)                # the flick
+    _mix(buf, at(0.0), _tone(4000, 0.05, 0.012), 0.3)
+    tick = _tone(3000, 0.025, 0.006)
+    for t in face_change_times():
+        _mix(buf, at(t), tick, 0.25 + 0.35 * t / FLIGHT)
+    _mix(buf, at(FLIGHT), _thud(), 1.0)
+    _mix(buf, at(FLIGHT + HITSTOP), _ring(), 0.35)
+    return buf
+
+
+def _write_wav(path, samples, peak=PEAK):
+    import array
+    import wave
+    top = max((abs(v) for v in samples), default=1.0) or 1.0
+    k = peak / top * 32767
+    data = array.array("h", (int(v * k) for v in samples))
+    if sys.byteorder != "little":
+        data.byteswap()
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with wave.open(tmp, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(data.tobytes())
+    os.replace(tmp, path)
+
+
+def _hum(hold):
+    res = []
+    phase = 0.0
+    n = int(hold * RATE)
+    for i in range(n):
+        p = i / n
+        phase += 2 * math.pi * (80 + 40 * p) / RATE
+        res.append((math.sin(phase) + 0.35 * math.sin(phase * 1.007))
+                   * min(1.0, i / (0.05 * RATE)) * (0.5 + 0.5 * p))
+    return res
+
+
+def _chime():
+    return [v for v in _tone(660, 0.18, 0.09)] + [v for v in _tone(880, 0.22, 0.11)]
+
+
+def synth_sounds(folder):
+    _worker_signals()
+    with contextlib.suppress(OSError):
+        os.nice(10)
+    os.makedirs(folder, exist_ok=True)
+    clips = {"click": (_click(), 0.14), "clack": ([a + 0.5 * b for a, b in zip(
+                 _click(0.06, 5, 0.9), _tone(1800, 0.06, 0.015))], 0.2),
+             "tick": (_tone(3000, 0.025, 0.006), 0.12), "chime": (_chime(), 0.16)}
+    for name, (s, peak) in clips.items():
+        _write_wav(os.path.join(folder, name + ".wav"), s, peak)
+    _write_wav(os.path.join(folder, "hum.wav"), _hum(CHARGE), 0.1)
+    _write_wav(os.path.join(folder, "flight.wav"), flight_mix())
+    with open(os.path.join(folder, ".done"), "w"):
+        pass
+
+
+class Audio:
+    """pw-play children, generated once and cached. Any failure is just silence."""
+
+    def __init__(self, muted):
+        self.muted = muted
+        self.player = shutil.which("pw-play")
+        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+        self.dir = os.path.join(base, "decide", f"{__version__}-{SOUND_REV}")
+        self.kids = []
+        self.hum = None
+
+    def prepare(self):
+        if not self.player or os.path.exists(os.path.join(self.dir, ".done")):
+            return
+        try:
+            ctx = multiprocessing.get_context("fork")
+            ctx.Process(target=synth_sounds, args=(self.dir,), daemon=True).start()
+        except OSError:
+            self.player = None
+
+    def play(self, name):
+        path = os.path.join(self.dir, name + ".wav")
+        if self.muted or not self.player or not os.path.exists(path):
+            return None
+        try:
+            p = subprocess.Popen([self.player, path], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+        except OSError:
+            return None
+        self.kids = [k for k in self.kids if k.poll() is None] + [p]
+        return p
+
+    def hum_start(self):
+        self.hum = self.play("hum")
+
+    def hum_stop(self):
+        if self.hum:
+            self._kill(self.hum)
+            self.hum = None
+
+    def _kill(self, p):
+        with contextlib.suppress(OSError):
+            p.kill()
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            p.wait(timeout=1)
+
+    def stop_all(self):
+        for p in self.kids:
+            if p.poll() is None:
+                self._kill(p)
+        self.kids = []
+        self.hum = None
+
+
+# ─── the screen ────────────────────────────────────────────────────────────
+class Screen:
+    """Fixed rows of text around a fixed rectangle of coin. Nothing ever jumps."""
+
+    def __init__(self, stage, a, b, emblems):
+        self.stage = stage
+        self.labels = (a, b)
+        self.emblems = emblems
+        self.cache = {}
+        self.pending = []
+        self.layout()
+
+    @staticmethod
+    def rows_for(lines):
+        """Rows left for the coin. Below 20 lines the hints give way."""
+        return max(4, lines - (11 if lines >= 20 else 10))
+
+    def layout(self):
+        sz = shutil.get_terminal_size((90, 30))
+        self.cols, self.lines = sz.columns, sz.lines
+        st = self.stage
+        full = self.lines >= 20
+        names = ["title", "sub", None] + ["coin"] * st.hc + [None, "legend", "status", "c1", "c2", "c3"]
+        if full:
+            names += ["hint"]
+        top = max(1, (self.lines - 1 - len(names)) // 2 + 1)
+        self.row = {}
+        for i, n in enumerate(names):
+            if n and n != "coin":
+                self.row[n] = top + i
+        st.place(top + 3, max(1, (self.cols - st.wc) // 2 + 1))
+        self.cache = {}
+        self.pending = []
+
+    def relayout_if_needed(self):
+        if TERM.redraw:
+            TERM.redraw = False
+            self.layout()
+            out(f"{ESC}[2J")
+            return True
+        return False
+
+    def put(self, name, colored, width):
+        """Queue one centred row, only if it changed."""
+        row = self.row.get(name)
+        if row is None or self.cache.get(name) == colored:
+            return
+        self.cache[name] = colored
+        left = max(0, (self.cols - width) // 2)
+        self.pending.append(f"{ESC}[{row};1H{ESC}[2K{ESC}[{left + 1}G{colored}{RESET}")
+
+    def text(self, name, s, rgb=LABEL, bold=False):
+        s = clip(s, self.cols - 2)
+        self.put(name, (BOLD if bold else "") + fg(rgb) + s, text_width(s))
+
+    def legend(self, up=-1, win=None):
+        a, b = self.labels
+        m1, m2 = self.emblems
+        maxlabel = max(3, (self.cols - 22) // 2)
+        segs = [f"{m}  {clip(s.upper(), maxlabel)}" for m, s in ((m1, a), (m2, b))]
+        gap = "      "
+        parts = []
+        w = 0
+        for i, seg in enumerate(segs):
+            tone, mark = SWATCH[i]
+            if win is not None:
+                if i == win:
+                    text, bold = ROSE, True
+                else:
+                    text, bold, tone = WHISPER, False, WHISPER
+            else:
+                bold = i == up
+                text = TITLE if bold else LABEL
+            parts.append(f"{fg(tone)}{mark}{RESET} "
+                         f"{BOLD if bold else ''}{fg(text)}{seg}{RESET}")
+            w += text_width("x " + seg)
+        self.put("legend", (gap.join(parts)), w + len(gap))
+
+    def blank(self, *names):
+        for n in names:
+            self.put(n, "", 0)
+
+    def flush(self, image=None):
+        if not self.pending and image is None:
+            return
+        body = "".join(self.pending).encode()
+        self.pending = []
+        try:
+            w = sys.stdout.buffer
+            w.write(SYNC_ON + body + (self.stage.wrap(image) if image is not None else b"") + SYNC_OFF)
+            w.flush()
+        except BrokenPipeError:
+            raise SystemExit(0)
+
+
+def bar(k, n=21):
+    full = int(round(max(0.0, min(1.0, k)) * n))
+    return "━" * full + "─" * (n - full)
+
+
+# ─── the game ──────────────────────────────────────────────────────────────
+class Leave(Exception):
+    """Left the table before the throw: nothing happened."""
+
+
+class Prefs:
+    """Mute and reduced motion stick between runs. Losing them is harmless, so a
+    file that can't be read or written is simply ignored."""
+
+    DEFAULTS = {"mute": False, "reduced_motion": False, "sound_noted": False}
+
+    def __init__(self):
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        self.path = os.path.join(base, "decide", "prefs.json")
+        self.d = dict(self.DEFAULTS)
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            with open(self.path) as f:
+                got = json.load(f)
+            self.d.update({k: bool(got[k]) for k in self.DEFAULTS if k in got})
+
+    def __getitem__(self, k):
+        return self.d[k]
+
+    def set(self, k, v):
+        self.d[k] = bool(v)
+        with contextlib.suppress(OSError):
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = f"{self.path}.{os.getpid()}"
+            with open(tmp, "w") as f:
+                json.dump(self.d, f)
+            os.replace(tmp, self.path)
+
+
+class Game:
+    def __init__(self, a, b, prefs, caps, flags):
+        self.a, self.b = a, b
+        self.prefs = prefs
+        self.caps = caps
+        self.kitty = caps["kitty_kb"]
+        self.emblems = pick_emblems(a, b)
+        self.reduced = (flags["reduced"] or prefs["reduced_motion"]
+                        or os.environ.get("DECIDE_REDUCED_MOTION", "0") not in ("", "0"))
+        self.flag_mute = flags["mute"] or os.environ.get("DECIDE_SOUND") == "0"
+        self.audio = Audio(self.flag_mute or prefs["mute"])
+        TERM.audio = self.audio
+        self.stats = Stats()
+        self.stage = None
+        self.scr = None
+        self.frames = None
+        self.keys = None
+        self.last_image = None
+
+    def build(self):
+        load_numpy()
+        lines = shutil.get_terminal_size((90, 30)).lines
+        cols = shutil.get_terminal_size((90, 30)).columns
+        msg = "striking the coin…"
+        out(f"{ESC}[{max(1, lines // 2)};{max(1, (cols - len(msg)) // 2)}H{fg(WHISPER)}{msg}{RESET}")
+        self.stage = Stage(self.emblems, self.caps, cols, Screen.rows_for(lines))
+        out(f"{ESC}[2J")
+        self.scr = Screen(self.stage, self.a, self.b, self.emblems)
+        self.keys = Keys()
+        TERM.flush_input()
+        self.audio.prepare()
+
+    def image(self, angle, y, reveal=-1, fade=0.0, **fx):
+        key = (angle, y, reveal, fade, tuple(sorted(fx.items())))
+        if key == self.last_image:
+            return None
+        self.last_image = key
+        return self.stage.payload(angle, y, reveal, fade, **fx)
+
+    def titles(self):
+        self.scr.text("title", "d e c i d e", TITLE, True)
+        self.scr.text("sub", "a fair toss · 50/50", LABEL)
+
+
+class Stats:
+    """Frames actually written per phase. Only written out if asked for."""
+
+    def __init__(self):
+        self.phases = {}
+
+    def begin(self, name):
+        self.phases[name] = {"t0": time.perf_counter(), "frames": 0, "secs": 0.0}
+
+    def frame(self, name):
+        p = self.phases[name]
+        p["frames"] += 1
+        p["secs"] = time.perf_counter() - p["t0"]
+
+    def dump(self, extra):
+        path = os.environ.get("DECIDE_STATS")
+        if not path:
+            return
+        res = dict(extra)
+        for k, p in self.phases.items():
+            res[k] = {"frames": p["frames"], "secs": round(p["secs"], 2),
+                      "fps": round(p["frames"] / p["secs"], 1) if p["secs"] else 0}
+        with open(path, "w") as f:
+            json.dump(res, f)
+
+
+def table(g):
+    """The coin at rest, then the hold. Returns the moment you let go."""
+    scr, keys, stage, audio = g.scr, g.keys, g.stage, g.audio
+    a, b = g.a, g.b
+    state = "table"                    # table, charging, armed
+    k = 0.0                            # charge, 0..1
+    from_angle = 0.0                   # where the slow turn was when the hold began
+    t0 = TERM.clock()
+    first_press = None
+    clicks = 0
+    g.stats.begin("table")
+    if stage.coin is None or g.reduced:
+        g.frames = None
+    elif stage.backend in ("sixel", "kitty"):
+        g.frames = FrameBank(stage)
+    prev_t = TERM.clock()
+
+    def start_charge():
+        nonlocal state, first_press, clicks, from_angle
+        state, first_press, clicks = "charging", TERM.clock(), 0
+        from_angle = turn_angle()
+        audio.hum_start()
+
+    def cancel():
+        nonlocal state
+        state = "table"
+        audio.hum_stop()
+
+    def turn_angle():
+        t = TERM.clock() - t0
+        if g.reduced or t >= 4.0:
+            return 0.0
+        a_ = 2 * math.pi * _smoothstep(t / 4.0)
+        return a_ - 2 * math.pi if a_ > math.pi else a_
+
+    while True:
+        now = TERM.clock()
+        dt = now - prev_t
+        prev_t = now
+        if scr.relayout_if_needed():
+            g.last_image = None
+        ready = stage.ready and (g.frames is None or (g.frames.started and not g.frames.busy()))
+        if g.frames is not None and not g.frames.started and stage.ready:
+            g.frames.start()
+        before = keys.last_input
+        evs = keys.poll(max(0.0, 1 / FPS - (TERM.clock() - now)))
+        throw = False
+        for name, ev in evs:
+            silence = TERM.clock() - before
+            before = TERM.clock()
+            if ev == REPEAT:
+                continue
+            if state == "table":
+                if ev == RELEASE:
+                    continue
+                if name == "m":
+                    audio.muted = not audio.muted
+                    g.prefs.set("mute", audio.muted)
+                elif name == "r":
+                    g.reduced = not g.reduced
+                    g.prefs.set("reduced_motion", g.reduced)
+                    g.last_image = None
+                    if g.reduced:
+                        g.frames = None
+                    elif stage.backend in ("sixel", "kitty"):
+                        g.frames = FrameBank(stage)
+                elif name == "q":
+                    raise Leave
+                elif name == "space" and ready:
+                    # a press must be fresh (RTS 14D). The legacy dialect can't say
+                    # so: require quiet first, which a held key's repeats never allow
+                    if g.kitty or silence >= 0.25:
+                        start_charge()
+            elif g.kitty:
+                if name == "space" and ev == RELEASE:
+                    if state == "armed":
+                        throw = True
+                    else:
+                        cancel()
+                elif name == "esc" and ev == PRESS:
+                    cancel()
+                elif name == "q" and ev == PRESS:
+                    raise Leave
+            else:                      # legacy: arm, then press again
+                if name == "space":
+                    if (state == "armed" and now - first_press >= 0.8 and silence >= 0.25):
+                        throw = True
+                elif name == "q":
+                    raise Leave
+                else:
+                    cancel()
+        if throw:
+            break
+        if state == "charging":
+            k = min(1.0, k + dt / CHARGE)
+            while clicks < 4 and k >= (clicks + 1) / 5:
+                clicks += 1
+                audio.play("click")
+            if k >= 1.0:
+                state = "armed"
+                audio.hum_stop()       # the sudden quiet is the loaded moment
+                audio.play("clack")
+        elif state == "table" and k > 0.0:
+            k = max(0.0, k - dt / 0.25)
+
+        # the coin
+        c = _smoothstep(k)
+        if g.reduced:
+            pose = (0.0, 0.0, dict(floor=1.0))
+        else:
+            ang = from_angle * (1 - min(1.0, k * 4)) - COCK_TILT * c if (state != "table" or k > 0) else turn_angle()
+            pose = (ang, -COCK_SINK * c,
+                    dict(light=1.0 + 0.15 * c, floor=1.0 - 0.2 * c, floor_r=1.0 - 0.25 * c))
+        img = g.image(pose[0], pose[1], **pose[2])
+        if img is not None:
+            g.stats.frame("table")
+
+        # the text
+        g.titles()
+        scr.legend()
+        scr.blank("status")
+        dim = LABEL if state == "table" else WHISPER
+        if state == "table":
+            scr.text("c1", "" if ready else "striking the coin…", WHISPER)
+            verb = "hold space to pick up the coin" if g.kitty else "press space to pick up the coin"
+            scr.text("c2", verb if ready else "", SOFT)
+            note = ""
+            if not g.prefs["sound_noted"] and not audio.muted:
+                note = "this makes sound · m mutes it, and it stays muted"
+            scr.text("c3", note, GOLD)
+        else:
+            scr.text("c1", bar(k), TITLE)
+            if state == "armed":
+                scr.text("c2", ("LET GO TO THROW" if g.kitty else "SPACE TO THROW") + " · esc to back out", TITLE, True)
+                scr.text("c3", f"{clip(a, 30)} or {clip(b, 30)}. whatever lands, you do.", LABEL)
+            else:
+                scr.text("c2", "let go early to back out" if g.kitty else "esc to back out", LABEL)
+                scr.text("c3", "", LABEL)
+        sound = "♪ off · m unmute" if audio.muted else "♪ on · m mute"
+        scr.text("hint", f"{sound}   r motion   q leave", dim)
+        scr.flush(img)
+
+    # ── the throw ──
+    if not g.prefs["sound_noted"]:
+        g.prefs.set("sound_noted", True)
+    TERM.kb_pop()                         # Ctrl-C is a plain signal again
+    TERM.flush_input()                    # stray presses mean nothing from here on
+    keys.buf = b""
+    audio.hum_stop()
+    audio.play("flight")                  # the sound starts, and so does the film
+
+
+def flight(g):
+    """Throw to the end of the covered hold. It takes no result: it can't know one."""
+    scr, keys, stage = g.scr, g.keys, g.stage
+    t0 = TERM.clock()
+    last_i = -1
+    g.stats.begin("flight")
+    g.stats.begin("catch")
+    g.last_image = None
+    total = FLIGHT + CATCH + HOLD
+    while True:
+        t = TERM.clock() - t0
+        if t >= total:
+            break
+        if scr.relayout_if_needed():
+            last_i = -1
+        i = min(int(t * FPS), (g.frames.n - 1) if g.frames else 10 ** 9)
+
+        # the coin. film_pose takes the clock and nothing else
+        img = None
+        if i != last_i:
+            last_i = i
+            if g.reduced:
+                img = g.image(*_still_args(t))
+            else:
+                img = g.frames.get(i) if g.frames else None
+                if img is None:
+                    pose = film_pose(i / FPS)
+                    img = stage.payload(pose[0], pose[1], **pose[2])
+            if img is not None:
+                g.stats.frame("flight" if t < FLIGHT else "catch")
+
+        # the text
+        up = -1
+        if not g.reduced and t < FLIGHT:
+            if SPIN_HI + (SPIN_LO - SPIN_HI) * (t / FLIGHT) < 1.1:
+                up = up_face(flight_angle(t / FLIGHT, FLIGHT, SPIN_HI, SPIN_LO))
+        scr.legend(up=up)
+        g.titles()
+        scr.blank("status", "c3", "hint")
+        scr.text("c1", bar(t / FLIGHT) if g.reduced and t < FLIGHT else "", LABEL)
+        if t < FLIGHT:
+            scr.text("c2", "in the air", WHISPER)
+        elif t < FLIGHT + CATCH:
+            scr.blank("c2")
+        else:
+            dots = min(3, 1 + int((t - FLIGHT - CATCH) / 0.4))
+            scr.text("c2", " ".join("·" * dots), LABEL)
+        scr.flush(img)
+        keys.poll(max(0.0, (i + 1) / FPS - (TERM.clock() - t0)))
+
+
+def _still_args(t):
+    return still_pose(t)[0], still_pose(t)[1], -1, 0.0
+
+
+def squeeze(g, winner):
+    """You lift the cover. The result is fixed; this only sets when you learn it."""
+    scr, keys = g.scr, g.keys
+    rest = 0.0 if winner == 0 else math.pi
+    TERM.flush_input()
+    keys.buf = b""
+    if g.kitty:
+        TERM.kb_push()
+    lift = 0.0
+    held = False
+    enter_from = None
+    enter_t = 0.0
+    last_key = TERM.clock()
+    legacy_seen = 0.0
+    legacy_window = 0.7
+    prev = TERM.clock()
+    g.stats.begin("squeeze")
+    g.last_image = None
+    while lift < 1.0:
+        now = TERM.clock()
+        dt = now - prev
+        prev = now
+        if scr.relayout_if_needed():
+            g.last_image = None
+        evs = keys.poll(1 / FPS)
+        for name, ev in evs:
+            last_key = TERM.clock()
+            if name == "space":
+                if g.kitty:
+                    if ev == PRESS:
+                        held = True
+                    elif ev == RELEASE:
+                        held = False
+                else:
+                    # a repeating key keeps it going; the first gap is the repeat delay
+                    legacy_window = 0.25 if TERM.clock() - legacy_seen < 0.7 else 0.7
+                    legacy_seen = TERM.clock()
+            elif name == "enter" and ev == PRESS and enter_from is None:
+                enter_from, enter_t = lift, TERM.clock()
+        now = TERM.clock()
+        if enter_from is not None:
+            lift = enter_from + (1 - enter_from) * min(1.0, (now - enter_t) / ENTER_TIME)
+        elif (held if g.kitty else now - legacy_seen < legacy_window) or now - last_key >= IDLE_LIFT:
+            lift = min(1.0, lift + dt / LIFT_TIME)
+        pose = squeeze_pose(rest, lift)
+        img = g.image(pose[0], pose[1], **pose[2])
+        if img is not None:
+            g.stats.frame("squeeze")
+        g.titles()
+        scr.legend()
+        scr.blank("status", "c1", "c3", "hint")
+        verb = "hold space to lift" if g.kitty else "tap or hold space to lift"
+        scr.text("c2", f"{verb} · enter to turn it over", SOFT)
+        scr.flush(img)
+    TERM.kb_pop()
+    TERM.flush_input()
+
+
+def reveal(g, winner):
+    """The winning letter fades to rose and the option lights up."""
+    scr, keys, audio = g.scr, g.keys, g.audio
+    rest = 0.0 if winner == 0 else math.pi
+    audio.play("chime")
+    wlabel = (g.a, g.b)[winner].upper()
+    t0 = TERM.clock()
+    g.stats.begin("reveal")
+    g.last_image = None
+    while True:
+        t = TERM.clock() - t0
+        if t >= REVEAL + RESULT_HOLD:
+            break
+        if scr.relayout_if_needed():
+            g.last_image = None
+        k = _smoothstep(min(1.0, t / REVEAL))
+        pose = reveal_pose(rest, k)
+        img = g.image(pose[0], pose[1], winner, k, **pose[2])
+        if img is not None:
+            g.stats.frame("reveal")
+        g.titles()
+        scr.legend(win=winner)
+        scr.text("status", "→  " + wlabel, _blend(LABEL, ROSE, k), True)
+        scr.blank("c1", "c2", "c3", "hint")
+        scr.flush(img)
+        for name, ev in keys.poll(1 / FPS):
+            if name == "enter" and ev == PRESS and t >= REVEAL:     # GLI-19 4.6.1(c)
+                return
+
+
+def result_box(label, rgb, lines):
+    cols = shutil.get_terminal_size((80, 24)).columns
+    pad = clip(label.upper(), max(6, cols - 10))
+    pw = text_width(pad)
+    inner = min(max(pw + 6, 14), max(10, cols - 4))
+    left = (inner - pw) // 2
+    centered = " " * left + pad + " " * (inner - pw - left)
+    bar_ = "─" * inner
+    s = ("\n  " + fg(rgb) + "╭" + bar_ + "╮" + RESET + "\n"
+         "  " + fg(rgb) + "│" + BOLD + centered + RESET + fg(rgb) + "│" + RESET + "\n"
+         "  " + fg(rgb) + "╰" + bar_ + "╯" + RESET + "\n")
+    for text, tone in lines:
+        s += "  " + fg(tone) + text + RESET + "\n"
+    out(s + "\n")
+
+
+def run_game(a, b, flags):
+    prefs = Prefs()
+    install_handlers()
+    caps = probe_terminal()
+    g = Game(a, b, prefs, caps, flags)
+    winner = draw()                     # before anything moves
+    TERM.enter()
+    if g.kitty:
+        TERM.kb_push()
+    g.build()
+    try:
+        table(g)
+    except Leave:
+        TERM.restore()
+        return 0
+    flight(g)
+    squeeze(g, winner)
+    reveal(g, winner)
+    g.stats.dump(_stat_extra(g))
+    TERM.restore()
+    result_box((a, b)[winner], ROSE, [("decided.", WHISPER)])
+    return 0
+
+
+def _stat_extra(g):
+    st = g.stage
+    return {"backend": st.backend, "coin_px": st.coin.D if st.coin else None,
+            "kitty_kb": g.kitty, "banked": bool(g.frames)}
+
+
+def run_plain(a, b):
+    """The toss with no keys and no sound, for when stdin isn't a terminal."""
+    install_handlers()
+    caps = probe_terminal() if sys.stdin.isatty() else {"kitty_kb": False, "backend": "halfblock", "cell": (0, 0)}
+    winner = draw()
+    TERM.enter()
+    load_numpy()
+    lines = shutil.get_terminal_size((90, 30)).lines
+    cols = shutil.get_terminal_size((90, 30)).columns
+    msg = "striking the coin…"
+    out(f"{ESC}[{max(1, lines // 2)};{max(1, (cols - len(msg)) // 2)}H{fg(WHISPER)}{msg}{RESET}")
+    emblems = pick_emblems(a, b)
+    stage = Stage(emblems, caps, cols, Screen.rows_for(lines))
+    if stage.coin is not None:
+        stage.coin.wait_upgrade()
+    out(f"{ESC}[2J")
+    scr = Screen(stage, a, b, emblems)
+    scr.text("title", "d e c i d e", TITLE, True)
+    scr.text("sub", "a fair toss · 50/50", LABEL)
+    rest = 0.0 if winner == 0 else math.pi
+    wlabel = (a, b)[winner].upper()
+    t0 = TERM.clock()
+    end = FLIGHT + CATCH + HOLD + LIFT_TIME + REVEAL + RESULT_HOLD
+    last = None
+    while True:
+        t = TERM.clock() - t0
+        if t >= end:
+            break
+        scr.relayout_if_needed()
+        if t < FLIGHT + CATCH + HOLD:
+            pose = film_pose(int(t * FPS) / FPS)
+            args = (pose[0], pose[1], -1, 0.0, pose[2])
+            scr.text("status", "in the air" if t < FLIGHT else "caught", WHISPER)
+        elif t < FLIGHT + CATCH + HOLD + LIFT_TIME:
+            pose = squeeze_pose(rest, (t - FLIGHT - CATCH - HOLD) / LIFT_TIME)
+            args = (pose[0], pose[1], -1, 0.0, pose[2])
+            scr.text("status", "lifting", WHISPER)
+        else:
+            k = _smoothstep(min(1.0, (t - end + RESULT_HOLD + REVEAL) / REVEAL))
+            pose = reveal_pose(rest, k)
+            args = (pose[0], pose[1], winner, k, pose[2])
+            scr.text("status", "→  " + wlabel, _blend(LABEL, ROSE, k), True)
+        scr.legend(win=winner if t >= FLIGHT + CATCH + HOLD + LIFT_TIME else None)
+        key = (args[0], args[1], args[2], args[3], tuple(sorted(args[4].items())))
+        img = None
+        if key != last:
+            last = key
+            img = stage.payload(args[0], args[1], args[2], args[3], **args[4])
+        scr.flush(img)
+        time.sleep(max(0.0, (math.floor(t * FPS) + 1) / FPS - (TERM.clock() - t0)))
+    TERM.restore()
+    result_box((a, b)[winner], ROSE, [("decided.", WHISPER)])
+    return 0
+
+
+def decide_static(a, b):
+    """Piped, dumb or tiny terminal: one fair draw, no animation."""
+    winner = (a, b)[draw()]
+    if not sys.stdout.isatty():
+        try:
+            print(winner)
+            sys.stdout.flush()
+        except BrokenPipeError:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        return 0
+    result_box(winner, ROSE, [("decided.", WHISPER)])
+    return 0
+
+
 def print_help():
     name = prog()
-    A = fg((248, 248, 248))
-    D = fg(LABEL)
-    W = fg(WHISPER)
+    A, D, W = fg(TITLE), fg(LABEL), fg(WHISPER)
     lines = [
         "",
-        f"  {A}decide{RESET} {D}— toss a 3D coin to choose between two things{RESET}",
+        f"  {A}decide{RESET} {D}— let a coin choose between two things{RESET}",
         "",
         f"  {A}USAGE{RESET}",
         f"    {name} <option 1> <option 2>",
         "",
         f"  {A}EXAMPLES{RESET}",
-        f"    {D}{name} pizza sushi{RESET}",
+        f'    {D}{name} "watch x movie" "watch y movie"{RESET}',
         f'    {D}{name} "stay in" "go out"{RESET}',
-        f"    {D}{name} -- -wine -beer{RESET}   {W}# -- lets options start with '-'{RESET}",
+        f"    {D}{name} -- -wine -beer{RESET}      {W}# -- lets options start with '-'{RESET}",
+        f"    {D}pick=$({name} tea coffee){RESET}   {W}# piped: just prints the option{RESET}",
+        "",
+        f"  {A}KEYS{RESET}",
+        f"    {D}hold space{RESET}     {W}pick up the coin; let go early or esc to back out{RESET}",
+        f"    {D}let go{RESET}         {W}throw{RESET}",
+        f"    {D}space, enter{RESET}   {W}lift the cover slowly, or turn it over{RESET}",
+        f"    {D}m, r, q{RESET}        {W}mute (sticks), reduced motion (sticks), leave{RESET}",
         "",
         f"  {A}FLAGS{RESET}",
-        f"    {D}-h, --help{RESET}       {W}show this help{RESET}",
-        f"    {D}-V, --version{RESET}    {W}print version and exit{RESET}",
-        f"    {D}    --no-color{RESET}   {W}disable colour (also honours NO_COLOR){RESET}",
+        f"    {D}--plain{RESET}        {W}just the toss: no keys, no sound{RESET}",
+        f"    {D}--mute{RESET}         {W}no sound this run (also DECIDE_SOUND=0){RESET}",
+        f"    {D}--reduced-motion{RESET} {W}still coin, same timing (also DECIDE_REDUCED_MOTION=1){RESET}",
+        f"    {D}--no-color{RESET}     {W}disable text colour (also honours NO_COLOR){RESET}",
+        f"    {D}-h, -V{RESET}         {W}help, version{RESET}",
         "",
-        f"  {A}HOW IT WORKS{RESET}",
-        f"    {W}The winner is drawn first, a fair 50/50 from the OS's secure{RESET}",
-        f"    {W}random source; the coin then plays it out over about 10 s.{RESET}",
-        f"    {W}One face is silver, the other black, each engraved with an{RESET}",
-        f"    {W}option's initial. It turns once so you can see which is which,{RESET}",
-        f"    {W}is tossed, slows to readable flips (the option facing up is{RESET}",
-        f"    {W}lit below the coin), lands, and the winning letter fades to rose.{RESET}",
-        "",
-        f"    {W}Piped or non-interactive, it just prints the chosen option,{RESET}",
-        f"    {W}so it is safe in scripts: {RESET}{D}pick=$({name} tea coffee){RESET}",
-        f"    {W}A tiny or TERM=dumb terminal skips the animation. There is no{RESET}",
-        f"    {W}skip; Ctrl-C aborts without showing a result.{RESET}",
+        f"  {A}WHAT TO KNOW{RESET}",
+        f"    {W}It's a fair 50/50, drawn before the coin moves. Holding and letting go{RESET}",
+        f"    {W}are a ritual and change nothing. There is no skip. Ctrl-C leaves without{RESET}",
+        f"    {W}a result. Tiny or TERM=dumb terminals get just the answer.{RESET}",
         "",
     ]
     out("\n".join(lines) + "\n")
@@ -623,8 +2407,8 @@ def print_version():
 def print_error(msg, hint=True):
     name = prog()
     if _COLOR and sys.stderr.isatty():
-        name_col = f"{fg((248, 248, 248))}{name}:{RESET}"
-    else:                                   # stderr redirected: no escapes
+        name_col = f"{fg(TITLE)}{name}:{RESET}"
+    else:
         name_col = f"{name}:"
     sys.stderr.write(f"{name_col} {msg}\n")
     if hint:
@@ -632,23 +2416,21 @@ def print_error(msg, hint=True):
 
 
 def parse_args(argv):
-    """Return (action, payload, no_color). action ∈ {help, version, error, run}.
-
-    Only dashed flags count, so 'help' or 'version' can be options. Every
-    token is read (not just up to the first flag) so --no-color also applies
-    to --help and errors, but nothing after '--' is ever a flag.
-    """
+    """Only dashed flags count, so 'help' or 'version' can be options. Every token
+    is read, so --no-color also applies to --help and errors; nothing after '--'
+    is ever a flag."""
     opts = []
     action, payload = "run", None
-    no_color = False
-    end_of_flags = False
+    f = {"no_color": False, "mute": False, "reduced": False, "plain": False}
+    named = {"--no-color": "no_color", "--mute": "mute", "--reduced-motion": "reduced", "--plain": "plain"}
+    end = False
     for tok in argv:
-        if end_of_flags or tok == "-" or not tok.startswith("-"):
+        if end or tok == "-" or not tok.startswith("-"):
             opts.append(tok)
         elif tok == "--":
-            end_of_flags = True
-        elif tok == "--no-color":
-            no_color = True
+            end = True
+        elif tok in named:
+            f[named[tok]] = True
         elif action == "run":                  # the first other flag wins
             if tok in ("-h", "--help"):
                 action = "help"
@@ -658,64 +2440,337 @@ def parse_args(argv):
                 action, payload = "error", f"unknown flag: {tok}"
     if action == "run":
         payload = opts
-    return action, payload, no_color
+    return action, payload, f
 
 
-def decide_static(a, b):
-    """Pick a winner without the animation (piped / dumb / tiny terminal)."""
-    winner = secrets.choice((a, b))
-    if not sys.stdout.isatty():
-        try:
-            print(winner)
-            sys.stdout.flush()
-        except BrokenPipeError:
-            # reader went away; silence the interpreter's shutdown flush
-            devnull = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(devnull, sys.stdout.fileno())
-        return 0
-    final_result(winner)
-    return 0
+# ─── selftest: DECIDE_SELFTEST=1, or a space list of groups ──────────────
+class PtyRun:
+    """Runs this script on a pty, answers terminal queries like the terminal it
+    plays, and lets a test feed key bytes and watch the output. Never touches the
+    caller's state: every run gets the test's scratch dirs."""
+
+    def __init__(self, args, env, cols=70, rows=30, cell=(8, 16), answer="kitty", term="foot"):
+        import pty
+        self.answer = answer
+        self.buf = b""
+        self.seen = 0
+        self.code = None
+        self.exit_status = None
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.environ.update(env)
+            os.environ["TERM"] = term
+            os.environ.pop("NO_COLOR", None)
+            os.environ.pop("DECIDE_SELFTEST", None)
+            os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+            argv = [sys.executable, os.path.abspath(__file__ if "__file__" in globals() else sys.argv[0])] + args
+            os.execv(sys.executable, argv)
+        self.pid, self.fd = pid, fd
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack(
+            "HHHH", rows, cols, cols * cell[0], rows * cell[1]))
+
+    def pump(self, seconds=0.0):
+        end = time.perf_counter() + seconds
+        while True:
+            left = end - time.perf_counter()
+            r, _, _ = select.select([self.fd], [], [], max(0.0, min(left, 0.05)))
+            if r:
+                try:
+                    data = os.read(self.fd, 1 << 18)
+                except OSError:
+                    data = b""
+                if not data:
+                    self._reap()
+                    return
+                self._answer(data)
+                self.buf += data
+                if len(self.buf) > 1 << 27:    # images are big; keep the tail and marks
+                    self.buf = self.buf[-(1 << 24):]
+                    self.seen = 0
+            if time.perf_counter() >= end:
+                return
+
+    def _answer(self, data):
+        if self.answer == "silent":
+            return
+        reply = b""
+        if b"\033[?u" in data and self.answer == "kitty":
+            reply += b"\033[?0u"
+        if b"\033[c" in data:
+            reply += b"\033[?62;4c"
+        if reply:
+            os.write(self.fd, reply)
+
+    def wait_for(self, marker, timeout=30.0):
+        """Block until marker appears in new output; True if it did."""
+        m = marker.encode() if isinstance(marker, str) else marker
+        end = time.perf_counter() + timeout
+        while time.perf_counter() < end:
+            i = self.buf.find(m, self.seen)
+            if i >= 0:
+                self.seen = i + len(m)
+                return True
+            if self.exit_status is not None:
+                return self.buf.find(m, self.seen) >= 0
+            self.pump(0.02)
+        return False
+
+    def send(self, b):
+        os.write(self.fd, b)
+
+    def _reap(self):
+        if self.exit_status is None:
+            with contextlib.suppress(ChildProcessError):
+                _, st = os.waitpid(self.pid, 0)
+                self.exit_status = os.waitstatus_to_exitcode(st)
+
+    def wait_exit(self, timeout=30.0):
+        end = time.perf_counter() + timeout
+        while self.exit_status is None and time.perf_counter() < end:
+            self.pump(0.05)
+            with contextlib.suppress(ChildProcessError):
+                p, st = os.waitpid(self.pid, os.WNOHANG)
+                if p:
+                    self.exit_status = os.waitstatus_to_exitcode(st)
+        return self.exit_status
+
+    def kill(self):
+        with contextlib.suppress(ProcessLookupError, ChildProcessError):
+            os.kill(self.pid, signal.SIGKILL)
+            os.waitpid(self.pid, 0)
+        with contextlib.suppress(OSError):
+            os.close(self.fd)
+
+    def restored(self, kitty=None):
+        """The tail must leave the terminal as it found it."""
+        t = self.buf
+        ok = t.rfind(b"\033[?1049l") > t.rfind(b"\033[?1049h") and t.rfind(b"\033[?25h") > t.rfind(b"\033[?25l")
+        if kitty:
+            ok = ok and t.rfind(b"\033[<u") > t.rfind(b"\033[>10u")
+        return ok
+
+
+SP_DOWN = b"\033[32;1:1u"
+SP_REPEAT = b"\033[32;1:2u"
+SP_UP = b"\033[32;1:3u"
 
 
 def selftest():
-    """Headless sanity check: dump plain frames + timing, no TTY needed."""
-    wc, hc = 72, 34
-    emblems = pick_emblems("pizza", "sushi")
-    for angle in (0.0, math.pi / 2, math.pi):
-        grid = render_grid(wc, hc, angle, 0.3, emblems, -1, 0.0)
-        print(f"--- angle={angle:.2f} ---")
-        print("\n".join(grid_to_plain(grid)))
+    groups = os.environ.get("DECIDE_SELFTEST", "1").split()
+    all_ = "1" in groups or "all" in groups
+    tmp = tempfile.mkdtemp(prefix="decide-selftest-")
+    res = []
 
-    # timeline: ends on the winner, the landing never shows the loser,
-    # and the last flips are slow enough to follow
-    for winner in (0, 1):
-        ts = [i / 200.0 for i in range(int(TOTAL * 200) + 1)]
-        poses = [pose(t, winner) for t in ts]
-        assert up_face(poses[-1][0]) == winner and poses[-1][3] == 1.0
-        landed = [p for t, p in zip(ts, poses) if t >= INTRO + FLIGHT]
-        assert all(up_face(p[0]) == winner for p in landed), "near miss"
-        flips = [t for t, p, q in zip(ts, poses, poses[1:])
-                 if up_face(p[0]) != up_face(q[0]) and up_face(q[0]) != -1]
-        gaps = [round(b - a, 2) for a, b in zip(flips, flips[1:])]
-        print(f"winner {winner}: {TOTAL:.1f} s total, last face-up spans "
-              f"{gaps[-4:]} s")
-    n = 24
-    t0 = time.perf_counter()
-    for i in range(n):
-        render_grid(wc, hc, i * 0.3, 0.2, emblems, -1, 0.0)
-    dt = (time.perf_counter() - t0) / n
-    print(f"\nmean frame compute: {dt*1000:.1f} ms  (~{1/dt:.0f} fps) at {wc}x{hc}")
+    def check(name, ok, detail=""):
+        res.append(bool(ok))
+        print(f"  {'ok  ' if ok else 'FAIL'}  {name}" + (f"  [{detail}]" if detail else ""), flush=True)
+
+    def want(g):
+        return all_ or g in groups
+
+    def env(tag, **kw):
+        base = os.path.join(tmp, tag)
+        e = {"XDG_STATE_HOME": base + "/state", "XDG_CACHE_HOME": base + "/cache", "DECIDE_SOUND": "0"}
+        e.update(kw)
+        return e
+
+    def run_cli(args, e, **kw):
+        full = {**os.environ, **e, "PYTHONDONTWRITEBYTECODE": "1"}
+        full.pop("DECIDE_SELFTEST", None)
+        return subprocess.run([sys.executable, os.path.abspath(sys.argv[0])] + args, env=full,
+                              capture_output=True, text=True, timeout=120, **kw)
+
+    def throw_kitty(run):
+        run.send(SP_DOWN)
+        armed = run.wait_for("LET GO TO THROW", 10)
+        run.send(SP_UP)
+        return armed and run.wait_for("in the air", 5)
+
+    load_numpy()
+
+    if want("film"):
+        print("film")
+        import inspect
+        for fn in (flight_pose, catch_pose, film_pose, still_pose):
+            check(f"{fn.__name__} takes only the clock", list(inspect.signature(fn).parameters) == ["t"])
+        x = (flight_angle(1.0, FLIGHT, SPIN_HI, SPIN_LO) - edge_on_angle()) % math.pi
+        check("flight lands edge-on", min(x, math.pi - x) < 1e-6)
+        ts = [i / 240 for i in range(int((CATCH + HOLD) * 240))]
+        check("covered from the catch on", all(catch_pose(t)[2]["seal"] == 1.0 for t in ts))
+        check("toss takes at least 5 s", FLIGHT + CATCH + HOLD + REVEAL >= 5)
+        bits = [draw() for _ in range(40000)]
+        check("draw is unbiased within 4 sigma", abs(sum(bits) - 20000) < 400, str(sum(bits)))
+        for args, want_e in ((("watch x movie", "watch y movie"), ("X", "Y")),
+                             (("pizza", "sushi"), ("P", "S")),
+                             (("stay in", "go out"), ("S", "G")),
+                             (("Watch Dune", "watch alien"), ("D", "A")),
+                             (("pizza", "pasta"), ("1", "2")),
+                             (("watch", "watch it"), ("1", "2")),
+                             (("🍕", "🍣"), ("1", "2"))):
+            check(f"coin letters for {args}", pick_emblems(*args) == want_e, str(pick_emblems(*args)))
+
+    if want("frames") and np is not None:
+        print("frames")
+        c = Coin(200, ("X", "Y"))
+        c.wait_upgrade()
+        same = lambda a, b: np.array_equal(a.idx, b.idx) and np.array_equal(a.palette, b.palette)
+        p0, p1 = squeeze_pose(0.0, 0.0), squeeze_pose(math.pi, 0.0)
+        check("covered coin looks the same for either result",
+              same(c.frame(p0[0], p0[1], -1, 0.0, None, **p0[2]), c.frame(p1[0], p1[1], -1, 0.0, None, **p1[2])))
+        lum, area = [], []
+        for i in range(int(FLIGHT * FPS)):
+            a, y, fx = flight_pose(i / FPS)
+            fr = c.frame(a, y, -1, 0.0, None, **fx)
+            g = fr.palette[fr.idx].astype(np.float32).mean(axis=2) / 255
+            lum.append(float(g.mean()))
+            H, W = g.shape                     # the coin's own area, not the black round it
+            area.append(float(g[H // 10:H * 7 // 10, W // 6:W * 5 // 6].mean()))
+        lum = np.array(lum[int(0.4 * FPS):])       # past the tone's ramp-in
+        area = np.array(area[int(0.4 * FPS):])
+        check("spin brightness stays even (no pulsing)", lum.max() / lum.min() <= PULSE_MAX,
+              f"{lum.max() / lum.min():.2f}× swing, limit {PULSE_MAX}×")
+        # WCAG 2.3.1: count opposing swings of 10% of full scale, on relative luminance
+        rel = np.where(area <= 0.04045, area / 12.92, ((area + 0.055) / 1.055) ** 2.4)
+        flashes, ref, sign = 0, rel[0], 0
+        for v in rel[1:]:
+            d = v - ref
+            if abs(d) >= 0.1:
+                if sign and (d > 0) != (sign > 0):
+                    flashes += 1
+                sign, ref = (1 if d > 0 else -1), v
+            elif sign and ((sign > 0 and v > ref) or (sign < 0 and v < ref)):
+                ref = v
+        check("under 3 flashes a second", flashes / 2 / (len(rel) / FPS) <= 3, f"{flashes / 2 / (len(rel) / FPS):.2f}/s")
+
+    if want("paths"):
+        print("paths")
+        e = env("piped")
+        r = run_cli(["tea", "coffee"], e)
+        check("piped prints one option", r.returncode == 0 and r.stdout in ("tea\n", "coffee\n"), repr(r.stdout))
+        check("piped keeps no state", not os.path.exists(e["XDG_STATE_HOME"]))
+        for args, code in (([], 2), (["a"], 2), (["a", "b", "c"], 2), (["--nope"], 2), (["a", ""], 2),
+                           (["--help"], 0), (["-V"], 0), (["help", "version"], 0), (["--", "-a", "-b"], 0)):
+            check(f"{args} exits {code}", run_cli(args, e).returncode == code)
+        h = run_cli(["--help"], e).stdout.lower()
+        check("help has no betting words", not any(w in h for w in ("stake", "chip", "ledger", "bet ", "credit")))
+        for flag in ("--welsh", "--ledger", "--rules", "--audit"):
+            check(f"{flag} is gone", run_cli([flag], e).returncode == 2)
+
+    if want("push"):
+        print("push")
+        e = env("push")
+        run = PtyRun(["pizza", "sushi"], e)
+        check("reaches the table", run.wait_for("hold space", 60))
+        run.send(SP_REPEAT)
+        run.pump(0.5)
+        check("a held key's repeats don't charge", not run.wait_for("let go early", 0.3))
+        run.send(SP_DOWN)
+        check("press starts the charge", run.wait_for("let go early", 5))
+        run.send(SP_UP)
+        run.pump(0.8)
+        check("early release backs out", run.exit_status is None and b"in the air" not in run.buf)
+        run.send(SP_DOWN)
+        check("press again arms", run.wait_for("LET GO TO THROW", 10))
+        run.pump(2.5)
+        check("holding forever never throws", b"in the air" not in run.buf)
+        run.send(b"\033[27;1:1u")              # esc backs out; space must be pressed afresh
+        run.pump(0.5)
+        run.send(SP_UP)
+        run.pump(0.5)
+        check("esc disarms", b"in the air" not in run.buf)
+        check("release after esc doesn't throw", b"in the air" not in run.buf)
+        run.send(b"\033[99;5u")                # Ctrl-C in this keyboard mode
+        check("ctrl-c at the table exits 130", run.wait_exit(10) == 130, str(run.exit_status))
+        check("terminal restored", run.restored(kitty=True))
+        run.kill()
+
+        run = PtyRun(["pizza", "sushi"], env("legacy"), answer="legacy")
+        check("legacy terminal reaches the table", run.wait_for("press space", 60))
+        run.pump(0.4)
+        run.send(b" ")
+        run.pump(0.6)                          # a held key: the repeat delay, then repeats
+        for _ in range(60):                    # right through the charge and past armed
+            run.send(b" ")
+            run.pump(0.04)
+        check("legacy press arms", b"SPACE TO THROW" in run.buf)
+        check("legacy held key doesn't throw", b"in the air" not in run.buf)
+        run.pump(0.4)
+        run.send(b" ")
+        check("legacy second press throws", run.wait_for("in the air", 5))
+        os.kill(run.pid, signal.SIGINT)
+        check("ctrl-c in the air exits 130", run.wait_exit(10) == 130, str(run.exit_status))
+        check("no result shown after ctrl-c", b"decided." not in run.buf)
+        run.kill()
+
+    if want("toss"):
+        print("toss")
+        e = env("toss", DECIDE_STATS=os.path.join(tmp, "stats.json"))
+        run = PtyRun(["watch x movie", "watch y movie"], e)
+        run.wait_for("hold space", 60)
+        check("throw", throw_kitty(run))
+        t0 = time.perf_counter()
+        check("cover comes up", run.wait_for("enter to turn it over", 15))
+        check("flight and hold not shortened", time.perf_counter() - t0 >= FLIGHT + CATCH + HOLD - 0.3,
+              f"{time.perf_counter() - t0:.2f} s")
+        run.send(b"\033[13;1:1u")
+        check("result box", run.wait_for("decided.", 15))
+        check("exits 0", run.wait_exit(10) == 0, str(run.exit_status))
+        check("terminal restored", run.restored(kitty=True))
+        tail = run.buf[run.buf.rfind(b"\033[?1049l"):].decode(errors="replace")
+        check("names the full option", "WATCH X MOVIE" in tail or "WATCH Y MOVIE" in tail)
+        run.kill()
+        with open(e["DECIDE_STATS"]) as f:
+            s = json.load(f)
+        print(f"  info  backend {s['backend']}, coin {s['coin_px']} px, flight {s['flight']['fps']} fps")
+        check("frame rate holds", s["flight"]["fps"] >= 24, str(s["flight"]["fps"]))
+
+    if want("sound"):
+        print("sound")
+        bin_dir = os.path.join(tmp, "bin")
+        os.makedirs(bin_dir)
+        log = os.path.join(tmp, "played.log")
+        fake = os.path.join(bin_dir, "pw-play")
+        with open(fake, "w") as f:
+            f.write(f'#!/bin/sh\nbasename "$1" >> {shlex_quote(log)}\nsleep 30\n')
+        os.chmod(fake, 0o755)
+        e = env("sound", PATH=bin_dir + os.pathsep + os.environ["PATH"])
+        e.pop("DECIDE_SOUND")
+        run = PtyRun(["pizza", "sushi"], e)
+        run.wait_for("hold space", 60)
+        done = os.path.join(e["XDG_CACHE_HOME"], "decide", f"{__version__}-{SOUND_REV}", ".done")
+        end = time.perf_counter() + 60
+        while not os.path.exists(done) and time.perf_counter() < end:
+            run.pump(0.2)
+        check("sounds generated", os.path.exists(done))
+        check("first run says it makes sound", b"this makes sound" in run.buf)
+        run.pump(0.5)
+        check("silent at the table", not os.path.exists(log))
+        check("throw", throw_kitty(run))
+        run.pump(0.3)
+        played = open(log).read().split()
+        check("hum, clack and flight played", {"hum.wav", "clack.wav", "flight.wav"} <= set(played), " ".join(played))
+        os.kill(run.pid, signal.SIGINT)
+        run.wait_exit(10)
+        run.pump(0.3)
+        alive = subprocess.run(["pgrep", "-f", fake], capture_output=True, text=True).stdout.strip()
+        check("no player left after ctrl-c", not alive, alive)
+        run.kill()
+
+    shutil.rmtree(tmp, ignore_errors=True)
+    print(f"\n{sum(res)}/{len(res)} passed")
+    return 0 if all(res) else 1
+
+
+def shlex_quote(s):
+    return "'" + s.replace("'", "'\\''") + "'"
 
 
 def main():
     if os.environ.get("DECIDE_SELFTEST"):
-        selftest()
-        return 0
+        return selftest()
 
-    action, payload, no_color = parse_args(sys.argv[1:])
-    # NO_COLOR counts only when non-empty (no-color.org); a pipe gets plain
-    # text too, so `decide --help | less` shows no raw escapes.
-    if no_color or os.environ.get("NO_COLOR") or not sys.stdout.isatty():
+    action, payload, f = parse_args(sys.argv[1:])
+    if f["no_color"] or os.environ.get("NO_COLOR") or not sys.stdout.isatty():
         set_color(False)
 
     if action == "help":
@@ -731,7 +2786,7 @@ def main():
     opts = [o.strip() for o in payload]
     if len(opts) == 0:
         print_error("need two options to decide between, e.g. "
-                    f"{prog()} pizza sushi")
+                    f'{prog()} "watch x movie" "watch y movie"')
         return 2
     if len(opts) == 1:
         print_error(f"need two options, only one given: '{opts[0]}'")
@@ -751,31 +2806,23 @@ def main():
                and sz.columns >= 40 and sz.lines >= 18)
     if not animate:
         return decide_static(a, b)
+    if f["plain"] or not sys.stdin.isatty():
+        return run_plain(a, b)
+    return run_game(a, b, f)
 
-    out(ALT_ON + HIDE)
-    result = None
+
+def _entry():
     try:
-        result = run(a, b)
+        code = main()
     except KeyboardInterrupt:
-        result = None
-    finally:
-        out(SHOW + ALT_OFF)
-
-    if result is None:
-        return 130
-    final_result(result)
-    return 0
+        TERM.restore()
+        sys.exit(130)
+    except BrokenPipeError:
+        with contextlib.suppress(Exception):
+            sys.stdout.close()
+        sys.exit(0)
+    sys.exit(code)
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except KeyboardInterrupt:
-        out(SHOW + ALT_OFF)
-        sys.exit(130)
-    except BrokenPipeError:
-        try:
-            sys.stdout.close()
-        except Exception:
-            pass
-        sys.exit(0)
+    _entry()

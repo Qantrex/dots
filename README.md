@@ -37,7 +37,7 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 🚫 `spotify-adblock` | Ad/tracking filter + `spotify.desktop` that loads it |
 | ⌨️ `homerow` | Launcher entry and icon for the homerow typing test, a Rust TUI in its own foot window (`scripts/homerow.sh`). The binary is built from `~/Projects/homerow` with `npm run deploy` |
 | ⚙️ `scripts` | Helper scripts |
-| 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` tosses an ASCII 3D coin to pick one |
+| 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` throws a pixel-rendered 3D coin to pick one |
 
 ---
 
