@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=homerow
+GenericName=Typing Test
+Comment=Minimalist typing test
+Icon=homerow
+Exec=sh -c "\\$HOME/.local/bin/homerow"
+Terminal=false
+Categories=Education;

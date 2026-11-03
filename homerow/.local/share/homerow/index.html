@@ -1,0 +1,2660 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>homerow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&family=JetBrains+Mono:wght@400;700&family=Fira+Code:wght@400;700&family=IBM+Plex+Mono:wght@400;700&family=Source+Code+Pro:wght@400;700&display=swap">
+<style>
+/* Layout: one centred typing column; the words are the only loud thing, everything else recedes. */
+:root {
+  color-scheme: dark;
+  --bg: #000000; --fg: #ffffff; --dim: #7a7a7a; --faint: #2a2a2a; --surface: #111111;
+  --accent: #ffffff; --err: #eb6f92; --extra: #a84f6a; --warn: #f6c177; --link: #c4a7e7;
+  --font: 'Roboto Mono', ui-monospace, 'DejaVu Sans Mono', Menlo, Consolas, monospace;
+  --words-size: 24px; --words-lh: 38px;
+}
+:root[data-look="graphite"] { --bg: #161616; --dim: #868686; --faint: #333333; --surface: #222222; }
+:root[data-look="paper"] {
+  color-scheme: light;
+  --bg: #ffffff; --fg: #000000; --dim: #6f6f6f; --faint: #dddddd; --surface: #f1f1f1;
+  --accent: #000000; --err: #b4365c; --extra: #8a2b48; --warn: #8a5a00; --link: #6b4f9c;
+}
+:root[data-look="rose"] { --accent: #eb6f92; }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font); }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+input, textarea { font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--faint); border-radius: 4px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+a { color: var(--link); }
+h1 { font-size: 1.5rem; font-weight: 400; margin: 0; }
+h2 { font-size: 1rem; font-weight: 400; color: var(--dim); margin: 0; }
+kbd { font: inherit; font-size: .85em; background: var(--surface); padding: 0 .4em; border-radius: 3px; }
+
+#app {
+  min-height: 100%; display: flex; flex-direction: column; gap: 24px;
+  max-width: 1100px; margin: 0 auto; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+main > section { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.chrome { transition: opacity .2s; }
+body.typing .chrome, body.typing #langBtn, body.typing #testActions { opacity: 0; }
+
+#top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 24px; }
+#logo { font-size: 1.5rem; color: var(--fg); text-decoration: none; }
+#top nav { display: flex; gap: 16px; }
+#top nav a { color: var(--dim); text-decoration: none; }
+#top nav a:hover, #top nav a[aria-current] { color: var(--fg); }
+#foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 24px; color: var(--dim); font-size: .8rem; }
+
+#configBar {
+  align-self: center; max-width: 100%; display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+  gap: 4px 12px; background: var(--surface); border-radius: 6px; padding: 6px 12px; font-size: .85rem;
+}
+#configBar button { color: var(--dim); }
+#configBar button:hover { color: var(--fg); }
+#configBar button[aria-pressed="true"] { color: var(--fg); font-weight: 700; }
+#configBar .sep { width: 2px; height: 1em; background: var(--faint); }
+
+#testView { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px; position: relative; min-width: 0; }
+#capsWarn { position: absolute; top: 0; left: 50%; transform: translateX(-50%); color: var(--warn); font-size: .85rem; white-space: nowrap; }
+#testTop { display: grid; min-height: 2em; align-items: center; }
+#testTop > * { grid-area: 1 / 1; }
+#live { display: flex; gap: 20px; font-size: 1.4rem; color: var(--accent); font-variant-numeric: tabular-nums; }
+#langBtn { justify-self: center; color: var(--dim); font-size: .85rem; transition: opacity .2s; }
+#langBtn:hover { color: var(--fg); }
+#wordsWrap { position: relative; cursor: text; }
+#hiddenInput {
+  position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0;
+  pointer-events: none; font-size: 16px;
+}
+#words {
+  position: relative; overflow: hidden; height: calc(var(--words-lh) * 3);
+  font-size: var(--words-size); line-height: var(--words-lh); transition: filter .15s;
+}
+#wordsWrap.blurred #words { filter: blur(4px); opacity: .5; }
+#wordsInner { position: relative; display: flex; flex-wrap: wrap; align-content: flex-start; font-variant-ligatures: none; }
+.word { margin-right: .6em; max-width: 100%; color: var(--dim); min-width: .3em; min-height: var(--words-lh); }
+.word.wrong { box-shadow: inset 0 -2px 0 var(--err); }
+.l { display: inline-block; position: relative; white-space: pre; }
+.l.correct { color: var(--fg); }
+.l.incorrect { color: var(--err); }
+.l.extra { color: var(--extra); }
+.l[data-t]::after {
+  content: attr(data-t); position: absolute; left: 0; right: 0; top: 72%; text-align: center;
+  font-size: .5em; line-height: 1.2; color: var(--err);
+}
+#focusMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; }
+#caret {
+  position: absolute; top: 0; left: 0; pointer-events: none; will-change: transform;
+  transition: transform .09s linear;
+}
+#caret.noanim { transition: none; }
+#caret.blink { animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+#caret[data-style="line"] { background: var(--accent); margin-top: 3px; }
+#caret[data-style="block"] { background: var(--accent); opacity: .45; }
+#caret[data-style="block"].blink { animation-name: blinkSoft; }
+@keyframes blinkSoft { 50% { opacity: .1; } }
+#caret[data-style="outline"] { border: 2px solid var(--accent); }
+#caret[data-style="underline"] { border-bottom: 3px solid var(--accent); }
+#caret[data-style="off"] { display: none; }
+#testActions { display: flex; justify-content: center; gap: 16px; min-height: 36px; align-items: center; transition: opacity .2s; }
+#restartBtn, #finishBtn { color: var(--dim); padding: 8px; }
+#restartBtn:hover, #restartBtn:focus, #finishBtn:hover { color: var(--fg); }
+
+#resultView { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 20px; min-width: 0; }
+#resultNotice { color: var(--warn); }
+#resultNotice.fail { color: var(--err); }
+#resultMain { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: stretch; }
+#resultBig { display: flex; flex-direction: column; gap: 8px; min-width: 130px; }
+.metric { display: flex; flex-direction: column; }
+.metricLabel { color: var(--dim); font-size: 1.1rem; }
+.metricHuge { font-size: 3.5rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+#resPb { font-size: .85rem; border: 1px solid var(--accent); color: var(--accent); padding: 2px 8px; border-radius: 4px; align-self: flex-start; }
+#resDetails { display: flex; flex-wrap: wrap; gap: 12px 40px; margin: 0; }
+#resDetails div { min-width: 0; }
+#resDetails dt { color: var(--dim); font-size: .85rem; }
+#resDetails dd { margin: 0; font-size: 1.25rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#resDetails dd.small { font-size: .95rem; }
+#resSource { margin: 0; color: var(--dim); }
+#resActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { background: var(--surface); padding: 6px 14px; border-radius: 4px; color: var(--fg); }
+.btn:hover:not(:disabled) { background: var(--fg); color: var(--bg); }
+.btn:disabled { color: var(--dim); cursor: not-allowed; }
+.btn.danger { color: var(--err); }
+.btn.danger:hover { background: var(--err); color: var(--bg); }
+
+.chartBox { min-width: 0; display: flex; flex-direction: column; gap: 6px; position: relative; }
+.chartCanvasWrap { position: relative; height: 200px; }
+.chartCanvasWrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: pan-y; }
+.chartLegend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: .75rem; color: var(--dim); }
+.chartLegend span { display: inline-flex; align-items: center; gap: 6px; }
+.chartLegend svg { flex: none; }
+.chartTip {
+  position: absolute; pointer-events: none; z-index: 2; background: var(--surface); border: 1px solid var(--faint);
+  border-radius: 4px; padding: 6px 10px; font-size: .75rem; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.chartTip b { font-weight: 400; color: var(--dim); }
+
+#pageStats, #pagePrefs, #pageAbout { max-width: 900px; width: 100%; margin: 0 auto; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px 24px; margin: 0; }
+.tiles dt { color: var(--dim); font-size: .85rem; }
+.tiles dd { margin: 0; font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.tableWrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .85rem; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--dim); font-weight: 400; }
+th, td { padding: 6px 12px 6px 0; border-bottom: 1px solid var(--faint); white-space: nowrap; }
+.rowBtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.empty { color: var(--dim); margin: 0; }
+.filter { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .85rem; }
+.filter button { color: var(--dim); }
+.filter button[aria-pressed="true"] { color: var(--fg); font-weight: 700; }
+.block { display: flex; flex-direction: column; gap: 12px; }
+
+.prefRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px 24px; padding: 12px 0; border-bottom: 1px solid var(--faint); }
+.prefRow p { margin: 0; color: var(--dim); font-size: .8rem; }
+.prefOpts { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+.prefOpts button { background: var(--surface); color: var(--dim); padding: 4px 10px; border-radius: 4px; font-size: .85rem; }
+.prefOpts button:hover { color: var(--fg); }
+.prefOpts button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.defs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 20px; margin: 0; }
+.defs dd { margin: 0; color: var(--dim); }
+#pageAbout p { margin: 0; max-width: 65ch; }
+
+.overlay { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .7); display: flex; justify-content: center; align-items: flex-start; padding: 12vh max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); }
+.panel { width: 100%; max-width: 560px; max-height: 76vh; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--faint); border-radius: 6px; overflow: hidden; }
+#paletteInput { border: 0; border-bottom: 1px solid var(--faint); border-radius: 0; padding: 12px 16px; outline: none; width: 100%; }
+#paletteList { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+#paletteList li { padding: 6px 16px; cursor: pointer; color: var(--dim); display: flex; justify-content: space-between; gap: 12px; }
+#paletteList li[aria-selected="true"] { background: var(--fg); color: var(--bg); }
+#modalForm { padding: 20px; gap: 12px; }
+#modalForm input, #modalForm textarea { width: 100%; padding: 8px; resize: vertical; background: var(--bg); }
+#modalForm p { margin: 0; color: var(--dim); overflow-wrap: anywhere; }
+#modalForm #modalError { color: var(--err); }
+#modalForm .btn { background: var(--bg); }
+#modalForm .btn:hover { background: var(--fg); color: var(--bg); }
+.modalBtns { display: flex; justify-content: flex-end; gap: 8px; }
+#toast { position: fixed; z-index: 20; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 6px 14px; border-radius: 4px; font-size: .85rem; max-width: 90vw; }
+
+@media (max-width: 700px) {
+  #resultMain { grid-template-columns: minmax(0, 1fr); }
+  #resultBig { flex-direction: row; flex-wrap: wrap; gap: 24px; }
+  .prefRow { grid-template-columns: minmax(0, 1fr); }
+  .metricHuge { font-size: 3rem; }
+  .defs { grid-template-columns: minmax(0, 1fr); }
+  .defs dd { margin-bottom: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+  #caret.blink { animation: none; }
+}
+
+</style>
+<div id="app">
+  <header id="top" class="chrome">
+    <a id="logo" href="#test">homerow</a>
+    <nav aria-label="Pages">
+      <a href="#test" data-page="test">test</a>
+      <a href="#stats" data-page="stats">stats</a>
+      <a href="#prefs" data-page="prefs">prefs</a>
+      <a href="#about" data-page="about">about</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="pageTest">
+      <div id="configBar" class="chrome" role="toolbar" aria-label="Test options"></div>
+
+      <div id="testView">
+        <div id="capsWarn" role="status" hidden>Caps Lock is on</div>
+        <div id="testTop">
+          <div id="live" aria-live="off"><span id="liveTimer"></span><span id="liveWpm"></span><span id="liveAcc"></span></div>
+          <button id="langBtn" type="button" title="Change language"></button>
+        </div>
+        <div id="wordsWrap">
+          <input id="hiddenInput" type="text" value=" " aria-label="Typing input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" tabindex="-1">
+          <div id="words"><div id="wordsInner"></div><div id="caret" aria-hidden="true"></div></div>
+          <div id="focusMsg" hidden>Click here or press any key to focus</div>
+        </div>
+        <div id="testActions">
+          <button id="restartBtn" type="button" title="Restart test" aria-label="Restart test">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+          </button>
+          <button id="finishBtn" type="button" hidden>finish</button>
+        </div>
+      </div>
+
+      <div id="resultView" hidden>
+        <div id="resultNotice" role="status" hidden></div>
+        <div id="resultMain">
+          <div id="resultBig">
+            <div class="metric"><span class="metricLabel">wpm</span><span id="resWpm" class="metricHuge"></span></div>
+            <div class="metric"><span class="metricLabel">acc</span><span id="resAcc" class="metricHuge"></span></div>
+            <div id="resPb" hidden>new personal best</div>
+          </div>
+          <div id="resChart" class="chartBox"></div>
+        </div>
+        <dl id="resDetails"></dl>
+        <p id="resSource" hidden></p>
+        <div id="resActions">
+          <button id="nextBtn" type="button" class="btn">next test</button>
+          <button id="repeatBtn" type="button" class="btn">repeat test</button>
+          <button id="practiceBtn" type="button" class="btn">practice missed words</button>
+          <button id="copyBtn" type="button" class="btn">copy result</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="pageStats" hidden></section>
+    <section id="pagePrefs" hidden></section>
+    <section id="pageAbout" hidden>
+      <h1>about</h1>
+      <p>homerow is an unofficial project inspired by <a href="https://monkeytype.com" target="_blank" rel="noopener">monkeytype.com</a>. It has no accounts and no server. Your settings and history stay in this browser.</p>
+      <h2>how speed is measured</h2>
+      <dl class="defs">
+        <dt>wpm</dt><dd>Characters in correctly typed words, plus the spaces after them, divided by 5, per minute. In time mode a correct partial last word counts too.</dd>
+        <dt>raw</dt><dd>All typed characters per minute divided by 5: correct, incorrect, extra and spaces.</dd>
+        <dt>accuracy</dt><dd>Correct keypresses as a share of all keypresses. Fixing a typo with backspace doesn't undo the wrong press.</dd>
+        <dt>consistency</dt><dd>How steady your raw speed was from second to second, on a 0-100 scale. Key consistency measures the same over the gaps between keypresses.</dd>
+        <dt>burst</dt><dd>Your speed over a single word.</dd>
+      </dl>
+      <h2>keyboard shortcuts</h2>
+      <dl class="defs keys">
+        <dt><kbd>tab</kbd> then <kbd>enter</kbd></dt><dd>restart the test</dd>
+        <dt><kbd>esc</kbd> or <kbd>ctrl</kbd> <kbd>shift</kbd> <kbd>p</kbd></dt><dd>open the command palette</dd>
+        <dt><kbd>shift</kbd> <kbd>enter</kbd></dt><dd>finish a zen test</dd>
+        <dt><kbd>ctrl</kbd> <kbd>backspace</kbd></dt><dd>clear the current word</dd>
+      </dl>
+    </section>
+  </main>
+
+  <footer id="foot" class="chrome">
+    <span><kbd>tab</kbd> + <kbd>enter</kbd> restart</span>
+    <span><kbd>esc</kbd> command palette</span>
+    <span id="zenHint" hidden><kbd>shift</kbd> + <kbd>enter</kbd> finish</span>
+  </footer>
+</div>
+
+<div id="palette" class="overlay" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input id="paletteInput" type="text" placeholder="type a command" aria-label="Filter commands" autocomplete="off" spellcheck="false">
+    <ul id="paletteList" role="listbox" aria-label="Commands"></ul>
+  </div>
+</div>
+
+<div id="modal" class="overlay" hidden>
+  <form id="modalForm" class="panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h2 id="modalTitle"></h2>
+    <p id="modalText" hidden></p>
+    <input id="modalInput" type="number" aria-labelledby="modalTitle" hidden>
+    <textarea id="modalArea" rows="8" aria-labelledby="modalTitle" spellcheck="false" hidden></textarea>
+    <p id="modalError" role="alert" hidden></p>
+    <div class="modalBtns">
+      <button id="modalCancel" type="button" class="btn">cancel</button>
+      <button id="modalOk" type="submit" class="btn">ok</button>
+    </div>
+  </form>
+</div>
+
+<div id="toast" role="status" hidden></div>
+<script>
+// Public-domain passages. Verse line breaks are written as spaces.
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  HR.data = HR.data || {};
+  const q = (text, source) => ({ text, source });
+  HR.data.quotes = {
+    english: [
+      q(`It was the best of times, it was the worst of times.`, `Charles Dickens, A Tale of Two Cities`),
+      q(`Call me Ishmael.`, `Herman Melville, Moby-Dick`),
+      q(`All that we see or seem is but a dream within a dream.`, `Edgar Allan Poe, A Dream Within a Dream`),
+      q(`To be, or not to be, that is the question.`, `William Shakespeare, Hamlet`),
+      q(`The lady doth protest too much, methinks.`, `William Shakespeare, Hamlet`),
+      q(`All the world's a stage, and all the men and women merely players.`, `William Shakespeare, As You Like It`),
+      q(`Brevity is the soul of wit.`, `William Shakespeare, Hamlet`),
+      q(`A thing of beauty is a joy for ever.`, `John Keats, Endymion`),
+      q(`Hope is the thing with feathers that perches in the soul.`, `Emily Dickinson`),
+      q(`Government of the people, by the people, for the people, shall not perish from the earth.`, `Abraham Lincoln, Gettysburg Address`),
+      q(`The only thing we have to fear is fear itself.`, `Franklin D. Roosevelt, First Inaugural Address`),
+      q(`Something is rotten in the state of Denmark.`, `William Shakespeare, Hamlet`),
+      q(`If music be the food of love, play on.`, `William Shakespeare, Twelfth Night`),
+      q(`We are such stuff as dreams are made on.`, `William Shakespeare, The Tempest`),
+      q(`I wandered lonely as a cloud that floats on high o'er vales and hills.`, `William Wordsworth, I Wandered Lonely as a Cloud`),
+      q(`Water, water, every where, nor any drop to drink.`, `Samuel Taylor Coleridge, The Rime of the Ancient Mariner`),
+      q(`A little learning is a dangerous thing.`, `Alexander Pope, An Essay on Criticism`),
+      q(`To err is human, to forgive divine.`, `Alexander Pope, An Essay on Criticism`),
+      q(`Shall I compare thee to a summer's day?`, `William Shakespeare, Sonnet 18`),
+      q(`What's in a name? That which we call a rose by any other name would smell as sweet.`, `William Shakespeare, Romeo and Juliet`),
+      q(`So we beat on, boats against the current, borne back ceaselessly into the past.`, `F. Scott Fitzgerald, The Great Gatsby`),
+
+      q(`It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.`, `Jane Austen, Pride and Prejudice`),
+      q(`We hold these truths to be self-evident, that all men are created equal, that they are endowed by their Creator with certain unalienable Rights, that among these are Life, Liberty and the pursuit of Happiness.`, `United States Declaration of Independence`),
+      q(`Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal.`, `Abraham Lincoln, Gettysburg Address`),
+      q(`What a piece of work is a man! How noble in reason, how infinite in faculty! In form and moving how express and admirable!`, `William Shakespeare, Hamlet`),
+      q(`Life's but a walking shadow, a poor player that struts and frets his hour upon the stage and then is heard no more. It is a tale told by an idiot, full of sound and fury, signifying nothing.`, `William Shakespeare, Macbeth`),
+      q(`Shall I compare thee to a summer's day? Thou art more lovely and more temperate. Rough winds do shake the darling buds of May, and summer's lease hath all too short a date.`, `William Shakespeare, Sonnet 18`),
+      q(`The quality of mercy is not strained. It droppeth as the gentle rain from heaven upon the place beneath. It is twice blest: it blesseth him that gives and him that takes.`, `William Shakespeare, The Merchant of Venice`),
+      q(`Friends, Romans, countrymen, lend me your ears; I come to bury Caesar, not to praise him. The evil that men do lives after them; the good is oft interred with their bones.`, `William Shakespeare, Julius Caesar`),
+      q(`But soft, what light through yonder window breaks? It is the east, and Juliet is the sun. Arise, fair sun, and kill the envious moon.`, `William Shakespeare, Romeo and Juliet`),
+      q(`Tyger Tyger, burning bright, in the forests of the night; what immortal hand or eye, could frame thy fearful symmetry?`, `William Blake, The Tyger`),
+      q(`To see a World in a Grain of Sand and a Heaven in a Wild Flower, hold Infinity in the palm of your hand and Eternity in an hour.`, `William Blake, Auguries of Innocence`),
+      q(`The woods are lovely, dark and deep, but I have promises to keep, and miles to go before I sleep, and miles to go before I sleep.`, `Robert Frost, Stopping by Woods on a Snowy Evening`),
+      q(`With malice toward none; with charity for all; with firmness in the right, as God gives us to see the right, let us strive on to finish the work we are in; to bind up the nation's wounds.`, `Abraham Lincoln, Second Inaugural Address`),
+      q(`If a man does not keep pace with his companions, perhaps it is because he hears a different drummer. Let him step to the music which he hears, however measured or far away.`, `Henry David Thoreau, Walden`),
+      q(`It matters not how strait the gate, how charged with punishments the scroll, I am the master of my fate: I am the captain of my soul.`, `William Ernest Henley, Invictus`),
+      q(`My name is Ozymandias, King of Kings; look on my Works, ye Mighty, and despair! Nothing beside remains. Round the decay of that colossal Wreck, boundless and bare the lone and level sands stretch far away.`, `Percy Bysshe Shelley, Ozymandias`),
+      q(`Though much is taken, much abides; and though we are not now that strength which in old days moved earth and heaven; that which we are, we are; one equal temper of heroic hearts, made weak by time and fate, but strong in will to strive, to seek, to find, and not to yield.`, `Alfred Tennyson, Ulysses`),
+      q(`I shall be telling this with a sigh somewhere ages and ages hence: two roads diverged in a wood, and I - I took the one less traveled by, and that has made all the difference.`, `Robert Frost, The Road Not Taken`),
+      q(`Any man's death diminishes me, because I am involved in mankind; and therefore never send to know for whom the bell tolls; it tolls for thee.`, `John Donne, Meditation XVII`),
+      q(`A foolish consistency is the hobgoblin of little minds, adored by little statesmen and philosophers and divines.`, `Ralph Waldo Emerson, Self-Reliance`),
+
+      q(`Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do: once or twice she had peeped into the book her sister was reading, but it had no pictures or conversations in it, "and what is the use of a book," thought Alice "without pictures or conversations?"`, `Lewis Carroll, Alice's Adventures in Wonderland`),
+      q(`It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness, it was the epoch of belief, it was the epoch of incredulity, it was the season of Light, it was the season of Darkness, it was the spring of hope, it was the winter of despair.`, `Charles Dickens, A Tale of Two Cities`),
+      q(`Call me Ishmael. Some years ago - never mind how long precisely - having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world. It is a way I have of driving off the spleen and regulating the circulation.`, `Herman Melville, Moby-Dick`),
+      q(`To be, or not to be, that is the question: whether 'tis nobler in the mind to suffer the slings and arrows of outrageous fortune, or to take arms against a sea of troubles and by opposing end them. To die: to sleep; no more; and by a sleep to say we end the heart-ache and the thousand natural shocks that flesh is heir to.`, `William Shakespeare, Hamlet`),
+      q(`All the world's a stage, and all the men and women merely players; they have their exits and their entrances, and one man in his time plays many parts, his acts being seven ages. At first, the infant, mewling and puking in the nurse's arms. Then the whining schoolboy, with his satchel and shining morning face, creeping like snail unwillingly to school.`, `William Shakespeare, As You Like It`),
+      q(`Once more unto the breach, dear friends, once more; or close the wall up with our English dead. In peace there's nothing so becomes a man as modest stillness and humility: but when the blast of war blows in our ears, then imitate the action of the tiger; stiffen the sinews, summon up the blood.`, `William Shakespeare, Henry V`),
+      q(`But, in a larger sense, we can not dedicate - we can not consecrate - we can not hallow - this ground. The brave men, living and dead, who struggled here, have consecrated it, far above our poor power to add or detract. The world will little note, nor long remember what we say here, but it can never forget what they did here.`, `Abraham Lincoln, Gettysburg Address`),
+      q(`When in the Course of human events, it becomes necessary for one people to dissolve the political bands which have connected them with another, and to assume among the powers of the earth, the separate and equal station to which the Laws of Nature and of Nature's God entitle them, a decent respect to the opinions of mankind requires that they should declare the causes which impel them to the separation.`, `United States Declaration of Independence`),
+      q(`We the People of the United States, in Order to form a more perfect Union, establish Justice, insure domestic Tranquility, provide for the common defence, promote the general Welfare, and secure the Blessings of Liberty to ourselves and our Posterity, do ordain and establish this Constitution for the United States of America.`, `Preamble to the United States Constitution`),
+      q(`There is grandeur in this view of life, with its several powers, having been originally breathed into a few forms or into one; and that, whilst this planet has gone cycling on according to the fixed law of gravity, from so simple a beginning endless forms most beautiful and most wonderful have been, and are being, evolved.`, `Charles Darwin, On the Origin of Species`),
+      q(`I went to the woods because I wished to live deliberately, to front only the essential facts of life, and see if I could not learn what it had to teach, and not, when I came to die, discover that I had not lived. I did not wish to live what was not life, living is so dear; nor did I wish to practise resignation, unless it was quite necessary.`, `Henry David Thoreau, Walden`),
+      q(`Marley was dead: to begin with. There is no doubt whatever about that. The register of his burial was signed by the clergyman, the clerk, the undertaker, and the chief mourner. Scrooge signed it: and Scrooge's name was good upon 'Change, for anything he chose to put his hand to. Old Marley was as dead as a door-nail.`, `Charles Dickens, A Christmas Carol`),
+
+      q(`Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal. Now we are engaged in a great civil war, testing whether that nation, or any nation so conceived and so dedicated, can long endure. We are met on a great battle-field of that war. We have come to dedicate a portion of that field, as a final resting place for those who here gave their lives that that nation might live. It is altogether fitting and proper that we should do this. But, in a larger sense, we can not dedicate - we can not consecrate - we can not hallow - this ground.`, `Abraham Lincoln, Gettysburg Address`),
+      q(`Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my soul; whenever I find myself involuntarily pausing before coffin warehouses, and bringing up the rear of every funeral I meet; and especially whenever my hypos get such an upper hand of me, that it requires a strong moral principle to prevent me from deliberately stepping into the street, and methodically knocking people's hats off - then, I account it high time to get to sea as soon as I can. This is my substitute for pistol and ball. With a philosophical flourish Cato throws himself upon his sword; I quietly take to the ship. There is nothing surprising in this.`, `Herman Melville, Moby-Dick`),
+      q(`It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness, it was the epoch of belief, it was the epoch of incredulity, it was the season of Light, it was the season of Darkness, it was the spring of hope, it was the winter of despair, we had everything before us, we had nothing before us, we were all going direct to Heaven, we were all going direct the other way - in short, the period was so far like the present period, that some of its noisiest authorities insisted on its being received, for good or for evil, in the superlative degree of comparison only.`, `Charles Dickens, A Tale of Two Cities`),
+      q(`To be, or not to be, that is the question: whether 'tis nobler in the mind to suffer the slings and arrows of outrageous fortune, or to take arms against a sea of troubles and by opposing end them. To die: to sleep; no more; and by a sleep to say we end the heart-ache and the thousand natural shocks that flesh is heir to, 'tis a consummation devoutly to be wish'd. To die, to sleep; to sleep: perchance to dream: ay, there's the rub; for in that sleep of death what dreams may come when we have shuffled off this mortal coil, must give us pause: there's the respect that makes calamity of so long life.`, `William Shakespeare, Hamlet`),
+      q(`Fondly do we hope, fervently do we pray, that this mighty scourge of war may speedily pass away. Yet, if God wills that it continue, until all the wealth piled by the bondsman's two hundred and fifty years of unrequited toil shall be sunk, and until every drop of blood drawn with the lash, shall be paid by another drawn with the sword, as was said three thousand years ago, so still it must be said "the judgments of the Lord, are true and righteous altogether." With malice toward none; with charity for all; with firmness in the right, as God gives us to see the right, let us strive on to finish the work we are in; to bind up the nation's wounds; to care for him who shall have borne the battle, and for his widow, and his orphan - to do all which may achieve and cherish a just and lasting peace, among ourselves, and with all nations.`, `Abraham Lincoln, Second Inaugural Address`),
+    ],
+    german: [
+      q(`Da steh ich nun, ich armer Tor! Und bin so klug als wie zuvor.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Zwei Seelen wohnen, ach! in meiner Brust.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Das also war des Pudels Kern!`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Grau, teurer Freund, ist alle Theorie, und grün des Lebens goldner Baum.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Es irrt der Mensch, solang er strebt.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Edel sei der Mensch, hilfreich und gut!`, `Johann Wolfgang von Goethe, Das Göttliche`),
+      q(`Ich weiß nicht, was soll es bedeuten, daß ich so traurig bin.`, `Heinrich Heine, Die Lore-Ley`),
+      q(`Denk ich an Deutschland in der Nacht, dann bin ich um den Schlaf gebracht.`, `Heinrich Heine, Nachtgedanken`),
+      q(`Freude, schöner Götterfunken, Tochter aus Elysium!`, `Friedrich Schiller, An die Freude`),
+      q(`Der Starke ist am mächtigsten allein.`, `Friedrich Schiller, Wilhelm Tell`),
+      q(`Was mich nicht umbringt, macht mich stärker.`, `Friedrich Nietzsche, Götzen-Dämmerung`),
+      q(`Wer reitet so spät durch Nacht und Wind? Es ist der Vater mit seinem Kind.`, `Johann Wolfgang von Goethe, Erlkönig`),
+      q(`Ich bin ein Teil von jener Kraft, die stets das Böse will und stets das Gute schafft.`, `Johann Wolfgang von Goethe, Faust I`),
+
+      q(`Als Gregor Samsa eines Morgens aus unruhigen Träumen erwachte, fand er sich in seinem Bett zu einem ungeheueren Ungeziefer verwandelt.`, `Franz Kafka, Die Verwandlung`),
+      q(`Jemand mußte Josef K. verleumdet haben, denn ohne daß er etwas Böses getan hätte, wurde er eines Morgens verhaftet.`, `Franz Kafka, Der Prozess`),
+      q(`Sein Blick ist vom Vorübergehn der Stäbe so müd geworden, daß er nichts mehr hält. Ihm ist, als ob es tausend Stäbe gäbe und hinter tausend Stäben keine Welt.`, `Rainer Maria Rilke, Der Panther`),
+      q(`Herr: es ist Zeit. Der Sommer war sehr groß. Leg deinen Schatten auf die Sonnenuhren, und auf den Fluren laß die Winde los.`, `Rainer Maria Rilke, Herbsttag`),
+      q(`Es war, als hätt der Himmel die Erde still geküßt, daß sie im Blütenschimmer von ihm nun träumen müßt.`, `Joseph von Eichendorff, Mondnacht`),
+      q(`Über allen Gipfeln ist Ruh, in allen Wipfeln spürest du kaum einen Hauch; die Vögelein schweigen im Walde. Warte nur, balde ruhest du auch.`, `Johann Wolfgang von Goethe, Wandrers Nachtlied`),
+      q(`Habe nun, ach! Philosophie, Juristerei und Medizin, und leider auch Theologie durchaus studiert, mit heißem Bemühn.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Daß ich erkenne, was die Welt im Innersten zusammenhält, schau alle Wirkenskraft und Samen, und tu nicht mehr in Worten kramen.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Ich bin der Geist, der stets verneint! Und das mit Recht; denn alles, was entsteht, ist wert, daß es zugrunde geht.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Mein Vater, mein Vater, und hörest du nicht, was Erlenkönig mir leise verspricht? Sei ruhig, bleibe ruhig, mein Kind; in dürren Blättern säuselt der Wind.`, `Johann Wolfgang von Goethe, Erlkönig`),
+      q(`Aufklärung ist der Ausgang des Menschen aus seiner selbstverschuldeten Unmündigkeit. Unmündigkeit ist das Unvermögen, sich seines Verstandes ohne Leitung eines anderen zu bedienen.`, `Immanuel Kant, Beantwortung der Frage: Was ist Aufklärung?`),
+      q(`Fest gemauert in der Erden steht die Form, aus Lehm gebrannt. Heute muß die Glocke werden. Frisch, Gesellen, seid zur Hand!`, `Friedrich Schiller, Das Lied von der Glocke`),
+      q(`Die Luft ist kühl und es dunkelt, und ruhig fließt der Rhein; der Gipfel des Berges funkelt im Abendsonnenschein.`, `Heinrich Heine, Die Lore-Ley`),
+
+      q(`Hat der alte Hexenmeister sich doch einmal wegbegeben! Und nun sollen seine Geister auch nach meinem Willen leben. Seine Wort und Werke merkt ich und den Brauch, und mit Geistesstärke tu ich Wunder auch. Walle! walle manche Strecke, daß, zum Zwecke, Wasser fließe und mit reichem, vollem Schwalle zu dem Bade sich ergieße.`, `Johann Wolfgang von Goethe, Der Zauberlehrling`),
+      q(`Habe nun, ach! Philosophie, Juristerei und Medizin, und leider auch Theologie durchaus studiert, mit heißem Bemühn. Da steh ich nun, ich armer Tor! Und bin so klug als wie zuvor; heiße Magister, heiße Doktor gar, und ziehe schon an die zehen Jahr herauf, herab und quer und krumm meine Schüler an der Nase herum - und sehe, daß wir nichts wissen können! Das will mir schier das Herz verbrennen.`, `Johann Wolfgang von Goethe, Faust I`),
+      q(`Sein Blick ist vom Vorübergehn der Stäbe so müd geworden, daß er nichts mehr hält. Ihm ist, als ob es tausend Stäbe gäbe und hinter tausend Stäben keine Welt. Der weiche Gang geschmeidig starker Schritte, der sich im allerkleinsten Kreise dreht, ist wie ein Tanz von Kraft um eine Mitte, in der betäubt ein großer Wille steht.`, `Rainer Maria Rilke, Der Panther`),
+      q(`Es war, als hätt der Himmel die Erde still geküßt, daß sie im Blütenschimmer von ihm nun träumen müßt. Die Luft ging durch die Felder, die Ähren wogten sacht, es rauschten leis die Wälder, so sternklar war die Nacht. Und meine Seele spannte weit ihre Flügel aus, flog durch die stillen Lande, als flöge sie nach Haus.`, `Joseph von Eichendorff, Mondnacht`),
+      q(`Herr: es ist Zeit. Der Sommer war sehr groß. Leg deinen Schatten auf die Sonnenuhren, und auf den Fluren laß die Winde los. Befiehl den letzten Früchten voll zu sein; gib ihnen noch zwei südlichere Tage, dränge sie zur Vollendung hin und jage die letzte Süße in den schweren Wein. Wer jetzt kein Haus hat, baut sich keines mehr.`, `Rainer Maria Rilke, Herbsttag`),
+
+      q(`Wer reitet so spät durch Nacht und Wind? Es ist der Vater mit seinem Kind; er hat den Knaben wohl in dem Arm, er faßt ihn sicher, er hält ihn warm. Mein Sohn, was birgst du so bang dein Gesicht? Siehst, Vater, du den Erlkönig nicht? Den Erlenkönig mit Kron und Schweif? Mein Sohn, es ist ein Nebelstreif. "Du liebes Kind, komm, geh mit mir! Gar schöne Spiele spiel ich mit dir; manch bunte Blumen sind an dem Strand, meine Mutter hat manch gülden Gewand." Mein Vater, mein Vater, und hörest du nicht, was Erlenkönig mir leise verspricht? Sei ruhig, bleibe ruhig, mein Kind; in dürren Blättern säuselt der Wind.`, `Johann Wolfgang von Goethe, Erlkönig`),
+      q(`Ich weiß nicht, was soll es bedeuten, daß ich so traurig bin; ein Märchen aus alten Zeiten, das kommt mir nicht aus dem Sinn. Die Luft ist kühl und es dunkelt, und ruhig fließt der Rhein; der Gipfel des Berges funkelt im Abendsonnenschein. Die schönste Jungfrau sitzet dort oben wunderbar, ihr goldnes Geschmeide blitzet, sie kämmt ihr goldenes Haar. Sie kämmt es mit goldenem Kamme und singt ein Lied dabei; das hat eine wundersame, gewaltige Melodei. Den Schiffer im kleinen Schiffe ergreift es mit wildem Weh; er schaut nicht die Felsenriffe, er schaut nur hinauf in die Höh. Ich glaube, die Wellen verschlingen am Ende Schiffer und Kahn; und das hat mit ihrem Singen die Lore-Ley getan.`, `Heinrich Heine, Die Lore-Ley`),
+    ],
+  };
+})(globalThis);
+
+</script>
+<script>
+// Common words in rough frequency order. The short lists are the head of the long ones.
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  HR.data = HR.data || {};
+  HR.data.languages = {
+    english: {
+      label: 'english',
+      words: [
+        'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for',
+        'they', 'i', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you',
+        'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who',
+        'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time',
+        'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take',
+        'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now',
+        'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way',
+        'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well',
+        'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high',
+        'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write',
+        'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last',
+        'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part',
+        'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since',
+        'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during',
+        'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem',
+        'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group',
+        'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line',
+      ],
+    },
+    english_1k: {
+      label: 'english 1k',
+      words: [
+        'the', 'be', 'of', 'and', 'a', 'to', 'in', 'he', 'have', 'it', 'that', 'for',
+        'they', 'i', 'with', 'as', 'not', 'on', 'she', 'at', 'by', 'this', 'we', 'you',
+        'do', 'but', 'from', 'or', 'which', 'one', 'would', 'all', 'will', 'there', 'say', 'who',
+        'make', 'when', 'can', 'more', 'if', 'no', 'man', 'out', 'other', 'so', 'what', 'time',
+        'up', 'go', 'about', 'than', 'into', 'could', 'state', 'only', 'new', 'year', 'some', 'take',
+        'come', 'these', 'know', 'see', 'use', 'get', 'like', 'then', 'first', 'any', 'work', 'now',
+        'may', 'such', 'give', 'over', 'think', 'most', 'even', 'find', 'day', 'also', 'after', 'way',
+        'many', 'must', 'look', 'before', 'great', 'back', 'through', 'long', 'where', 'much', 'should', 'well',
+        'people', 'down', 'own', 'just', 'because', 'good', 'each', 'those', 'feel', 'seem', 'how', 'high',
+        'too', 'place', 'little', 'world', 'very', 'still', 'nation', 'hand', 'old', 'life', 'tell', 'write',
+        'become', 'here', 'show', 'house', 'both', 'between', 'need', 'mean', 'call', 'develop', 'under', 'last',
+        'right', 'move', 'thing', 'general', 'school', 'never', 'same', 'another', 'begin', 'while', 'number', 'part',
+        'turn', 'real', 'leave', 'might', 'want', 'point', 'form', 'off', 'child', 'few', 'small', 'since',
+        'against', 'ask', 'late', 'home', 'interest', 'large', 'person', 'end', 'open', 'public', 'follow', 'during',
+        'present', 'without', 'again', 'hold', 'govern', 'around', 'possible', 'head', 'consider', 'word', 'program', 'problem',
+        'however', 'lead', 'system', 'set', 'order', 'eye', 'plan', 'run', 'keep', 'face', 'fact', 'group',
+        'play', 'stand', 'increase', 'early', 'course', 'change', 'help', 'line', 'city', 'put', 'close', 'case',
+        'force', 'meet', 'once', 'water', 'upon', 'war', 'build', 'hear', 'light', 'unite', 'live', 'every',
+        'country', 'bring', 'center', 'let', 'side', 'try', 'provide', 'continue', 'name', 'certain', 'power', 'pay',
+        'result', 'question', 'study', 'woman', 'member', 'until', 'far', 'night', 'always', 'service', 'away', 'report',
+        'something', 'company', 'week', 'church', 'toward', 'start', 'social', 'room', 'figure', 'nature', 'though', 'young',
+        'less', 'enough', 'almost', 'read', 'include', 'president', 'nothing', 'yet', 'better', 'big', 'boy', 'cost',
+        'business', 'value', 'second', 'why', 'clear', 'expect', 'family', 'complete', 'act', 'sense', 'mind', 'experience',
+        'art', 'next', 'near', 'direct', 'car', 'law', 'industry', 'important', 'girl', 'god', 'several', 'matter',
+        'usual', 'rather', 'per', 'often', 'kind', 'among', 'white', 'reason', 'action', 'return', 'foot', 'care',
+        'simple', 'within', 'love', 'human', 'along', 'appear', 'doctor', 'believe', 'speak', 'active', 'student', 'month',
+        'drive', 'concern', 'best', 'door', 'hope', 'example', 'inform', 'body', 'ever', 'least', 'probable', 'understand',
+        'reach', 'effect', 'different', 'idea', 'whole', 'control', 'condition', 'field', 'pass', 'fall', 'note', 'special',
+        'talk', 'particular', 'today', 'measure', 'walk', 'teach', 'low', 'hour', 'type', 'carry', 'rate', 'remain',
+        'full', 'street', 'easy', 'although', 'record', 'sit', 'determine', 'level', 'local', 'sure', 'receive', 'thus',
+        'moment', 'spirit', 'train', 'college', 'religion', 'perhaps', 'music', 'grow', 'free', 'cause', 'serve', 'age',
+        'book', 'board', 'recent', 'sound', 'office', 'cut', 'step', 'class', 'true', 'history', 'position', 'above',
+        'strong', 'friend', 'necessary', 'add', 'court', 'deal', 'tax', 'support', 'party', 'whether', 'either', 'land',
+        'material', 'happen', 'education', 'death', 'agree', 'arm', 'mother', 'across', 'quite', 'anything', 'town', 'past',
+        'view', 'society', 'manage', 'answer', 'break', 'organize', 'half', 'fire', 'lose', 'money', 'stop', 'actual',
+        'already', 'effort', 'wait', 'department', 'able', 'political', 'learn', 'voice', 'air', 'together', 'shall', 'cover',
+        'common', 'subject', 'draw', 'short', 'wife', 'treat', 'limit', 'road', 'letter', 'color', 'behind', 'produce',
+        'send', 'term', 'total', 'university', 'rise', 'century', 'success', 'minute', 'remember', 'purpose', 'test', 'fight',
+        'watch', 'situation', 'south', 'ago', 'difference', 'stage', 'father', 'table', 'rest', 'bear', 'entire', 'market',
+        'prepare', 'explain', 'offer', 'plant', 'charge', 'ground', 'west', 'picture', 'hard', 'front', 'lie', 'modern',
+        'dark', 'surface', 'rule', 'regard', 'dance', 'peace', 'observe', 'future', 'wall', 'farm', 'claim', 'firm',
+        'operation', 'further', 'pressure', 'property', 'morning', 'amount', 'top', 'outside', 'piece', 'sometimes', 'beauty', 'trade',
+        'fear', 'demand', 'wonder', 'list', 'accept', 'judge', 'paint', 'mile', 'soon', 'responsible', 'allow', 'secretary',
+        'heart', 'union', 'slow', 'island', 'enter', 'drink', 'story', 'experiment', 'stay', 'paper', 'space', 'apply',
+        'decide', 'share', 'desire', 'spend', 'sign', 'therefore', 'various', 'visit', 'supply', 'officer', 'doubt', 'private',
+        'immediate', 'wish', 'contain', 'feed', 'raise', 'describe', 'ready', 'horse', 'son', 'exist', 'north', 'suggest',
+        'station', 'effective', 'food', 'deep', 'wide', 'alone', 'character', 'english', 'happy', 'critic', 'unit', 'product',
+        'respect', 'drop', 'nor', 'fill', 'cold', 'represent', 'sudden', 'basic', 'kill', 'fine', 'trouble', 'mark',
+        'single', 'press', 'heavy', 'attempt', 'origin', 'standard', 'everything', 'committee', 'moral', 'black', 'red', 'bad',
+        'earth', 'accord', 'else', 'mere', 'die', 'remark', 'basis', 'except', 'equal', 'east', 'event', 'employ',
+        'defense', 'smile', 'river', 'improve', 'game', 'detail', 'account', 'cent', 'sort', 'reduce', 'club', 'buy',
+        'attention', 'ship', 'decision', 'wear', 'inside', 'win', 'suppose', 'ride', 'operate', 'realize', 'sale', 'choose',
+        'park', 'square', 'vote', 'price', 'district', 'dead', 'foreign', 'window', 'beyond', 'direction', 'strike', 'instead',
+        'trial', 'practice', 'catch', 'opportunity', 'likely', 'recognize', 'permit', 'serious', 'attack', 'floor', 'association', 'spring',
+        'lot', 'stock', 'lack', 'hair', 'science', 'relation', 'profession', 'pattern', 'quick', 'medical', 'influence', 'occasion',
+        'machine', 'compare', 'husband', 'blue', 'international', 'fair', 'especially', 'indeed', 'imagine', 'surprise', 'average', 'official',
+        'temperature', 'difficult', 'sing', 'hit', 'tree', 'race', 'police', 'touch', 'relative', 'throw', 'quality', 'former',
+        'pull', 'chance', 'prove', 'argue', 'settle', 'growth', 'date', 'heat', 'save', 'performance', 'count', 'production',
+        'listen', 'main', 'pick', 'size', 'cool', 'army', 'patient', 'combine', 'summer', 'hall', 'slight', 'command',
+        'enjoy', 'length', 'proper', 'running', 'thought', 'clean', 'region', 'hotel', 'forward', 'arrive', 'nice', 'star',
+        'gas', 'western', 'capital', 'wrong', 'dream', 'style', 'garden', 'kitchen', 'bridge', 'teacher', 'brother', 'sister',
+        'animal', 'beautiful', 'bird', 'fish', 'sun', 'moon', 'sky', 'snow', 'rain', 'wind', 'tomorrow', 'yesterday',
+        'evening', 'afternoon', 'winter', 'autumn', 'travel', 'journey', 'village', 'mountain', 'forest', 'lake', 'ocean', 'beach',
+        'flower', 'grass', 'stone', 'metal', 'glass', 'wood', 'bread', 'milk', 'coffee', 'sugar', 'salt', 'dinner',
+        'lunch', 'breakfast', 'apple', 'orange', 'green', 'yellow', 'brown', 'gray', 'silver', 'gold', 'shoe', 'shirt',
+        'coat', 'hat', 'bag', 'clock', 'phone', 'computer', 'screen', 'keyboard', 'chair', 'bed', 'sleep', 'wake',
+        'laugh', 'cry', 'dress', 'wash', 'cook', 'bake', 'swim', 'climb', 'jump', 'fly', 'sail', 'steal',
+        'borrow', 'lend', 'finish', 'forget', 'notice', 'promise', 'protect', 'prefer', 'pretend', 'reply', 'invite', 'join',
+        'hurry', 'guess', 'explore', 'create', 'design', 'invent', 'discover', 'solve', 'repair', 'replace', 'connect', 'divide',
+        'multiply', 'weigh', 'bright', 'quiet', 'loud', 'soft', 'sharp', 'narrow', 'thick', 'thin', 'wet', 'dry',
+        'warm', 'tall', 'shy', 'brave', 'calm', 'gentle', 'clever', 'honest', 'lucky', 'polite', 'proud', 'rich',
+        'poor', 'angry', 'tired', 'hungry', 'thirsty', 'healthy', 'strange', 'famous', 'ancient', 'perfect', 'useful', 'careful',
+        'accident', 'address', 'adult', 'advice', 'afraid', 'agent', 'airport', 'alive', 'amazing', 'anger', 'annual', 'apartment',
+        'arrange', 'article', 'artist', 'asleep', 'author', 'baby', 'balance', 'ball', 'band', 'bank', 'base', 'bath',
+        'battle', 'bean', 'bedroom', 'beer', 'bell', 'belt', 'bench', 'bicycle', 'bill', 'birth', 'bite', 'blanket',
+        'blind', 'block', 'blood', 'boat', 'bone', 'border', 'bottle', 'bottom', 'bowl', 'box', 'brain', 'branch',
+        'breath', 'brush', 'budget', 'burn', 'bus', 'butter', 'button', 'cake', 'camera', 'camp', 'candle', 'card',
+        'career', 'carpet', 'cash', 'castle', 'cat', 'ceiling', 'chain', 'cheap', 'check', 'cheese', 'chicken', 'choice',
+        'circle', 'citizen', 'climate', 'cloud', 'coast', 'collect', 'comfort', 'contact', 'copy', 'corner', 'cotton', 'couple',
+        'cousin', 'crowd', 'cup', 'curtain', 'customer', 'daughter', 'debt', 'desk', 'dish', 'distance', 'dog', 'dollar',
+        'driver', 'duty', 'ear', 'edge', 'egg', 'engine', 'error', 'exercise', 'factory', 'farmer', 'fashion', 'fence',
+        'festival', 'finger', 'flag', 'flat', 'folk', 'football', 'fork', 'fresh', 'fruit', 'gift', 'glad', 'goal',
+        'guest', 'guide', 'gun', 'habit', 'hammer', 'handle', 'holiday', 'honey', 'hospital', 'ice', 'jacket', 'job',
+        'juice', 'key', 'king', 'knee',
+      ],
+    },
+    german: {
+      label: 'german',
+      words: [
+        'der', 'die', 'und', 'in', 'den', 'von', 'zu', 'das', 'mit', 'sich', 'des', 'auf',
+        'für', 'ist', 'im', 'dem', 'nicht', 'ein', 'eine', 'als', 'auch', 'es', 'an', 'werden',
+        'aus', 'er', 'hat', 'dass', 'sie', 'nach', 'wird', 'bei', 'einer', 'um', 'am', 'sind',
+        'noch', 'wie', 'einem', 'über', 'einen', 'so', 'zum', 'war', 'haben', 'nur', 'oder', 'aber',
+        'vor', 'zur', 'bis', 'mehr', 'durch', 'man', 'sein', 'wurde', 'sei', 'Jahr', 'gegen', 'vom',
+        'kann', 'schon', 'wenn', 'habe', 'seine', 'Mark', 'ihre', 'dann', 'unter', 'wir', 'soll', 'ich',
+        'eines', 'Jahre', 'zwei', 'diese', 'dieser', 'wieder', 'keine', 'Uhr', 'seiner', 'worden', 'will', 'zwischen',
+        'immer', 'was', 'sagte', 'gibt', 'alle', 'diesem', 'seit', 'muss', 'doch', 'jetzt', 'wurden', 'ihr',
+        'ihm', 'viel', 'hatte', 'nun', 'damit', 'Mann', 'ersten', 'neue', 'sehr', 'drei', 'Menschen', 'Frau',
+        'machen', 'weil', 'ohne', 'wo', 'Zeit', 'Land', 'Stadt', 'gut', 'große', 'Tag', 'Kinder', 'hier',
+        'andere', 'Prozent', 'ganz', 'Leben', 'Welt', 'weiter', 'Haus', 'heute', 'alles', 'Ende', 'Teil', 'selbst',
+        'lange', 'gehen', 'kommen', 'sagen', 'sehen', 'geben', 'stehen', 'wissen', 'lassen', 'finden', 'bleiben', 'liegen',
+        'heißen', 'denken', 'nehmen', 'tun', 'dürfen', 'glauben', 'halten', 'nennen', 'zeigen', 'führen', 'sprechen', 'bringen',
+        'leben', 'fahren', 'meinen', 'fragen', 'kennen', 'gelten', 'stellen', 'spielen', 'arbeiten', 'brauchen', 'folgen', 'lernen',
+        'bestehen', 'verstehen', 'setzen', 'bekommen', 'beginnen', 'erzählen', 'versuchen', 'schreiben', 'laufen', 'erklären', 'entsprechen', 'sitzen',
+        'ziehen', 'scheinen', 'fallen', 'gehören', 'entstehen', 'erhalten', 'treffen', 'suchen', 'legen', 'vorstellen', 'handeln', 'erreichen',
+        'tragen', 'schaffen', 'lesen', 'verlieren', 'darstellen', 'erkennen', 'entwickeln', 'reden',
+      ],
+    },
+    german_1k: {
+      label: 'german 1k',
+      words: [
+        'der', 'die', 'und', 'in', 'den', 'von', 'zu', 'das', 'mit', 'sich', 'des', 'auf',
+        'für', 'ist', 'im', 'dem', 'nicht', 'ein', 'eine', 'als', 'auch', 'es', 'an', 'werden',
+        'aus', 'er', 'hat', 'dass', 'sie', 'nach', 'wird', 'bei', 'einer', 'um', 'am', 'sind',
+        'noch', 'wie', 'einem', 'über', 'einen', 'so', 'zum', 'war', 'haben', 'nur', 'oder', 'aber',
+        'vor', 'zur', 'bis', 'mehr', 'durch', 'man', 'sein', 'wurde', 'sei', 'Jahr', 'gegen', 'vom',
+        'kann', 'schon', 'wenn', 'habe', 'seine', 'Mark', 'ihre', 'dann', 'unter', 'wir', 'soll', 'ich',
+        'eines', 'Jahre', 'zwei', 'diese', 'dieser', 'wieder', 'keine', 'Uhr', 'seiner', 'worden', 'will', 'zwischen',
+        'immer', 'was', 'sagte', 'gibt', 'alle', 'diesem', 'seit', 'muss', 'doch', 'jetzt', 'wurden', 'ihr',
+        'ihm', 'viel', 'hatte', 'nun', 'damit', 'Mann', 'ersten', 'neue', 'sehr', 'drei', 'Menschen', 'Frau',
+        'machen', 'weil', 'ohne', 'wo', 'Zeit', 'Land', 'Stadt', 'gut', 'große', 'Tag', 'Kinder', 'hier',
+        'andere', 'Prozent', 'ganz', 'Leben', 'Welt', 'weiter', 'Haus', 'heute', 'alles', 'Ende', 'Teil', 'selbst',
+        'lange', 'gehen', 'kommen', 'sagen', 'sehen', 'geben', 'stehen', 'wissen', 'lassen', 'finden', 'bleiben', 'liegen',
+        'heißen', 'denken', 'nehmen', 'tun', 'dürfen', 'glauben', 'halten', 'nennen', 'zeigen', 'führen', 'sprechen', 'bringen',
+        'leben', 'fahren', 'meinen', 'fragen', 'kennen', 'gelten', 'stellen', 'spielen', 'arbeiten', 'brauchen', 'folgen', 'lernen',
+        'bestehen', 'verstehen', 'setzen', 'bekommen', 'beginnen', 'erzählen', 'versuchen', 'schreiben', 'laufen', 'erklären', 'entsprechen', 'sitzen',
+        'ziehen', 'scheinen', 'fallen', 'gehören', 'entstehen', 'erhalten', 'treffen', 'suchen', 'legen', 'vorstellen', 'handeln', 'erreichen',
+        'tragen', 'schaffen', 'lesen', 'verlieren', 'darstellen', 'erkennen', 'entwickeln', 'reden', 'aussehen', 'erscheinen', 'bilden', 'anfangen',
+        'erwarten', 'wohnen', 'betreffen', 'warten', 'vergehen', 'helfen', 'gewinnen', 'schließen', 'fühlen', 'bieten', 'interessieren', 'erinnern',
+        'ergeben', 'anbieten', 'studieren', 'verbinden', 'ansehen', 'fehlen', 'bedeuten', 'vergleichen', 'Kind', 'Woche', 'Monat', 'Morgen',
+        'Abend', 'Nacht', 'Stunde', 'Minute', 'Sekunde', 'Sommer', 'Winter', 'Herbst', 'Frühling', 'Vater', 'Mutter', 'Bruder',
+        'Schwester', 'Sohn', 'Tochter', 'Eltern', 'Familie', 'Freund', 'Freundin', 'Junge', 'Mädchen', 'Lehrer', 'Schüler', 'Arzt',
+        'Student', 'Name', 'Adresse', 'Straße', 'Weg', 'Platz', 'Schule', 'Universität', 'Arbeit', 'Beruf', 'Firma', 'Geld',
+        'Preis', 'Bank', 'Auto', 'Bus', 'Zug', 'Bahn', 'Fahrrad', 'Flugzeug', 'Schiff', 'Reise', 'Urlaub', 'Hotel',
+        'Zimmer', 'Küche', 'Bad', 'Tisch', 'Stuhl', 'Bett', 'Tür', 'Fenster', 'Wand', 'Boden', 'Dach', 'Garten',
+        'Baum', 'Blume', 'Wald', 'Berg', 'Fluss', 'See', 'Meer', 'Strand', 'Insel', 'Himmel', 'Sonne', 'Mond',
+        'Stern', 'Wetter', 'Regen', 'Schnee', 'Wind', 'Wolke', 'Wasser', 'Feuer', 'Luft', 'Erde', 'Stein', 'Holz',
+        'Glas', 'Papier', 'Buch', 'Brief', 'Zeitung', 'Bild', 'Film', 'Musik', 'Lied', 'Spiel', 'Sport', 'Ball',
+        'Essen', 'Brot', 'Butter', 'Käse', 'Fleisch', 'Fisch', 'Obst', 'Gemüse', 'Apfel', 'Kartoffel', 'Reis', 'Suppe',
+        'Salz', 'Zucker', 'Kaffee', 'Tee', 'Milch', 'Wein', 'Bier', 'Kopf', 'Auge', 'Ohr', 'Nase', 'Mund',
+        'Zahn', 'Hals', 'Arm', 'Hand', 'Finger', 'Bein', 'Fuß', 'Herz', 'Körper', 'Haar', 'Kleid', 'Hose',
+        'Hemd', 'Jacke', 'Schuh', 'Hut', 'Tasche', 'Schlüssel', 'Telefon', 'Computer', 'Tastatur', 'Bildschirm', 'Internet', 'Nachricht',
+        'Frage', 'Antwort', 'Problem', 'Lösung', 'Beispiel', 'Grund', 'Idee', 'Meinung', 'Gefühl', 'Liebe', 'Glück', 'Angst',
+        'Freude', 'Hoffnung', 'Kraft', 'Macht', 'Recht', 'Gesetz', 'Staat', 'Regierung', 'Politik', 'Partei', 'Präsident', 'Krieg',
+        'Frieden', 'Volk', 'Geschichte', 'Kultur', 'Sprache', 'Wort', 'Satz', 'Seite', 'Zahl', 'Ort', 'Raum', 'Form',
+        'Farbe', 'Größe', 'Richtung', 'Mitte', 'Anfang', 'Art', 'Fall', 'Sache', 'Ding', 'Punkt', 'Linie', 'Gruppe',
+        'Gesellschaft', 'Unternehmen', 'Markt', 'Wirtschaft', 'Ausbildung', 'Erfolg', 'Ziel', 'Plan', 'Möglichkeit', 'Entwicklung', 'Bedeutung', 'Ergebnis',
+        'Wirkung', 'Ursache', 'Unterschied', 'Beziehung', 'Erfahrung', 'Wissen', 'Kunst', 'Natur', 'Tier', 'Hund', 'Katze', 'Vogel',
+        'Pferd', 'Kuh', 'Schwein', 'Maus', 'Biene', 'Gott', 'Kirche', 'Bürger', 'Nachbar', 'Gast', 'Kunde', 'Chef',
+        'Mitarbeiter', 'Polizei', 'Gericht', 'Krankenhaus', 'Apotheke', 'Geschäft', 'Laden', 'Bahnhof', 'Flughafen', 'Brücke', 'Turm', 'Dorf',
+        'Gegend', 'Grenze', 'Ausland', 'Heimat', 'Deutschland', 'Österreich', 'Europa', 'klein', 'groß', 'neu', 'alt', 'jung',
+        'lang', 'kurz', 'hoch', 'tief', 'breit', 'schmal', 'dick', 'dünn', 'schwer', 'leicht', 'stark', 'schwach',
+        'schnell', 'langsam', 'früh', 'spät', 'warm', 'kalt', 'heiß', 'kühl', 'nass', 'trocken', 'hell', 'dunkel',
+        'laut', 'leise', 'schön', 'hässlich', 'reich', 'arm', 'billig', 'teuer', 'voll', 'leer', 'offen', 'sauber',
+        'schmutzig', 'gesund', 'krank', 'müde', 'wach', 'hungrig', 'durstig', 'glücklich', 'traurig', 'froh', 'böse', 'nett',
+        'freundlich', 'höflich', 'klug', 'dumm', 'ruhig', 'wichtig', 'richtig', 'falsch', 'möglich', 'einfach', 'schwierig', 'sicher',
+        'gefährlich', 'bekannt', 'fremd', 'rot', 'blau', 'grün', 'gelb', 'weiß', 'schwarz', 'braun', 'grau', 'golden',
+        'eins', 'vier', 'fünf', 'sechs', 'sieben', 'acht', 'neun', 'zehn', 'elf', 'zwölf', 'zwanzig', 'dreißig',
+        'hundert', 'tausend', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag', 'Januar', 'Februar', 'März',
+        'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember', 'gestern', 'morgen', 'bald',
+        'oft', 'manchmal', 'selten', 'nie', 'niemals', 'überall', 'dort', 'drinnen', 'draußen', 'oben', 'unten', 'vorne',
+        'hinten', 'links', 'rechts', 'gerade', 'fast', 'etwa', 'genau', 'wirklich', 'vielleicht', 'natürlich', 'leider', 'gern',
+        'lieber', 'zusammen', 'allein', 'trotzdem', 'deshalb', 'deswegen', 'außerdem', 'jedoch', 'obwohl', 'während', 'bevor', 'nachdem',
+        'falls', 'sondern', 'denn', 'also', 'etwas', 'nichts', 'jemand', 'niemand', 'jeder', 'jede', 'jedes', 'mancher',
+        'einige', 'mehrere', 'wenige', 'beide', 'dein', 'mein', 'unser', 'euer', 'kaufen', 'verkaufen', 'bezahlen', 'kosten',
+        'öffnen', 'kochen', 'backen', 'trinken', 'schlafen', 'aufstehen', 'waschen', 'putzen', 'singen', 'tanzen', 'schwimmen', 'springen',
+        'fliegen', 'reisen', 'wandern', 'besuchen', 'einladen', 'danken', 'bitten', 'antworten', 'rufen', 'hören', 'riechen', 'schmecken',
+        'lachen', 'weinen', 'lächeln', 'küssen', 'vergessen', 'lieben', 'hassen', 'hoffen', 'wünschen', 'träumen', 'planen', 'bauen',
+        'reparieren', 'malen', 'zeichnen', 'rechnen', 'zählen', 'messen', 'wiegen', 'schneiden', 'werfen', 'fangen', 'drücken', 'schieben',
+        'steigen', 'sinken', 'wachsen', 'sterben', 'töten', 'retten', 'schützen', 'kämpfen', 'siegen', 'teilen', 'tauschen', 'senden',
+        'empfangen', 'drucken', 'speichern', 'löschen', 'benutzen', 'wählen', 'entscheiden', 'Entscheidung', 'Bewegung', 'Forschung', 'Wissenschaft', 'Technik',
+        'Maschine', 'Motor', 'Energie', 'Strom', 'Licht', 'Schatten', 'Klang', 'Stimme', 'Ton', 'Geruch', 'Geschmack', 'Gedanke',
+        'Traum', 'Erinnerung', 'Zukunft', 'Vergangenheit', 'Gegenwart', 'Augenblick', 'Moment', 'Datum', 'Kalender', 'Geburtstag', 'Fest', 'Feier',
+        'Geschenk', 'Einladung', 'Hochzeit', 'Paar', 'Ehe', 'Kuchen', 'Schokolade', 'Ei', 'Nudel', 'Tomate', 'Zwiebel', 'Salat',
+        'Getränk', 'Saft', 'Flasche', 'Tasse', 'Teller', 'Gabel', 'Messer', 'Löffel', 'Topf', 'Ofen', 'Kühlschrank', 'Lampe',
+        'Sofa', 'Teppich', 'Spiegel', 'Treppe', 'Keller', 'Wohnung', 'Miete', 'Stock', 'Rechnung', 'Vertrag', 'Pass', 'Ausweis',
+        'Karte', 'Fahrkarte', 'Koffer', 'Gepäck', 'Ankunft', 'Abfahrt', 'Ausgang', 'Eingang', 'Ampel', 'Kreuzung', 'Parkplatz', 'Tankstelle',
+        'Museum', 'Theater', 'Kino', 'Konzert', 'Bibliothek', 'Park', 'Spielplatz', 'Rathaus', 'Post', 'Paket', 'Marke', 'Umschlag',
+        'Stift', 'Heft', 'Tafel', 'Klasse', 'Prüfung', 'Note', 'Aufgabe', 'Übung', 'Fehler', 'Hausaufgabe', 'Fach', 'Mathematik',
+        'Physik', 'Chemie', 'Biologie', 'Regel', 'Ordnung', 'Gesundheit', 'Krankheit', 'Medizin', 'Schmerz', 'Fieber', 'Husten', 'Verein',
+        'Mannschaft', 'Trainer', 'Tor', 'Sieg', 'Niederlage', 'Wettbewerb', 'Rennen', 'Gewicht', 'Länge', 'Breite', 'Höhe', 'Tiefe',
+        'Mitglied', 'Gemeinde', 'Bevölkerung', 'Umwelt', 'Klima', 'Landschaft', 'Feld', 'Wiese', 'Bauer', 'Ernte', 'Getreide', 'Stoff',
+        'Metall', 'Eisen', 'Gold', 'Silber', 'Kupfer', 'Kohle', 'Gas', 'Öl', 'Rauch', 'Staub', 'Sand', 'Eis',
+        'Dampf', 'Blitz', 'Donner', 'Sturm', 'Nebel', 'Frost', 'Hitze', 'Kälte', 'Gesicht', 'Schulter', 'Rücken', 'Bauch',
+        'Knie', 'Haut', 'Blut', 'Knochen', 'Seele', 'Geist', 'Mut', 'Stolz', 'Ruhe', 'Stille', 'Gefahr', 'Sicherheit',
+        'Freiheit', 'Wahrheit', 'Gerechtigkeit', 'Ehre', 'Pflicht', 'Schuld', 'Strafe', 'Zweifel', 'Vertrauen', 'Mitleid', 'Wut', 'Zorn',
+        'Neid', 'Trauer', 'Tod', 'Geburt', 'Alter', 'Jugend', 'Kindheit', 'Mensch', 'Person', 'Herr', 'Dame', 'Onkel',
+        'Tante', 'Neffe', 'Nichte', 'Enkel', 'Oma', 'Opa', 'Baby', 'König', 'Königin', 'Prinz', 'Soldat', 'Richter',
+        'Anwalt', 'Bäcker', 'Koch', 'Kellner', 'Fahrer', 'Pilot', 'Sänger', 'Maler', 'Autor', 'Dichter', 'Ingenieur', 'Bauarbeiter',
+        'Verkäufer', 'Politiker', 'Abschied', 'Abteilung', 'Angebot', 'Anruf', 'Anzug', 'Aufzug', 'Ausflug', 'Aussicht', 'Bedingung', 'Begriff',
+        'Bericht', 'Besuch', 'Betrieb', 'Bewerbung', 'Birne', 'Bleistift', 'Decke', 'Dienst', 'Dose', 'Druck', 'Ecke', 'Einkauf',
+        'Entfernung', 'Fahrt', 'Feiertag', 'Flur', 'Foto', 'Gebäude', 'Gebiet', 'Gedicht', 'Gemeinschaft', 'Gerät', 'Gespräch', 'Gewohnheit',
+        'Handy', 'Hilfe', 'Hof', 'Insekt', 'Kamera', 'Kerze', 'Kissen', 'Kleidung', 'Kollege', 'Kontakt', 'Korb', 'Kosten',
+        'Lage', 'Leistung', 'Lehre', 'Mantel', 'Mauer', 'Meter', 'Mühe', 'Münze', 'Nummer', 'Ordner', 'Pause', 'Pflanze',
+        'Platte', 'Qualität', 'Rad', 'Rand',
+      ],
+    },
+  };
+})(globalThis);
+
+</script>
+<script>
+// Pure typing test logic. No DOM; time is always passed in. Contract: docs/ARCHITECTURE.md.
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+
+  const MAX_EXTRA = 20;
+  const WORDS_AHEAD = 60;
+  const WORD_BATCH = 100;
+
+  const defaultConfig = {
+    mode: 'time',
+    time: 30,
+    words: 25,
+    quoteLength: 'all',
+    punctuation: false,
+    numbers: false,
+    language: 'english',
+    customText: '',
+    stopOnError: 'off',
+    freedom: false,
+    confidence: 'off',
+    difficulty: 'normal',
+  };
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const data = () => (root.HR && root.HR.data) || {};
+
+  function kogasa(cov) {
+    return 100 * (1 - Math.tanh(cov + Math.pow(cov, 3) / 3 + Math.pow(cov, 5) / 5));
+  }
+
+  function consistencyOf(values) {
+    if (values.length < 2) return 0;
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    if (mean === 0) return 0;
+    const variance = values.reduce((a, v) => a + (v - mean) * (v - mean), 0) / values.length;
+    return kogasa(Math.sqrt(variance) / mean);
+  }
+
+  function wordList(language) {
+    const langs = data().languages || {};
+    const lang = langs[language] || langs.english;
+    return lang && lang.words && lang.words.length ? lang.words : ['the', 'of', 'and'];
+  }
+
+  const bareWord = (w) => w.replace(/^[("]+|[.,;:?!)"]+$/g, '').toLowerCase();
+  const capitalise = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+  const between = (rng, min, max) => min + Math.floor(rng() * (max - min + 1));
+
+  function randomNumber(rng) {
+    const digits = between(rng, 1, 4);
+    const min = digits === 1 ? 0 : Math.pow(10, digits - 1);
+    return String(between(rng, min, Math.pow(10, digits) - 1));
+  }
+
+  function generateWords(config, count, rng, previous) {
+    const cfg = Object.assign({}, defaultConfig, config);
+    const random = rng || Math.random;
+    const prev = previous || [];
+    const list = wordList(cfg.language);
+    const out = [];
+    let last = prev.length ? prev[prev.length - 1] : null;
+    let sentenceStart = last === null || /[.?!]["')]*$/.test(last);
+    let sinceSentence = 0;
+    let sentenceLength = between(random, 6, 14);
+
+    for (let i = 0; i < count; i++) {
+      const isLast = i === count - 1;
+      const lastBare = last === null ? null : bareWord(last);
+
+      // Dash as its own word: never opening a sentence or closing the batch, never twice in a row.
+      if (cfg.punctuation && !sentenceStart && !isLast && last !== '-' && random() < 0.03) {
+        out.push('-');
+        last = '-';
+        continue;
+      }
+
+      let word = null;
+      for (let tries = 0; tries < 50; tries++) {
+        const candidate =
+          cfg.numbers && random() < 0.1 ? randomNumber(random) : list[Math.floor(random() * list.length)];
+        word = candidate;
+        if (bareWord(candidate) !== lastBare) break;
+      }
+      if (bareWord(word) === lastBare) {
+        // A list with too few distinct words: walk it for one that differs.
+        const other = list.find((w) => bareWord(w) !== lastBare);
+        if (other) word = other;
+      }
+
+      if (cfg.punctuation) {
+        if (sentenceStart) word = capitalise(word);
+        sentenceStart = false;
+        sinceSentence++;
+        if (isLast) {
+          word += '.';
+          sentenceStart = true;
+        } else if (sinceSentence >= sentenceLength) {
+          const r = random();
+          word += r < 0.7 ? '.' : r < 0.85 ? '?' : '!';
+          sentenceStart = true;
+          sinceSentence = 0;
+          sentenceLength = between(random, 6, 14);
+        } else {
+          const r = random();
+          if (r < 0.08) word += ',';
+          else if (r < 0.095) word += ';';
+          else if (r < 0.11) word += ':';
+          else if (r < 0.14) word = '"' + word + '"';
+          else if (r < 0.17) word = '(' + word + ')';
+        }
+      }
+      out.push(word);
+      last = word;
+    }
+    return out;
+  }
+
+  function quoteFits(quote, length) {
+    const n = quote.text.length;
+    if (length === 'short') return n <= 100;
+    if (length === 'medium') return n > 100 && n <= 300;
+    if (length === 'long') return n > 300 && n <= 600;
+    if (length === 'thicc') return n > 600;
+    return true;
+  }
+
+  function pickQuote(language, quoteLength, rng) {
+    const quotes = data().quotes || {};
+    const key = String(language).split('_')[0];
+    const list = quotes[key] || quotes.english || [];
+    if (!list.length) return null;
+    const fitting = list.filter((q) => quoteFits(q, quoteLength));
+    const pool = fitting.length ? fitting : list;
+    return pool[Math.floor((rng || Math.random)() * pool.length)];
+  }
+
+  function calcStats(words, inputs, seconds, opts) {
+    const timed = !!(opts && opts.timed);
+    const last = inputs.length - 1;
+    let correct = 0, incorrect = 0, extra = 0, missed = 0;
+    let correctWordChars = 0, spaces = 0, correctSpaces = 0;
+
+    inputs.forEach((input, i) => {
+      // No target: zen, or the empty entry after the final commit.
+      const target = words[i] === undefined ? input : words[i];
+      if (input === target) {
+        correctWordChars += target.length;
+        correct += target.length;
+      } else if (input.length >= target.length) {
+        for (let c = 0; c < input.length; c++) {
+          if (c >= target.length) extra++;
+          else if (input[c] === target[c]) correct++;
+          else incorrect++;
+        }
+      } else {
+        let thisCorrect = 0, thisIncorrect = 0, thisMissed = 0;
+        for (let c = 0; c < target.length; c++) {
+          if (c >= input.length) thisMissed++;
+          else if (input[c] === target[c]) thisCorrect++;
+          else thisIncorrect++;
+        }
+        correct += thisCorrect;
+        incorrect += thisIncorrect;
+        if (i === last && timed) {
+          if (thisIncorrect === 0) correctWordChars += thisCorrect;
+        } else {
+          missed += thisMissed;
+        }
+      }
+      if (i < last) {
+        spaces++;
+        if (input === target) correctSpaces++;
+      }
+    });
+
+    const minutes = seconds / 60;
+    return {
+      wpm: minutes > 0 ? (correctWordChars + correctSpaces) / 5 / minutes : 0,
+      raw: minutes > 0 ? (correct + spaces + incorrect + extra) / 5 / minutes : 0,
+      chars: { correct, incorrect, extra, missed },
+      correctWordChars,
+      spaces,
+      correctSpaces,
+    };
+  }
+
+  function letterStates(target, typed) {
+    const out = [];
+    if (target === undefined) {
+      for (const ch of typed) out.push({ ch, state: 'correct' });
+      return out;
+    }
+    const n = Math.max(target.length, typed.length);
+    for (let i = 0; i < n; i++) {
+      if (i >= target.length) out.push({ ch: typed[i], state: 'extra' });
+      else if (i >= typed.length) out.push({ ch: target[i], state: 'pending' });
+      else out.push({ ch: target[i], state: typed[i] === target[i] ? 'correct' : 'incorrect' });
+    }
+    return out;
+  }
+
+  function initialWords(cfg, opts, rng) {
+    if (cfg.mode === 'zen') return { words: [], quote: null };
+    if (opts.words) return { words: opts.words.slice(), quote: opts.quote || null };
+    if (cfg.mode === 'time') return { words: generateWords(cfg, WORD_BATCH, rng), quote: null };
+    if (cfg.mode === 'words') return { words: generateWords(cfg, cfg.words, rng), quote: null };
+    if (cfg.mode === 'custom') {
+      const words = String(cfg.customText).trim().split(/\s+/).filter(Boolean);
+      return { words: words.length ? words : ['custom'], quote: null };
+    }
+    const quote = opts.quote || pickQuote(cfg.language, cfg.quoteLength, rng);
+    if (!quote) return { words: generateWords(cfg, defaultConfig.words, rng), quote: null };
+    return { words: quote.text.split(' ').filter(Boolean), quote };
+  }
+
+  function createTest(config, opts) {
+    const options = opts || {};
+    const cfg = Object.assign({}, defaultConfig, config);
+    const rng = options.rng || Math.random;
+    const isZen = cfg.mode === 'zen';
+    const isTime = cfg.mode === 'time';
+    const first = initialWords(cfg, options, rng);
+
+    let start = null, end = null, lastCommit = null, lastKey = null;
+    let correctKeys = 0, incorrectKeys = 0, afkSeconds = 0;
+    let secondChars = 0, secondErrors = 0, secondKeys = 0, latestBurst = 0;
+    const samples = [], bursts = [], keyIntervals = [], missedWords = {};
+
+    const t = {
+      config: cfg,
+      quote: first.quote,
+      status: 'ready',
+      failReason: null,
+      words: first.words,
+      inputs: [''],
+      wordIndex: 0,
+    };
+
+    function topUp() {
+      if (isTime && t.words.length - t.wordIndex < WORDS_AHEAD) {
+        t.words.push(...generateWords(cfg, WORD_BATCH, rng, t.words));
+      }
+    }
+    topUp();
+
+    const stats = (seconds) => calcStats(t.words, t.inputs, seconds, { timed: isTime });
+
+    function pushSample(second, seconds, length) {
+      samples.push({
+        second,
+        wpm: round2(stats(seconds).wpm),
+        raw: round2((secondChars / 5) * (60 / length)),
+        burst: latestBurst,
+        errors: secondErrors,
+      });
+      if (secondKeys === 0) afkSeconds++;
+      secondChars = secondErrors = secondKeys = 0;
+    }
+
+    function catchUp(now) {
+      while ((samples.length + 1) * 1000 <= now - start) {
+        const second = samples.length + 1;
+        pushSample(second, second, 1);
+      }
+    }
+
+    function stop(at, status) {
+      catchUp(at);
+      const total = (at - start) / 1000;
+      const fraction = total - samples.length;
+      if (fraction >= 0.5) pushSample(samples.length + 1, total, fraction);
+      end = at;
+      t.status = status;
+    }
+
+    // Brings the clock up to `now`. True if this call ended a time-mode test.
+    function advanceClock(now) {
+      if (t.status !== 'running') return false;
+      if (isTime && now - start >= cfg.time * 1000) {
+        stop(start + cfg.time * 1000, 'finished');
+        return true;
+      }
+      catchUp(now);
+      return false;
+    }
+
+    function countKey(now, correct) {
+      if (correct) correctKeys++;
+      else {
+        incorrectKeys++;
+        secondErrors++;
+        const target = t.words[t.wordIndex];
+        if (target !== undefined) missedWords[target] = (missedWords[target] || 0) + 1;
+      }
+      secondKeys++;
+      if (lastKey !== null) keyIntervals.push(now - lastKey);
+      lastKey = now;
+    }
+
+    function begin(now) {
+      if (t.status === 'ready') {
+        start = lastCommit = now;
+        t.status = 'running';
+      }
+    }
+
+    const reply = (accepted, correct, advanced, finished) => ({
+      accepted,
+      correct,
+      advanced,
+      finished,
+      failed: t.status === 'failed',
+      wordIndex: t.wordIndex,
+    });
+
+    function fail(now, reason) {
+      begin(now);
+      t.failReason = reason;
+      stop(now, 'failed');
+    }
+
+    function space(now) {
+      const input = t.inputs[t.wordIndex];
+      if (input === '') return reply(false, false, false, false);
+      const target = isZen ? input : t.words[t.wordIndex];
+      const right = input === target;
+      countKey(now, right);
+      if (!right && cfg.stopOnError !== 'off') return reply(false, false, false, false);
+      if (!right && cfg.difficulty !== 'normal') {
+        fail(now, 'expert');
+        return reply(true, false, false, false);
+      }
+
+      secondChars++;
+      const minutes = (now - lastCommit) / 60000;
+      latestBurst = minutes > 0 ? round2(target.length / 5 / minutes) : 0;
+      bursts.push(latestBurst);
+      lastCommit = now;
+      t.wordIndex++;
+      t.inputs[t.wordIndex] = '';
+      if (!isZen && t.wordIndex >= t.words.length && !isTime) {
+        stop(now, 'finished');
+        return reply(true, right, true, true);
+      }
+      topUp();
+      return reply(true, right, true, false);
+    }
+
+    function letter(now, ch) {
+      const input = t.inputs[t.wordIndex];
+      if (isZen) {
+        begin(now);
+        countKey(now, true);
+        secondChars++;
+        t.inputs[t.wordIndex] = input + ch;
+        return reply(true, true, false, false);
+      }
+      const target = t.words[t.wordIndex];
+      if (input.length - target.length >= MAX_EXTRA) return reply(false, false, false, false);
+
+      const right = input.length < target.length && target[input.length] === ch;
+      const blocked = !right && cfg.stopOnError === 'letter';
+      countKey(now, right);
+      if (!right && cfg.difficulty === 'master') {
+        if (!blocked) {
+          t.inputs[t.wordIndex] = input + ch;
+          secondChars++;
+        }
+        fail(now, 'master');
+        return reply(!blocked, false, false, false);
+      }
+      if (blocked) return reply(false, false, false, false);
+
+      begin(now);
+      secondChars++;
+      t.inputs[t.wordIndex] = input + ch;
+      const isFinalWord = !isTime && t.wordIndex === t.words.length - 1;
+      if (isFinalWord && t.inputs[t.wordIndex].length === target.length) {
+        stop(now, 'finished');
+        return reply(true, right, false, true);
+      }
+      return reply(true, right, false, false);
+    }
+
+    t.input = function (ch, now) {
+      const ended = advanceClock(now);
+      if (t.status === 'finished' || t.status === 'failed') return reply(false, false, false, ended);
+      return ch === ' ' ? space(now) : letter(now, ch);
+    };
+
+    function canGoBack() {
+      if (t.wordIndex === 0 || cfg.confidence !== 'off') return false;
+      return cfg.freedom || t.isWordWrong(t.wordIndex - 1);
+    }
+
+    function goBack() {
+      t.inputs.pop();
+      t.wordIndex--;
+    }
+
+    const editReply = (changed) => ({ changed, wordIndex: t.wordIndex });
+
+    t.backspace = function (now) {
+      advanceClock(now);
+      if (t.status !== 'running' || cfg.confidence === 'max') return editReply(false);
+      const input = t.inputs[t.wordIndex];
+      if (input !== '') {
+        t.inputs[t.wordIndex] = input.slice(0, -1);
+        return editReply(true);
+      }
+      if (!canGoBack()) return editReply(false);
+      goBack();
+      return editReply(true);
+    };
+
+    t.backspaceWord = function (now) {
+      advanceClock(now);
+      if (t.status !== 'running' || cfg.confidence === 'max') return editReply(false);
+      if (t.inputs[t.wordIndex] !== '') {
+        t.inputs[t.wordIndex] = '';
+        return editReply(true);
+      }
+      if (!canGoBack()) return editReply(false);
+      goBack();
+      t.inputs[t.wordIndex] = '';
+      return editReply(true);
+    };
+
+    t.tick = function (now) {
+      return { finished: advanceClock(now) };
+    };
+
+    t.finish = function (now) {
+      if (t.status === 'running') stop(now, 'finished');
+    };
+
+    t.isWordWrong = function (i) {
+      return !isZen && i < t.wordIndex && t.inputs[i] !== t.words[i];
+    };
+
+    function accuracy() {
+      const total = correctKeys + incorrectKeys;
+      return total ? (correctKeys / total) * 100 : 0;
+    }
+
+    t.live = function (now) {
+      let elapsed = 0;
+      if (t.status === 'running') elapsed = (now - start) / 1000;
+      else if (end !== null) elapsed = (end - start) / 1000;
+      if (isTime) elapsed = Math.min(elapsed, cfg.time);
+      const s = stats(elapsed);
+      const fixed = !isTime && !isZen;
+      return {
+        elapsed,
+        remaining: isTime ? Math.max(0, cfg.time - elapsed) : null,
+        wpm: round2(s.wpm),
+        raw: round2(s.raw),
+        acc: round2(accuracy()),
+        wordsDone: t.wordIndex,
+        wordsTotal: fixed ? t.words.length : null,
+      };
+    };
+
+    t.result = function () {
+      if (t.status !== 'finished' && t.status !== 'failed') return null;
+      const time = (end - start) / 1000;
+      const s = stats(time);
+      const acc = accuracy();
+      let invalidReason = null;
+      if (afkSeconds >= 5 && afkSeconds >= samples.length * 0.5) invalidReason = 'afk';
+      else if (time < 5) invalidReason = 'too short';
+      else if (acc < 50) invalidReason = 'accuracy too low';
+      const mode2 = {
+        time: String(cfg.time),
+        words: String(cfg.words),
+        quote: cfg.quoteLength,
+        zen: 'zen',
+        custom: 'custom',
+      }[cfg.mode];
+      return {
+        wpm: round2(s.wpm),
+        raw: round2(s.raw),
+        acc: round2(acc),
+        consistency: round2(consistencyOf(samples.map((x) => x.raw))),
+        keyConsistency: round2(consistencyOf(keyIntervals)),
+        time: round2(time),
+        chars: s.chars,
+        keypresses: { correct: correctKeys, incorrect: incorrectKeys },
+        samples: samples.slice(),
+        bursts: bursts.slice(),
+        missedWords: Object.assign({}, missedWords),
+        mode: cfg.mode,
+        mode2,
+        language: cfg.language,
+        punctuation: cfg.punctuation,
+        numbers: cfg.numbers,
+        difficulty: cfg.difficulty,
+        quote: t.quote,
+        failed: t.status === 'failed',
+        failReason: t.failReason,
+        afkSeconds,
+        invalidReason,
+      };
+    };
+
+    return t;
+  }
+
+  HR.engine = { defaultConfig, createTest, generateWords, pickQuote, calcStats, kogasa, letterStates };
+})(globalThis);
+
+</script>
+<script>
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  const ui = (HR.ui = HR.ui || {});
+  const PREFIX = 'homerow:';
+  const HISTORY_CAP = 1000;
+
+  function load(name, fallback) {
+    try {
+      const raw = root.localStorage.getItem(PREFIX + name);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  }
+  function save(name, value) {
+    try {
+      root.localStorage.setItem(PREFIX + name, JSON.stringify(value));
+    } catch (e) {
+      /* Storage blocked or full: the in-memory state keeps working for this session. */
+    }
+  }
+
+  const ONOFF = [[true, 'on'], [false, 'off']];
+  const SCHEMA = [
+    { key: 'theme', label: 'theme', def: 'black', options: [['black', 'black'], ['graphite', 'graphite'], ['paper', 'paper'], ['rose', 'rosé']] },
+    { key: 'font', label: 'font', def: 'Roboto Mono', options: ['Roboto Mono', 'JetBrains Mono', 'Fira Code', 'IBM Plex Mono', 'Source Code Pro'].map((f) => [f, f]) },
+    { key: 'fontSize', label: 'font size', def: 1.5, options: [1, 1.25, 1.5, 2, 2.5, 3].map((n) => [n, String(n)]) },
+    { key: 'caretStyle', label: 'caret style', def: 'line', options: ['off', 'line', 'block', 'outline', 'underline'].map((s) => [s, s]) },
+    { key: 'smoothCaret', label: 'smooth caret', def: true, options: ONOFF, help: 'Animates the caret between letters.' },
+    { key: 'timerVisible', label: 'timer', def: true, options: ONOFF, help: 'Shows time left or word progress during a test.' },
+    { key: 'liveWpm', label: 'live wpm', def: false, options: ONOFF },
+    { key: 'liveAcc', label: 'live accuracy', def: false, options: ONOFF },
+    { key: 'focusMode', label: 'focus mode', def: true, options: ONOFF, help: 'Hides everything but the words while you type. Moving the mouse brings it back.' },
+    { key: 'indicateTypos', label: 'indicate typos', def: 'off', options: ['off', 'below', 'replace'].map((s) => [s, s]), help: 'Shows the letter you typed under the expected one, or in its place.' },
+    { key: 'blind', label: 'blind mode', def: false, options: ONOFF, help: 'Shows every typed letter as correct. Errors appear only in the result.' },
+    { key: 'difficulty', label: 'difficulty', def: 'normal', engine: true, options: ['normal', 'expert', 'master'].map((s) => [s, s]), help: 'Expert fails the test on a wrong word, master on a wrong keypress.' },
+    { key: 'stopOnError', label: 'stop on error', def: 'off', engine: true, options: ['off', 'letter', 'word'].map((s) => [s, s]), help: 'Letter blocks wrong letters. Word blocks the space until the word is right.' },
+    { key: 'freedom', label: 'freedom mode', def: false, engine: true, options: ONOFF, help: 'Lets backspace return to correct words too.' },
+    { key: 'confidence', label: 'confidence mode', def: 'off', engine: true, options: [['off', 'off'], ['on', 'on'], ['max', 'max']], help: 'On stops you returning to earlier words. Max disables backspace.' },
+    { key: 'quickRestart', label: 'quick restart', def: 'off', options: ['off', 'tab', 'esc'].map((s) => [s, s]), help: 'Restarts with one key. With esc, open the palette with ctrl shift p.' },
+    { key: 'clickSound', label: 'click sound', def: false, options: ONOFF },
+    { key: 'errorSound', label: 'error sound', def: false, options: ONOFF },
+  ];
+
+  function validPrefs(stored) {
+    const out = {};
+    for (const item of SCHEMA) {
+      const value = stored && stored[item.key];
+      out[item.key] = item.options.some(([v]) => v === value) ? value : item.def;
+    }
+    return out;
+  }
+
+  function validConfig(stored) {
+    const s = stored || {};
+    const posInt = (v, d) => (Number.isInteger(v) && v > 0 ? v : d);
+    const langs = (HR.data && HR.data.languages) || {};
+    return {
+      mode: ['time', 'words', 'quote', 'zen', 'custom'].includes(s.mode) ? s.mode : 'time',
+      time: posInt(s.time, 30),
+      words: posInt(s.words, 25),
+      quoteLength: ['short', 'medium', 'long', 'thicc', 'all'].includes(s.quoteLength) ? s.quoteLength : 'all',
+      punctuation: s.punctuation === true,
+      numbers: s.numbers === true,
+      language: Object.prototype.hasOwnProperty.call(langs, s.language) ? s.language : 'english',
+      customText: typeof s.customText === 'string' ? s.customText : '',
+    };
+  }
+
+  const store = {
+    SCHEMA,
+    prefs: validPrefs(load('prefs', null)),
+    config: validConfig(load('config', null)),
+    listeners: [],
+    setPref(key, value) {
+      store.prefs[key] = value;
+      save('prefs', store.prefs);
+      store.listeners.forEach((fn) => fn(key));
+    },
+    resetPrefs() {
+      store.prefs = validPrefs(null);
+      save('prefs', store.prefs);
+      store.listeners.forEach((fn) => fn(null));
+    },
+    saveConfig() {
+      save('config', store.config);
+    },
+    history() {
+      const h = load('history', null);
+      if (h) store._history = h;
+      return store._history || [];
+    },
+    pbs() {
+      return store._pbs || (store._pbs = load('pbs', {}) || {});
+    },
+    totals() {
+      return store._totals || (store._totals = load('totals', { tests: 0, seconds: 0 }) || { tests: 0, seconds: 0 });
+    },
+    /** Saves a finished test and returns whether it set a personal best. */
+    addResult(r) {
+      const entry = {
+        ts: Date.now(), wpm: r.wpm, raw: r.raw, acc: r.acc, consistency: r.consistency, time: r.time,
+        mode: r.mode, mode2: String(r.mode2), language: r.language, punctuation: !!r.punctuation,
+        numbers: !!r.numbers, difficulty: r.difficulty, chars: r.chars,
+      };
+      const history = store.history().slice();
+      history.push(entry);
+      if (history.length > HISTORY_CAP) history.splice(0, history.length - HISTORY_CAP);
+      store._history = history;
+      save('history', history);
+
+      const totals = store.totals();
+      totals.tests += 1;
+      totals.seconds += r.time;
+      save('totals', totals);
+
+      let isPb = false;
+      if (r.mode === 'time' || r.mode === 'words') {
+        const key = [r.mode, entry.mode2, r.language, entry.punctuation, entry.numbers, r.difficulty].join('|');
+        const pbs = store.pbs();
+        if (!pbs[key] || r.wpm > pbs[key].wpm) {
+          pbs[key] = entry;
+          isPb = true;
+          save('pbs', pbs);
+        }
+      }
+      return isPb;
+    },
+    clearHistory() {
+      store._history = [];
+      store._pbs = {};
+      store._totals = { tests: 0, seconds: 0 };
+      save('history', []);
+      save('pbs', {});
+      save('totals', store._totals);
+    },
+  };
+  ui.store = store;
+})(globalThis);
+
+</script>
+<script>
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  const ui = (HR.ui = HR.ui || {});
+
+  function niceMax(v) {
+    if (v <= 10) return 10;
+    const mag = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 1.5, 2, 3, 4, 5, 6, 8, 10]) if (m * mag >= v) return m * mag;
+    return 10 * mag;
+  }
+
+  /**
+   * Line chart with one y axis. Series are told apart by lightness, weight and dash, never hue.
+   * spec: { series: [{ name, colorVar, width, dash, values }], errors?: number[], xLabel(i), tip(i) => [[label, value]] , aria }
+   */
+  ui.createChart = function createChart(box) {
+    box.innerHTML = '<div class="chartCanvasWrap"><canvas></canvas><div class="chartTip" hidden></div></div><div class="chartLegend"></div>';
+    const wrap = box.firstChild;
+    const canvas = wrap.firstChild;
+    const tip = wrap.lastChild;
+    const legend = box.lastChild;
+    const PAD = { l: 38, r: 12, t: 22, b: 24 };
+    let spec = null;
+    let hover = -1;
+
+    const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const count = () => (spec ? Math.max(0, ...spec.series.map((s) => s.values.length)) : 0);
+
+    function draw() {
+      const w = wrap.clientWidth;
+      const h = wrap.clientHeight;
+      if (!w || !h || !spec) return;
+      const dpr = root.devicePixelRatio || 1;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      const g = canvas.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, w, h);
+      const n = count();
+      const font = getComputedStyle(document.body).fontFamily;
+      const dim = css('--dim');
+      const faint = css('--faint');
+      g.font = '11px ' + font;
+
+      const maxV = niceMax(Math.max(1, ...spec.series.flatMap((s) => s.values)));
+      const pw = Math.max(1, w - PAD.l - PAD.r);
+      const ph = Math.max(1, h - PAD.t - PAD.b);
+      const x = (i) => PAD.l + (n > 1 ? (i / (n - 1)) * pw : pw / 2);
+      const y = (v) => PAD.t + ph - (v / maxV) * ph;
+
+      g.textBaseline = 'middle';
+      g.textAlign = 'right';
+      for (let t = 0; t <= 4; t++) {
+        const v = (maxV * t) / 4;
+        g.strokeStyle = faint;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(PAD.l, Math.round(y(v)) + 0.5);
+        g.lineTo(w - PAD.r, Math.round(y(v)) + 0.5);
+        g.stroke();
+        g.fillStyle = dim;
+        g.fillText(String(Math.round(v * 10) / 10), PAD.l - 8, y(v));
+      }
+      g.textAlign = 'center';
+      g.textBaseline = 'alphabetic';
+      const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(pw / 50))));
+      for (let i = 0; i < n; i += step) g.fillText(spec.xLabel(i), x(i), h - 6);
+
+      if (hover >= 0 && hover < n) {
+        g.strokeStyle = dim;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(Math.round(x(hover)) + 0.5, PAD.t);
+        g.lineTo(Math.round(x(hover)) + 0.5, PAD.t + ph);
+        g.stroke();
+      }
+
+      // Drawn back to front so the first series stays on top.
+      for (const s of spec.series.slice().reverse()) {
+        const color = css(s.colorVar);
+        g.strokeStyle = color;
+        g.fillStyle = color;
+        g.lineWidth = s.width;
+        g.lineJoin = 'round';
+        g.setLineDash(s.dash || []);
+        g.beginPath();
+        s.values.forEach((v, i) => (i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v))));
+        g.stroke();
+        g.setLineDash([]);
+        if (s.values.length === 1) {
+          g.beginPath();
+          g.arc(x(0), y(s.values[0]), 3, 0, Math.PI * 2);
+          g.fill();
+        }
+        if (hover >= 0 && hover < s.values.length) {
+          g.beginPath();
+          g.arc(x(hover), y(s.values[hover]), 4, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+
+      // Errors sit in their own lane above the plot, so they need no second scale.
+      if (spec.errors) {
+        g.strokeStyle = css('--err');
+        g.lineWidth = 2;
+        spec.errors.forEach((e, i) => {
+          if (!e) return;
+          const cx = x(i);
+          const cy = 10;
+          g.beginPath();
+          g.moveTo(cx - 4, cy - 4);
+          g.lineTo(cx + 4, cy + 4);
+          g.moveTo(cx + 4, cy - 4);
+          g.lineTo(cx - 4, cy + 4);
+          g.stroke();
+        });
+      }
+
+      if (hover >= 0 && hover < n) {
+        tip.hidden = false;
+        tip.textContent = '';
+        for (const [label, value] of spec.tip(hover)) {
+          const row = document.createElement('div');
+          const b = document.createElement('b');
+          b.textContent = label + ' ';
+          row.append(b, String(value));
+          tip.append(row);
+        }
+        const left = Math.min(Math.max(0, x(hover) + 12), w - tip.offsetWidth);
+        const flipped = x(hover) + 12 + tip.offsetWidth > w ? x(hover) - tip.offsetWidth - 12 : left;
+        tip.style.left = Math.max(0, flipped) + 'px';
+        tip.style.top = PAD.t + 'px';
+      } else {
+        tip.hidden = true;
+      }
+    }
+
+    function pointer(e) {
+      const n = count();
+      if (!n) return;
+      const r = canvas.getBoundingClientRect();
+      const pw = Math.max(1, r.width - PAD.l - PAD.r);
+      const i = n > 1 ? Math.round(((e.clientX - r.left - PAD.l) / pw) * (n - 1)) : 0;
+      const next = Math.max(0, Math.min(n - 1, i));
+      if (next !== hover) {
+        hover = next;
+        draw();
+      }
+    }
+    canvas.addEventListener('pointermove', pointer);
+    canvas.addEventListener('pointerdown', pointer);
+    canvas.addEventListener('pointerleave', () => {
+      hover = -1;
+      draw();
+    });
+    if (root.ResizeObserver) new ResizeObserver(draw).observe(wrap);
+
+    return {
+      update(next) {
+        spec = next;
+        hover = -1;
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', next.aria || 'chart');
+        legend.textContent = '';
+        const items = next.series.map((s) => ({ name: s.name, colorVar: s.colorVar, dash: s.dash, width: s.width }));
+        for (const it of items) {
+          const span = document.createElement('span');
+          const dash = it.dash ? ` stroke-dasharray="${it.dash.join(' ')}"` : '';
+          span.innerHTML = `<svg width="20" height="6" aria-hidden="true"><line x1="0" y1="3" x2="20" y2="3" stroke="var(${it.colorVar})" stroke-width="${it.width}"${dash}/></svg>`;
+          span.append(it.name);
+          legend.append(span);
+        }
+        if (next.errors) {
+          const span = document.createElement('span');
+          span.innerHTML = '<svg width="10" height="10" aria-hidden="true"><path d="M1 1L9 9M9 1L1 9" stroke="var(--err)" stroke-width="2"/></svg>';
+          span.append('errors');
+          legend.append(span);
+        }
+        draw();
+      },
+      draw,
+    };
+  };
+})(globalThis);
+
+</script>
+<script>
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  const ui = (HR.ui = HR.ui || {});
+  const $ = (id) => document.getElementById(id);
+  ui.$ = $;
+
+  ui.esc = (s) =>
+    String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  ui.fmtDuration = (seconds) => {
+    const s = Math.round(seconds);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return (h ? h + 'h ' : '') + (h || m ? m + 'm ' : '') + (s % 60) + 's';
+  };
+
+  let toastTimer = 0;
+  ui.toast = (text) => {
+    const el = $('toast');
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (el.hidden = true), 2500);
+  };
+
+  /** Must be called inside a click handler. Falls back to showing the text for manual copying. */
+  ui.copy = (text, doneMessage) => {
+    const fallback = () =>
+      ui.modal({ title: 'Copy this text', text: 'Your browser blocked the clipboard. Select the text and copy it.', area: text, readOnly: true });
+    if (!navigator.clipboard || !navigator.clipboard.writeText) return fallback();
+    navigator.clipboard.writeText(text).then(() => ui.toast(doneMessage), fallback);
+  };
+
+  /** A button that asks for a second click before doing something destructive. */
+  ui.twoStep = (button, confirmLabel, action) => {
+    const original = button.textContent;
+    let armed = false;
+    let timer = 0;
+    button.addEventListener('click', () => {
+      if (!armed) {
+        armed = true;
+        button.textContent = confirmLabel;
+        timer = setTimeout(() => {
+          armed = false;
+          button.textContent = original;
+        }, 4000);
+        return;
+      }
+      clearTimeout(timer);
+      armed = false;
+      button.textContent = original;
+      action();
+    });
+  };
+
+  ui.overlayOpen = () => !$('modal').hidden || !$('palette').hidden;
+  ui.setInert = (on) => {
+    $('app').inert = on;
+  };
+
+  let modalSpec = null;
+  ui.modal = (spec) => {
+    modalSpec = spec;
+    $('modalTitle').textContent = spec.title;
+    $('modalText').hidden = !spec.text;
+    $('modalText').textContent = spec.text || '';
+    $('modalError').hidden = true;
+    const input = $('modalInput');
+    const area = $('modalArea');
+    input.hidden = spec.number === undefined;
+    area.hidden = spec.area === undefined;
+    area.readOnly = !!spec.readOnly;
+    $('modalOk').hidden = !!spec.readOnly;
+    $('modalCancel').textContent = spec.readOnly ? 'close' : 'cancel';
+    $('modalOk').textContent = spec.okLabel || 'ok';
+    if (spec.number !== undefined) {
+      input.value = spec.number;
+      input.min = spec.min;
+      input.max = spec.max;
+    }
+    if (spec.area !== undefined) area.value = spec.area;
+    $('modal').hidden = false;
+    ui.setInert(true);
+    const target = spec.number !== undefined ? input : spec.area !== undefined ? area : $('modalCancel');
+    target.focus();
+    if (target.select && (spec.number !== undefined || spec.readOnly)) target.select();
+  };
+  function closeModal(ok) {
+    const spec = modalSpec;
+    modalSpec = null;
+    $('modal').hidden = true;
+    ui.setInert(false);
+    if (!ok && spec && spec.onCancel) spec.onCancel();
+    if (ui.refocus) ui.refocus();
+  }
+  ui.initModal = () => {
+    $('modalForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const spec = modalSpec;
+      if (!spec || spec.readOnly) return;
+      const value = spec.number !== undefined ? $('modalInput').value : $('modalArea').value;
+      const problem = spec.validate ? spec.validate(value) : null;
+      if (problem) {
+        $('modalError').textContent = problem;
+        $('modalError').hidden = false;
+        return;
+      }
+      closeModal(true);
+      spec.onOk(value);
+    });
+    $('modalCancel').addEventListener('click', () => closeModal(false));
+    $('modal').addEventListener('mousedown', (e) => {
+      if (e.target === $('modal')) closeModal(false);
+    });
+    $('modal').addEventListener('keydown', (e) => {
+      e.stopPropagation(); // closing here must not fall through to the global handler
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeModal(false);
+      } else if (e.key === 'Enter' && e.ctrlKey && e.target === $('modalArea')) {
+        e.preventDefault();
+        $('modalForm').requestSubmit();
+      }
+    });
+  };
+
+  // Sound: the AudioContext is created only from a key press, as browsers require.
+  let audio = null;
+  ui.beep = (error) => {
+    try {
+      audio = audio || new (root.AudioContext || root.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.type = error ? 'sawtooth' : 'square';
+      osc.frequency.value = error ? 140 : 900;
+      const t = audio.currentTime;
+      const len = error ? 0.09 : 0.025;
+      gain.gain.setValueAtTime(error ? 0.05 : 0.04, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + len);
+    } catch (e) {
+      /* Sound is optional. */
+    }
+  };
+
+  ui.applyLook = () => {
+    const p = ui.store.prefs;
+    const docEl = document.documentElement;
+    if (p.theme === 'black') delete docEl.dataset.look;
+    else docEl.dataset.look = p.theme;
+    docEl.style.setProperty('--font', `'${p.font}', ui-monospace, 'DejaVu Sans Mono', Menlo, Consolas, monospace`);
+    const px = Math.round(p.fontSize * 16 * (root.innerWidth < 600 ? 0.8 : 1));
+    docEl.style.setProperty('--words-size', px + 'px');
+    docEl.style.setProperty('--words-lh', Math.round(px * 1.6) + 'px');
+  };
+})(globalThis);
+
+</script>
+<script>
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  const ui = (HR.ui = HR.ui || {});
+  const { $, store, esc } = ui;
+  const RENDER_AHEAD = 150;
+
+  const S = {
+    t: null, // the one current test
+    tickId: 0,
+    view: 'none', // 'none' | 'test' | 'result'
+    repeated: false, // repeats and practice aren't saved
+    result: null,
+    els: [], // word elements for indices first .. first + els.length - 1
+    first: 0,
+    composing: false,
+    chart: null,
+  };
+  ui.testState = S;
+
+  const engineConfig = () => {
+    const p = store.prefs;
+    return { ...store.config, stopOnError: p.stopOnError, freedom: p.freedom, confidence: p.confidence, difficulty: p.difficulty };
+  };
+
+  const isZen = () => S.t.config.mode === 'zen';
+  const wordCount = () => (isZen() ? S.t.inputs.length : S.t.words.length);
+  const lineHeight = () => parseFloat(getComputedStyle($('words')).lineHeight) || 38;
+
+  // ---- rendering words ----
+
+  function fillWord(el, i) {
+    const t = S.t;
+    const p = store.prefs;
+    const target = t.words[i];
+    const typed = t.inputs[i] || '';
+    const states = HR.engine.letterStates(target, typed);
+    let html = '';
+    states.forEach((l, k) => {
+      let cls = l.state;
+      let ch = l.ch;
+      let attr = '';
+      if (p.blind && (cls === 'incorrect' || cls === 'extra')) {
+        cls = 'correct';
+      } else if (cls === 'incorrect' && p.indicateTypos === 'replace') {
+        ch = typed[k];
+      } else if (cls === 'incorrect' && p.indicateTypos === 'below') {
+        attr = ` data-t="${esc(typed[k])}"`;
+      }
+      html += `<span class="l ${cls}"${attr}>${esc(ch)}</span>`;
+    });
+    el.innerHTML = html;
+    el.classList.toggle('wrong', !p.blind && t.isWordWrong(i));
+  }
+
+  function syncWords() {
+    const t = S.t;
+    const inner = $('wordsInner');
+    const limit = Math.min(wordCount(), t.wordIndex + RENDER_AHEAD);
+    if (t.wordIndex < S.first) return renderAll();
+    while (S.first + S.els.length > wordCount()) inner.removeChild(S.els.pop());
+    const frag = document.createDocumentFragment();
+    while (S.first + S.els.length < limit) {
+      const el = document.createElement('div');
+      el.className = 'word';
+      fillWord(el, S.first + S.els.length);
+      S.els.push(el);
+      frag.appendChild(el);
+    }
+    inner.appendChild(frag);
+  }
+
+  function renderAll() {
+    const inner = $('wordsInner');
+    inner.textContent = '';
+    S.els = [];
+    S.first = 0;
+    syncWords();
+    // A rebuild after a long backspace keeps every earlier word; trimming resumes on the next commit.
+    for (let i = 0; i < S.els.length; i++) fillWord(S.els[i], i);
+  }
+
+  function trimLines() {
+    const active = S.els[S.t.wordIndex - S.first];
+    if (!active) return;
+    const limit = active.offsetTop - 2 * lineHeight();
+    let drop = 0;
+    while (drop < S.els.length && S.els[drop].offsetTop < limit) drop++;
+    if (!drop) return;
+    const inner = $('wordsInner');
+    for (let i = 0; i < drop; i++) inner.removeChild(S.els[i]);
+    S.els.splice(0, drop);
+    S.first += drop;
+  }
+
+  function placeCaret(instant) {
+    const t = S.t;
+    if (!t) return;
+    const active = S.els[t.wordIndex - S.first];
+    const inner = $('wordsInner');
+    const words = $('words');
+    const caret = $('caret');
+    if (!active) return;
+    const lh = lineHeight();
+    const pos = (t.inputs[t.wordIndex] || '').length;
+    const letters = active.children;
+    const letter = letters[pos] || letters[letters.length - 1] || null;
+    const atEnd = !letters[pos];
+
+    const innerRect = inner.getBoundingClientRect();
+    const box = (letter || active).getBoundingClientRect();
+    const scroll = Math.max(0, Math.round(box.top - innerRect.top - lh));
+    inner.style.transform = scroll ? `translateY(${-scroll}px)` : '';
+
+    const wordsRect = words.getBoundingClientRect();
+    const newInner = inner.getBoundingClientRect();
+    const x = (letter ? (atEnd ? box.right : box.left) : box.left) - wordsRect.left;
+    const y = box.top - innerRect.top + (newInner.top - wordsRect.top);
+    const size = parseFloat(getComputedStyle(words).fontSize);
+    const letterW = letter ? box.width : size * 0.6;
+
+    const style = store.prefs.caretStyle;
+    caret.dataset.style = style;
+    if (style === 'line') {
+      caret.style.width = '2px';
+      caret.style.height = Math.max(0, lh - 6) + 'px';
+    } else {
+      caret.style.width = letterW + 'px';
+      caret.style.height = lh + 'px';
+    }
+    const noAnim = instant || !store.prefs.smoothCaret;
+    caret.classList.toggle('noanim', noAnim);
+    caret.style.transform = `translate(${x}px, ${y}px)`;
+    if (noAnim && store.prefs.smoothCaret) {
+      void caret.offsetWidth;
+      caret.classList.remove('noanim');
+    }
+  }
+  ui.relayout = () => {
+    if (S.t && S.view === 'test') placeCaret(true);
+  };
+
+  // ---- live numbers ----
+
+  function updateLive() {
+    const t = S.t;
+    const p = store.prefs;
+    const running = t && t.status === 'running';
+    $('live').hidden = !running;
+    $('langBtn').hidden = !!running;
+    if (!running) return;
+    const l = t.live(performance.now());
+    let timer = '';
+    if (p.timerVisible) {
+      if (l.remaining !== null && l.remaining !== undefined) timer = String(Math.max(0, Math.ceil(l.remaining)));
+      else if (l.wordsTotal) timer = `${l.wordsDone}/${l.wordsTotal}`;
+      else timer = String(l.wordsDone);
+    }
+    $('liveTimer').textContent = timer;
+    $('liveWpm').textContent = p.liveWpm ? Math.floor(l.wpm) + ' wpm' : '';
+    $('liveAcc').textContent = p.liveAcc ? Math.floor(l.acc) + '%' : '';
+  }
+
+  function stopTick() {
+    clearInterval(S.tickId);
+    S.tickId = 0;
+  }
+
+  function startTick(test) {
+    stopTick();
+    S.tickId = setInterval(() => {
+      if (S.t !== test) return stopTick();
+      const r = test.tick(performance.now());
+      if ((r && r.finished) || test.status === 'finished' || test.status === 'failed') return endTest();
+      updateLive();
+    }, 100);
+  }
+
+  // ---- typing ----
+
+  function afterChange(prevIndex, instant) {
+    const t = S.t;
+    if (t.wordIndex < S.first) {
+      renderAll();
+    } else {
+      syncWords();
+      const low = Math.min(prevIndex, t.wordIndex);
+      const high = Math.max(prevIndex, t.wordIndex);
+      for (let i = low; i <= high; i++) {
+        const el = S.els[i - S.first];
+        if (el) fillWord(el, i);
+      }
+      if (t.wordIndex > prevIndex) trimLines();
+    }
+    placeCaret(instant);
+  }
+
+  function setTyping(on) {
+    document.body.classList.toggle('typing', on && store.prefs.focusMode);
+  }
+
+  function feed(text) {
+    for (const ch of Array.from(text)) {
+      const t = S.t;
+      if (!t || S.view !== 'test' || t.status === 'finished' || t.status === 'failed') return;
+      const prev = t.wordIndex;
+      const value = /\s/.test(ch) ? ' ' : ch;
+      // A space on an empty word is ignored by the engine, but returns the same shape as a blocked wrong letter.
+      if (value === ' ' && !t.inputs[t.wordIndex]) continue;
+      const r = t.input(value, performance.now());
+      if (t.status === 'running' && !S.tickId) {
+        startTick(t);
+        $('caret').classList.remove('blink');
+        updateLive();
+      }
+      if (r.accepted || r.correct === false) {
+        setTyping(true);
+        if (r.correct === false && store.prefs.errorSound) ui.beep(true);
+        else if (store.prefs.clickSound) ui.beep(false);
+      }
+      if (t.status === 'finished' || t.status === 'failed') return endTest();
+      afterChange(prev);
+    }
+  }
+
+  function erase(word) {
+    const t = S.t;
+    if (!t || S.view !== 'test' || t.status === 'finished' || t.status === 'failed') return;
+    const prev = t.wordIndex;
+    const r = word ? t.backspaceWord(performance.now()) : t.backspace(performance.now());
+    if (r.changed) {
+      if (store.prefs.clickSound) ui.beep(false);
+      afterChange(prev);
+    }
+  }
+
+  const resetInput = () => {
+    const input = $('hiddenInput');
+    input.value = ' ';
+    input.setSelectionRange(1, 1);
+  };
+
+  function bindInput() {
+    const input = $('hiddenInput');
+    input.addEventListener('compositionstart', () => {
+      S.composing = true;
+    });
+    input.addEventListener('compositionend', (e) => {
+      S.composing = false;
+      if (e.data) feed(e.data);
+      resetInput();
+    });
+    input.addEventListener('input', (e) => {
+      if (S.composing || e.isComposing) return;
+      const type = e.inputType;
+      if (type === 'insertText' && e.data) feed(e.data);
+      else if (type === 'deleteContentBackward') erase(false);
+      else if (type === 'deleteWordBackward' || type === 'deleteSoftLineBackward') erase(true);
+      resetInput();
+    });
+    input.addEventListener('paste', (e) => e.preventDefault());
+    input.addEventListener('drop', (e) => e.preventDefault());
+    input.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        erase(e.ctrlKey || e.altKey || e.metaKey);
+      }
+    });
+  }
+
+  const focusInput = () => {
+    if (S.view === 'test' && !ui.overlayOpen()) {
+      resetInput();
+      $('hiddenInput').focus({ preventScroll: true });
+    }
+    updateFocusState();
+  };
+  ui.refocus = () => {
+    if (S.view === 'test') focusInput();
+  };
+  ui.focusTest = focusInput;
+
+  function updateFocusState() {
+    const active = document.activeElement;
+    const ok = document.hasFocus() && (active === $('hiddenInput') || active === $('restartBtn') || active === $('finishBtn'));
+    const show = S.view === 'test' && !ok && !ui.overlayOpen();
+    $('wordsWrap').classList.toggle('blurred', show);
+    $('focusMsg').hidden = !show;
+    $('caret').style.visibility = show ? 'hidden' : '';
+  }
+
+  // ---- lifecycle ----
+
+  function showView(view) {
+    S.view = view;
+    $('testView').hidden = view !== 'test';
+    $('resultView').hidden = view !== 'result';
+  }
+
+  /** spec: { config?, words?, quote?, repeated? } */
+  function newTest(spec) {
+    const s = spec || {};
+    stopTick();
+    setTyping(false);
+    const opts = {};
+    if (s.words) opts.words = s.words;
+    if (s.quote) opts.quote = s.quote;
+    S.t = HR.engine.createTest(s.config || engineConfig(), opts);
+    S.repeated = !!s.repeated;
+    S.result = null;
+    S.composing = false;
+    showView('test');
+    $('wordsInner').style.transform = '';
+    renderAll();
+    updateLive();
+    $('finishBtn').hidden = !isZen();
+    $('zenHint').hidden = !isZen();
+    $('caret').classList.add('blink');
+    placeCaret(true);
+    focusInput();
+  }
+  ui.newTest = newTest;
+
+  ui.cancelTest = () => {
+    stopTick();
+    setTyping(false);
+    S.t = null;
+    S.result = null;
+    showView('none');
+    $('wordsInner').textContent = '';
+    S.els = [];
+    S.first = 0;
+  };
+
+  const CHART_SERIES = (r) => [
+    { name: 'wpm', colorVar: '--fg', width: 2, values: r.samples.map((s) => s.wpm) },
+    { name: 'raw', colorVar: '--dim', width: 1.5, values: r.samples.map((s) => s.raw) },
+    { name: 'burst', colorVar: '--dim', width: 1, dash: [3, 4], values: r.samples.map((s) => s.burst) },
+  ];
+
+  function describeType(r) {
+    const parts = [r.mode];
+    if (r.mode !== 'zen' && r.mode !== 'custom') parts.push(String(r.mode2));
+    parts.push(HR.data.languages[r.language] ? HR.data.languages[r.language].label : r.language);
+    if (r.punctuation) parts.push('punctuation');
+    if (r.numbers) parts.push('numbers');
+    if (r.difficulty !== 'normal') parts.push(r.difficulty);
+    return parts.join(' ');
+  }
+
+  const FAILS = {
+    expert: 'Test failed: expert difficulty ends on a wrong word.',
+    master: 'Test failed: master difficulty ends on a wrong keypress.',
+  };
+  const INVALID = {
+    afk: 'Not saved: you were away from the keyboard for too much of the test.',
+    'too short': 'Not saved: the test was shorter than 5 seconds.',
+    'accuracy too low': 'Not saved: accuracy was below 50%.',
+  };
+
+  function endTest() {
+    const t = S.t;
+    stopTick();
+    setTyping(false);
+    const r = t.result();
+    S.result = r;
+    const saved = !r.failed && !r.invalidReason && !S.repeated;
+    const isPb = saved ? store.addResult(r) : false;
+    renderResult(r, isPb);
+    showView('result');
+    $('hiddenInput').blur();
+    $('zenHint').hidden = true;
+    updateFocusState();
+    if (S.chart) S.chart.draw();
+  }
+
+  function renderResult(r, isPb) {
+    $('resWpm').textContent = Math.floor(r.wpm);
+    $('resWpm').title = r.wpm.toFixed(2) + ' wpm';
+    $('resAcc').textContent = Math.floor(r.acc) + '%';
+    $('resAcc').title = r.acc.toFixed(2) + '%';
+    $('resPb').hidden = !isPb;
+
+    const notice = $('resultNotice');
+    let msg = '';
+    if (r.failed) msg = FAILS[r.failReason] || 'Test failed.';
+    else if (r.invalidReason) msg = INVALID[r.invalidReason] || 'Not saved: invalid test.';
+    else if (S.repeated) msg = 'Repeated and practice tests are not saved.';
+    notice.textContent = msg;
+    notice.hidden = !msg;
+    notice.classList.toggle('fail', !!r.failed);
+
+    const c = r.chars;
+    const item = (dt, dd, title, small) =>
+      `<div><dt>${esc(dt)}</dt><dd${title ? ` title="${esc(title)}"` : ''}${small ? ' class="small"' : ''}>${esc(dd)}</dd></div>`;
+    $('resDetails').innerHTML =
+      item('test type', describeType(r), '', true) +
+      item('raw', Math.floor(r.raw), r.raw.toFixed(2)) +
+      item('characters', `${c.correct}/${c.incorrect}/${c.extra}/${c.missed}`, 'correct / incorrect / extra / missed') +
+      item('consistency', Math.floor(r.consistency) + '%', `key consistency ${r.keyConsistency.toFixed(2)}%`) +
+      item('time', r.time.toFixed(r.time % 1 ? 2 : 0) + 's', r.afkSeconds ? `${r.afkSeconds}s away from keyboard` : '');
+
+    $('resSource').hidden = !(r.quote && r.quote.source);
+    $('resSource').textContent = r.quote ? 'source: ' + r.quote.source : '';
+    $('practiceBtn').disabled = !Object.keys(r.missedWords || {}).length;
+
+    if (!S.chart) S.chart = ui.createChart($('resChart'));
+    S.chart.update({
+      series: CHART_SERIES(r),
+      errors: r.samples.map((s) => s.errors),
+      xLabel: (i) => String(r.samples[i].second),
+      aria: `Speed per second. Final ${Math.floor(r.wpm)} wpm, raw ${Math.floor(r.raw)}.`,
+      tip: (i) => {
+        const s = r.samples[i];
+        return [['second', s.second], ['wpm', Math.round(s.wpm)], ['raw', Math.round(s.raw)], ['burst', Math.round(s.burst)], ['errors', s.errors]];
+      },
+    });
+  }
+
+  function practice() {
+    const r = S.result;
+    if (!r) return;
+    const missed = Object.keys(r.missedWords || {});
+    if (!missed.length) return;
+    let pool = [];
+    while (pool.length < 25) pool = pool.concat(missed);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    newTest({ config: { ...S.t.config, mode: 'custom', customText: pool.join(' ') }, repeated: true });
+  }
+
+  function repeat() {
+    const t = S.t;
+    if (!t) return newTest();
+    const zen = t.config.mode === 'zen';
+    newTest({ config: t.config, words: zen ? undefined : t.words.slice(), quote: t.quote || undefined, repeated: true });
+  }
+  ui.repeatTest = repeat;
+
+  function copyResult() {
+    const r = S.result;
+    if (!r) return;
+    const c = r.chars;
+    const text =
+      `homerow: ${Math.floor(r.wpm)} wpm, ${Math.floor(r.acc)}% acc, raw ${Math.floor(r.raw)}, ` +
+      `consistency ${Math.floor(r.consistency)}%, ${describeType(r)}, ${r.time}s, chars ${c.correct}/${c.incorrect}/${c.extra}/${c.missed}`;
+    ui.copy(text, 'Result copied');
+  }
+
+  // ---- config bar ----
+
+  const LIMITS = { time: [15, 30, 60, 120], words: [10, 25, 50, 100] };
+
+  function renderConfig() {
+    const c = store.config;
+    const b = (k, v, label, on, extra) =>
+      `<button type="button" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}"${extra || ''}>${esc(label)}</button>`;
+    let html = '';
+    if (c.mode === 'time' || c.mode === 'words') {
+      html += b('punctuation', '', '@ punctuation', c.punctuation) + b('numbers', '', '# numbers', c.numbers) + '<span class="sep"></span>';
+    }
+    for (const m of ['time', 'words', 'quote', 'zen', 'custom']) html += b('mode', m, m, c.mode === m);
+    if (c.mode === 'time' || c.mode === 'words') {
+      html += '<span class="sep"></span>';
+      const cur = c[c.mode];
+      for (const n of LIMITS[c.mode]) html += b(c.mode, n, n, cur === n);
+      const free = !LIMITS[c.mode].includes(cur);
+      html += b('free', c.mode, free ? String(cur) : 'other', free, ' title="Choose your own number"');
+    } else if (c.mode === 'quote') {
+      html += '<span class="sep"></span>';
+      for (const q of ['all', 'short', 'medium', 'long', 'thicc']) html += b('quoteLength', q, q, c.quoteLength === q);
+    } else if (c.mode === 'custom') {
+      html += '<span class="sep"></span>' + b('editCustom', '', 'change text', false);
+    }
+    $('configBar').innerHTML = html;
+    const lang = HR.data.languages[c.language];
+    $('langBtn').textContent = lang ? lang.label : c.language;
+  }
+  ui.renderConfig = renderConfig;
+
+  function setConfig(patch) {
+    Object.assign(store.config, patch);
+    store.saveConfig();
+    renderConfig();
+    if (ui.currentPage() === 'test') newTest();
+  }
+  ui.setConfig = setConfig;
+
+  function editCustom(previousMode) {
+    ui.modal({
+      title: 'Custom text',
+      text: 'Paste or type the text to practise. Ctrl+Enter starts the test.',
+      area: store.config.customText,
+      okLabel: 'start',
+      onOk: (value) => setConfig({ mode: 'custom', customText: value }),
+      onCancel: () => {
+        if (previousMode) setConfig({ mode: previousMode });
+      },
+    });
+  }
+  ui.editCustom = editCustom;
+
+  function askNumber(mode) {
+    const seconds = mode === 'time';
+    const max = seconds ? 3600 : 10000;
+    ui.modal({
+      title: seconds ? 'Test length in seconds' : 'Number of words',
+      text: `Enter a whole number from 1 to ${max}.`,
+      number: store.config[mode],
+      min: 1,
+      max,
+      okLabel: 'start',
+      validate: (v) => {
+        const n = Number(v);
+        return Number.isInteger(n) && n >= 1 && n <= max ? null : `Enter a whole number from 1 to ${max}.`;
+      },
+      onOk: (v) => setConfig({ [mode]: Number(v) }),
+    });
+  }
+  ui.askNumber = askNumber;
+
+  function onConfigClick(e) {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const { k, v } = btn.dataset;
+    if (k === 'punctuation' || k === 'numbers') setConfig({ [k]: !store.config[k] });
+    else if (k === 'mode') {
+      if (v === 'custom' && store.config.mode !== 'custom' && !store.config.customText.trim()) editCustom(store.config.mode);
+      else setConfig({ mode: v });
+    } else if (k === 'time' || k === 'words') setConfig({ [k]: Number(v) });
+    else if (k === 'quoteLength') setConfig({ quoteLength: v });
+    else if (k === 'free') askNumber(v);
+    else if (k === 'editCustom') editCustom();
+  }
+
+  // ---- keys ----
+
+  function onKeyDown(e) {
+    if (e.getModifierState) $('capsWarn').hidden = !e.getModifierState('CapsLock');
+    if (e.isComposing) return;
+    if (!$('modal').hidden || !$('palette').hidden) return;
+    if (e.ctrlKey && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault();
+      return ui.openPalette();
+    }
+    const inTest = ui.currentPage() === 'test';
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (inTest && store.prefs.quickRestart === 'esc') return newTest();
+      return ui.openPalette();
+    }
+    if (!inTest) return;
+
+    const target = e.target;
+    const input = $('hiddenInput');
+    if (S.view === 'result') {
+      if (e.key === 'Tab' && !e.shiftKey) {
+        if (store.prefs.quickRestart === 'tab') {
+          e.preventDefault();
+          return newTest();
+        }
+        if (target === document.body) {
+          e.preventDefault();
+          $('nextBtn').focus();
+        }
+      }
+      return;
+    }
+    if (S.view !== 'test') return;
+
+    if (e.key === 'Tab' && !e.shiftKey) {
+      if (store.prefs.quickRestart === 'tab') {
+        e.preventDefault();
+        return newTest();
+      }
+      if (target === input) {
+        e.preventDefault();
+        $('restartBtn').focus();
+      }
+      return;
+    }
+    if (e.key === 'Enter' && e.shiftKey && isZen()) {
+      e.preventDefault();
+      return finishZen();
+    }
+    if (target === input) return;
+    if (['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'Tab', 'Dead'].includes(e.key)) {
+      if (e.key === 'Dead' && target === document.body) focusInput();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) return;
+    const onRestart = target === $('restartBtn') || target === $('finishBtn');
+    if (onRestart) {
+      if (e.key.length === 1 && e.key !== ' ') focusInput();
+      return;
+    }
+    if (!target.closest || !target.closest('a, button, input, textarea, select')) focusInput();
+  }
+
+  function finishZen() {
+    const t = S.t;
+    if (!t || t.status !== 'running') return;
+    t.finish(performance.now());
+    endTest();
+  }
+
+  ui.initTest = () => {
+    bindInput();
+    renderConfig();
+    $('configBar').addEventListener('click', onConfigClick);
+    $('restartBtn').addEventListener('click', () => newTest());
+    $('finishBtn').addEventListener('click', finishZen);
+    $('nextBtn').addEventListener('click', () => newTest());
+    $('repeatBtn').addEventListener('click', repeat);
+    $('practiceBtn').addEventListener('click', practice);
+    $('copyBtn').addEventListener('click', copyResult);
+    $('langBtn').addEventListener('click', () => ui.openPalette('language'));
+    $('wordsWrap').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      focusInput();
+    });
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', (e) => {
+      if (e.getModifierState) $('capsWarn').hidden = !e.getModifierState('CapsLock');
+    });
+    document.addEventListener('focusin', updateFocusState);
+    document.addEventListener('focusout', () => setTimeout(updateFocusState, 0));
+    root.addEventListener('blur', updateFocusState);
+    root.addEventListener('focus', () => {
+      if (S.view === 'test' && document.activeElement === document.body) focusInput();
+      updateFocusState();
+    });
+    let mx = null;
+    let my = null;
+    document.addEventListener('mousemove', (e) => {
+      if (mx !== null && (Math.abs(e.clientX - mx) > 2 || Math.abs(e.clientY - my) > 2)) setTyping(false);
+      mx = e.clientX;
+      my = e.clientY;
+    });
+
+    const relayout = () => {
+      ui.applyLook();
+      ui.relayout();
+    };
+    root.addEventListener('resize', relayout);
+    if (root.ResizeObserver) new ResizeObserver(() => ui.relayout()).observe($('words'));
+    if (document.fonts) {
+      document.fonts.addEventListener && document.fonts.addEventListener('loadingdone', () => ui.relayout());
+      document.fonts.ready && document.fonts.ready.then(() => ui.relayout());
+    }
+
+    store.listeners.push((key) => {
+      ui.applyLook();
+      if (S.chart && S.view === 'result') S.chart.draw();
+      if (ui.currentPage() !== 'test' || !S.t || S.view !== 'test') return;
+      const item = store.SCHEMA.find((x) => x.key === key);
+      if (key === null || (item && item.engine)) return newTest();
+      // Visual change: letters re-render, then the caret re-measures once the font has applied.
+      S.els.forEach((el, i) => fillWord(el, S.first + i));
+      updateLive();
+      placeCaret(true);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => ui.relayout());
+    });
+  };
+})(globalThis);
+
+</script>
+<script>
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  const ui = (HR.ui = HR.ui || {});
+  const { $, store, esc } = ui;
+
+  const avg = (list, key) => (list.length ? list.reduce((a, x) => a + x[key], 0) / list.length : 0);
+  const n0 = (v) => Math.floor(v);
+  const langLabel = (k) => (HR.data.languages[k] ? HR.data.languages[k].label : k);
+
+  let filter = 'all';
+  let statsChart = null;
+
+  function renderStats() {
+    const page = $('pageStats');
+    const history = store.history();
+    const totals = store.totals();
+    const last20 = history.slice(-20);
+    const tile = (dt, dd) => `<div><dt>${esc(dt)}</dt><dd>${esc(dd)}</dd></div>`;
+    const best = history.reduce((a, x) => Math.max(a, x.wpm), 0);
+
+    const pbs = Object.values(store.pbs()).sort(
+      (a, b) => a.mode.localeCompare(b.mode) || Number(a.mode2) - Number(b.mode2) || a.language.localeCompare(b.language),
+    );
+    const pbRows = pbs
+      .map((p) => {
+        const tags = [p.punctuation && 'punctuation', p.numbers && 'numbers', p.difficulty !== 'normal' && p.difficulty].filter(Boolean).join(', ') || '-';
+        return `<tr><td>${esc(p.mode)} ${esc(p.mode2)}</td><td>${esc(langLabel(p.language))}</td><td>${esc(tags)}</td><td>${n0(p.wpm)}</td><td>${n0(p.acc)}%</td><td>${esc(new Date(p.ts).toLocaleDateString())}</td></tr>`;
+      })
+      .join('');
+
+    const shown = history.filter((h) => filter === 'all' || h.mode === filter).slice(-50).reverse();
+    const rows = shown
+      .map(
+        (h) =>
+          `<tr><td>${n0(h.wpm)}</td><td>${n0(h.raw)}</td><td>${n0(h.acc)}%</td><td>${n0(h.consistency)}%</td><td>${esc(h.mode)} ${h.mode === 'zen' || h.mode === 'custom' ? '' : esc(h.mode2)}</td><td>${esc(langLabel(h.language))}</td><td>${esc(new Date(h.ts).toLocaleString())}</td></tr>`,
+      )
+      .join('');
+    const filters = ['all', 'time', 'words', 'quote', 'zen', 'custom']
+      .map((m) => `<button type="button" data-filter="${m}" aria-pressed="${filter === m}">${m}</button>`)
+      .join('');
+
+    page.innerHTML = `
+      <h1>stats</h1>
+      <dl class="tiles">
+        ${tile('tests completed', totals.tests)}
+        ${tile('time typing', ui.fmtDuration(totals.seconds))}
+        ${tile('best wpm', n0(best))}
+        ${tile('average wpm', n0(avg(history, 'wpm')))}
+        ${tile('last 20 wpm', n0(avg(last20, 'wpm')))}
+        ${tile('average accuracy', n0(avg(history, 'acc')) + '%')}
+        ${tile('last 20 accuracy', n0(avg(last20, 'acc')) + '%')}
+      </dl>
+      <div class="block"><h2>progress</h2>
+        ${history.length ? '<div id="progressChart" class="chartBox"></div>' : '<p class="empty">Finish a test to see your progress here.</p>'}
+      </div>
+      <div class="block"><h2>personal bests</h2>
+        ${pbRows ? `<div class="tableWrap"><table><thead><tr><th>test</th><th>language</th><th>options</th><th>wpm</th><th>acc</th><th>date</th></tr></thead><tbody>${pbRows}</tbody></table></div>` : '<p class="empty">Personal bests come from time and words tests.</p>'}
+      </div>
+      <div class="block"><h2>recent tests</h2>
+        <div class="filter" id="statsFilter">${filters}</div>
+        ${rows ? `<div class="tableWrap"><table><thead><tr><th>wpm</th><th>raw</th><th>acc</th><th>cons</th><th>test</th><th>language</th><th>date</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="empty">No tests here yet.</p>'}
+      </div>
+      <div class="rowBtns">
+        <button id="exportBtn" type="button" class="btn">copy history as JSON</button>
+        <button id="clearBtn" type="button" class="btn danger">clear history</button>
+      </div>`;
+
+    if (history.length) {
+      const recent = history.slice(-200);
+      const offset = history.length - recent.length;
+      const rolling = recent.map((_, i) => avg(recent.slice(Math.max(0, i - 9), i + 1), 'wpm'));
+      statsChart = ui.createChart($('progressChart'));
+      statsChart.update({
+        series: [
+          { name: 'wpm', colorVar: '--dim', width: 1.5, values: recent.map((h) => h.wpm) },
+          { name: 'average of 10', colorVar: '--fg', width: 2, values: rolling },
+        ],
+        xLabel: (i) => String(i + 1 + offset),
+        aria: `Speed over your last ${recent.length} tests.`,
+        tip: (i) => [['test', i + 1 + offset], ['wpm', n0(recent[i].wpm)], ['average of 10', n0(rolling[i])], ['acc', n0(recent[i].acc) + '%']],
+      });
+    }
+
+    $('statsFilter').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      filter = b.dataset.filter;
+      renderStats();
+      const again = $('statsFilter').querySelector(`[data-filter="${filter}"]`);
+      if (again) again.focus();
+    });
+    $('exportBtn').addEventListener('click', () => ui.copy(JSON.stringify(store.history(), null, 2), 'History copied'));
+    ui.twoStep($('clearBtn'), 'click again to clear everything', () => {
+      store.clearHistory();
+      renderStats();
+      ui.toast('History cleared');
+    });
+  }
+
+  function renderPrefs() {
+    const page = $('pagePrefs');
+    const rows = store.SCHEMA.map((item) => {
+      const opts = item.options
+        .map(([v, label], i) => `<button type="button" data-key="${item.key}" data-i="${i}" aria-pressed="${store.prefs[item.key] === v}">${esc(label)}</button>`)
+        .join('');
+      return `<div class="prefRow"><div>${esc(item.label)}${item.help ? `<p>${esc(item.help)}</p>` : ''}</div><div class="prefOpts" role="group" aria-label="${esc(item.label)}">${opts}</div></div>`;
+    }).join('');
+    page.innerHTML = `<h1>prefs</h1><div>${rows}</div><div class="rowBtns"><button id="resetPrefs" type="button" class="btn danger">reset settings</button></div>`;
+    ui.twoStep($('resetPrefs'), 'click again to reset all settings', () => {
+      store.resetPrefs();
+      renderPrefs();
+      ui.toast('Settings reset');
+    });
+  }
+
+  ui.initPages = () => {
+    $('pagePrefs').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-key]');
+      if (!b) return;
+      const item = store.SCHEMA.find((x) => x.key === b.dataset.key);
+      store.setPref(item.key, item.options[Number(b.dataset.i)][0]);
+      b.parentElement.querySelectorAll('button').forEach((o) => o.setAttribute('aria-pressed', o === b));
+    });
+  };
+
+  const PAGES = { test: 'pageTest', stats: 'pageStats', prefs: 'pagePrefs', about: 'pageAbout' };
+  let current = null;
+  ui.currentPage = () => current;
+
+  ui.route = () => {
+    const name = root.location.hash.replace('#', '');
+    const page = Object.prototype.hasOwnProperty.call(PAGES, name) ? name : 'test';
+    const previous = current;
+    current = page;
+    for (const [key, id] of Object.entries(PAGES)) $(id).hidden = key !== page;
+    document.querySelectorAll('#top nav a').forEach((a) => {
+      if (a.dataset.page === page) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+    });
+    const S = ui.testState;
+    if (page === 'test') {
+      if (S.view === 'result' && S.result) {
+        if (S.chart) S.chart.draw();
+      } else if (previous !== 'test' || !S.t) {
+        ui.newTest();
+      }
+    } else {
+      // Leaving mid-test cancels it; a finished result stays for when you come back.
+      if (S.view !== 'result') ui.cancelTest();
+      if (page === 'stats') renderStats();
+      if (page === 'prefs') renderPrefs();
+      root.scrollTo(0, 0);
+    }
+  };
+})(globalThis);
+
+</script>
+<script>
+(function (root) {
+  const HR = (root.HR = root.HR || {});
+  const ui = (HR.ui = HR.ui || {});
+  const { $, store } = ui;
+  let items = [];
+  let shown = [];
+  let selected = 0;
+
+  function commands() {
+    const c = store.config;
+    const out = [];
+    const add = (label, run, on) => out.push({ label, run, on: !!on });
+    add('test: restart', () => go('test', () => ui.newTest()));
+    add('test: repeat', () => go('test', () => ui.repeatTest()));
+    for (const page of ['test', 'stats', 'prefs', 'about']) add('go to: ' + page, () => (root.location.hash = page));
+
+    for (const m of ['time', 'words', 'quote', 'zen', 'custom']) {
+      add('mode: ' + m, () => go('test', () => (m === 'custom' && !c.customText.trim() ? ui.editCustom(c.mode) : ui.setConfig({ mode: m }))), c.mode === m);
+    }
+    for (const n of [15, 30, 60, 120]) add(`time: ${n} seconds`, () => go('test', () => ui.setConfig({ mode: 'time', time: n })), c.mode === 'time' && c.time === n);
+    add('time: other', () => go('test', () => ui.askNumber('time')));
+    for (const n of [10, 25, 50, 100]) add(`words: ${n}`, () => go('test', () => ui.setConfig({ mode: 'words', words: n })), c.mode === 'words' && c.words === n);
+    add('words: other', () => go('test', () => ui.askNumber('words')));
+    for (const q of ['all', 'short', 'medium', 'long', 'thicc']) add('quote: ' + q, () => go('test', () => ui.setConfig({ mode: 'quote', quoteLength: q })), c.mode === 'quote' && c.quoteLength === q);
+    add('custom: change text', () => go('test', () => ui.editCustom()));
+    for (const [key, lang] of Object.entries(HR.data.languages)) add('language: ' + lang.label, () => go('test', () => ui.setConfig({ language: key })), c.language === key);
+    add('toggle: punctuation', () => go('test', () => ui.setConfig({ punctuation: !c.punctuation })), c.punctuation);
+    add('toggle: numbers', () => go('test', () => ui.setConfig({ numbers: !c.numbers })), c.numbers);
+    for (const item of store.SCHEMA) {
+      for (const [value, label] of item.options) add(`${item.label}: ${label}`, () => store.setPref(item.key, value), store.prefs[item.key] === value);
+    }
+    return out;
+  }
+
+  /** Runs after making sure the test page is showing. */
+  function go(page, fn) {
+    if (ui.currentPage() !== page) {
+      root.location.hash = page;
+      ui.route();
+    }
+    fn();
+  }
+
+  /** Subsequence match; lower is better, null means no match. */
+  function score(label, query) {
+    if (!query) return 0;
+    const text = label.toLowerCase();
+    const direct = text.indexOf(query);
+    if (direct >= 0) return direct - 1000;
+    let pos = -1;
+    let gaps = 0;
+    for (const ch of query) {
+      if (ch === ' ') continue;
+      const next = text.indexOf(ch, pos + 1);
+      if (next < 0) return null;
+      if (pos >= 0) gaps += next - pos - 1;
+      pos = next;
+    }
+    return gaps;
+  }
+
+  function render() {
+    const query = $('paletteInput').value.trim().toLowerCase();
+    shown = items
+      .map((it, i) => ({ it, i, s: score(it.label, query) }))
+      .filter((x) => x.s !== null)
+      .sort((a, b) => a.s - b.s || a.i - b.i)
+      .map((x) => x.it);
+    selected = Math.min(selected, Math.max(0, shown.length - 1));
+    const list = $('paletteList');
+    list.textContent = '';
+    shown.forEach((it, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', i === selected);
+      li.dataset.i = i;
+      const name = document.createElement('span');
+      name.textContent = it.label;
+      li.append(name);
+      if (it.on) {
+        const mark = document.createElement('span');
+        mark.textContent = 'current';
+        li.append(mark);
+      }
+      list.append(li);
+    });
+    const sel = list.children[selected];
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  function close() {
+    $('palette').hidden = true;
+    ui.setInert(false);
+    ui.refocus();
+  }
+
+  function run(i) {
+    const it = shown[i];
+    if (!it) return;
+    close();
+    it.run();
+  }
+
+  ui.openPalette = (query) => {
+    items = commands();
+    selected = 0;
+    $('paletteInput').value = query ? query + ': ' : '';
+    $('palette').hidden = false;
+    ui.setInert(true);
+    render();
+    $('paletteInput').focus();
+  };
+
+  ui.initPalette = () => {
+    const input = $('paletteInput');
+    input.addEventListener('input', () => {
+      selected = 0;
+      render();
+    });
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation(); // the palette may close here; the global handler must not then reopen it
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      } else if (e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) {
+        e.preventDefault();
+        if (shown.length) selected = (selected + 1) % shown.length;
+        render();
+      } else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) {
+        e.preventDefault();
+        if (shown.length) selected = (selected - 1 + shown.length) % shown.length;
+        render();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        run(selected);
+      }
+    });
+    $('paletteList').addEventListener('click', (e) => {
+      const li = e.target.closest('li');
+      if (li) run(Number(li.dataset.i));
+    });
+    $('palette').addEventListener('mousedown', (e) => {
+      if (e.target === $('palette')) {
+        e.preventDefault();
+        close();
+      } else if (e.target !== input) {
+        e.preventDefault();
+      }
+    });
+  };
+})(globalThis);
+
+</script>
+<script>
+(function (root) {
+  const { ui } = root.HR;
+  function boot() {
+    ui.applyLook();
+    ui.initModal();
+    ui.initPalette();
+    ui.initPages();
+    ui.initTest();
+    // Clicking the current page's link in the header restarts the test, since no hashchange fires.
+    document.querySelectorAll('#logo, #top nav a[data-page="test"]').forEach((a) =>
+      a.addEventListener('click', () => {
+        if (ui.currentPage() === 'test') ui.newTest();
+      }),
+    );
+    root.addEventListener('hashchange', ui.route);
+    ui.route();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})(globalThis);
+
+</script>

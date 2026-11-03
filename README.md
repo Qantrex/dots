@@ -35,8 +35,9 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 💬 `vesktop` | Discord theme (`themes/` only) |
 | 🎵 `spicetify` | Spotify theme (Ziro + `monochrome` scheme) |
 | 🚫 `spotify-adblock` | Ad/tracking filter + `spotify.desktop` that loads it |
+| ⌨️ `homerow` | Typing test app: built page, launcher entry and icon. Source in its own repo; `npm run deploy` there updates the copy here |
 | ⚙️ `scripts` | Helper scripts |
-| 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` tosses an ASCII 3D coin to pick one |
+| 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` tosses an ASCII 3D coin to pick one, `homerow` opens the typing test |
 
 ---
 
@@ -149,6 +150,7 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | --- | --- |
 | `T` / `E` / `A`,`R` | Terminal / file manager / launcher |
 | `C` / `L` | Clipboard history / lock |
+| `SHIFT+T` | Typing test (homerow) |
 | `Q` / `V` / `F` | Close / float / fullscreen |
 | `arrows` | Move focus (`+SHIFT` moves the window) |
 | `1`–`0` | Workspace (`+SHIFT` moves the window there) |

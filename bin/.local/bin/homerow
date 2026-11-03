@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# homerow: typing test (source: ~/Projects/homerow) in its own app window.
+# Already open: focus it. Chrome names the window class after the page path
+# (chrome-..homerow_index.html-Default) and ignores --class in app mode.
+# Stats and settings live in the app's own browser profile, so they survive updates and stay out of the normal browser.
+
+page="$HOME/.local/share/homerow/index.html"
+profile="${XDG_STATE_HOME:-$HOME/.local/state}/homerow"
+
+if hyprctl clients -j 2>/dev/null | grep -qE '"class": "[^"]*homerow[^"]*"'; then
+  exec hyprctl dispatch 'hl.dsp.focus({ window = "class:.*homerow.*" })' >/dev/null
+fi
+
+for browser in google-chrome-stable chromium; do
+  if command -v "$browser" >/dev/null; then
+    exec "$browser" --app="file://$page" --user-data-dir="$profile" \
+      --no-first-run --no-default-browser-check --ozone-platform-hint=auto
+  fi
+done
+
+# Machines without Chrome: a separate Firefox profile, with a normal toolbar.
+mkdir -p "$profile/firefox"
+exec firefox --class homerow --name homerow --profile "$profile/firefox" --no-remote "file://$page"
