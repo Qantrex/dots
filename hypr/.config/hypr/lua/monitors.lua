@@ -17,14 +17,14 @@ if hostname() == "bauarch-pc" then
         output   = "desc:AOC Q27G2G4",
         mode     = "2560x1440@144",
         position = "0x0",
-        scale    = 1,
+        scale    = 1.25,
     })
 
     -- Side screen, in reversed portrait (transform 3 = 270 degrees).
     hl.monitor({
         output    = "desc:AOC 27G2G8",
         mode      = "1920x1080@240",
-        position  = "2560x0",
+        position  = "2048x0",
         scale     = 1,
         transform = 3,
         vrr       = 2, -- adaptive sync in fullscreen only
