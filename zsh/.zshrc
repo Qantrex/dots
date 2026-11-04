@@ -89,3 +89,4 @@ fi
 # -----------------------------------------------------------------------------
 eval "$(starship init zsh)"
 export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.npm-global/bin:$PATH"
