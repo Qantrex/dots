@@ -54,7 +54,7 @@ One repo for both machines. Differences are picked by hostname (`/etc/hostname`)
 | Waybar AI button (`custom/ai`, `ai-webui.sh`) | yes | no (2026-11-04: the desktop is a headless AI node instead) | `waybar/config-bauarch-pc.jsonc` |
 | Waybar battery, touchpad, power profile | yes | no (no battery, touchpad or asusctl) | `waybar/config-bauarch-pc.jsonc` |
 | Idle | dim, lock, screens off, suspend on battery | lock + quiet mode (`away --idle`), screens off, **never suspends** (AI node; only pc-guard may sleep it) | `scripts/idle.sh` |
-| Power | asusctl profiles, SUPER+F1/F2/F3, `batsignal` | none of those; SUPER+F1 or `away`: lock, screens off, `pc-quiet on` (CPU boost off, EPP power, GPU at 125 W) until unlock. One-time: `sudo ~/.config/scripts/setup-pc-quiet.sh` | `bin/away`, `scripts/pc-quiet`, `hypr/lua/keybinds.lua` |
+| Power | asusctl profiles, SUPER+F1/F2/F3, `batsignal` | none of those; SUPER+F1 or `away`: lock, screens off, `pc-quiet on` (CPU boost off, EPP power, GPU at 125 W) until unlock. One-time: `sudo ~/.config/scripts/setup-pc-quiet.sh` (the installer offers it). Fans are the BIOS's job: Q-Fan custom curve, flat ~20–30 % up to ~60 °C, then up to 100 % at ~80 °C, a few seconds of fan step up/down | `bin/away`, `scripts/pc-quiet`, `hypr/lua/keybinds.lua` |
 
 ---
 

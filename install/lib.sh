@@ -451,6 +451,10 @@ run_root_scripts() {
   if ((HW_ASUS)) && ask "ASUS: Quiet/Performance profiles via asusctl + TLP (setup-power-profiles.sh)?" y; then
     run sudo "$s/setup-power-profiles.sh" || FAILED+=("setup-power-profiles.sh")
   fi
+  if [[ $(cat /etc/hostname 2>/dev/null) == bauarch-pc ]] &&
+     ask "Desktop: quiet mode for away (pc-quiet + sudoers line, setup-pc-quiet.sh)?" y; then
+    run sudo "$s/setup-pc-quiet.sh" || FAILED+=("setup-pc-quiet.sh")
+  fi
   if ask "Maintenance: prune the pacman cache, enable paccache/fstrim timers (maintain.sh)?" y; then
     run sudo "$s/maintain.sh" || FAILED+=("maintain.sh")
   fi
