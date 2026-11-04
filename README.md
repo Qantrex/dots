@@ -9,7 +9,7 @@
 Welcome to my **dotfiles** 👾
 Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks and portability.
 
-**Machine:** ASUS Vivobook Pro 14X OLED (M7400QC) · Ryzen 9 5900HX · 2880x1800 @ 90 Hz
+**Machines:** `bauarch`, ASUS Vivobook Pro 14X OLED (M7400QC) · Ryzen 9 5900HX · 2880x1800 @ 90 Hz, and `bauarch-pc`, a desktop (Ryzen 5 3600, RTX 2060 Super, two AOC screens). Same repo on both; see [Per-machine differences](#per-machine-differences).
 
 ---
 
@@ -38,6 +38,20 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | ⌨️ `homerow` | Launcher entry and icon for the homerow typing test, a Rust TUI in its own foot window (`scripts/homerow.sh`). The binary is built from `~/Projects/homerow` with `npm run deploy` |
 | ⚙️ `scripts` | Helper scripts |
 | 🪙 `bin` | Commands on `$PATH` in `~/.local/bin`: `decide a b` throws a pixel-rendered 3D coin to pick one |
+
+---
+
+## Per-machine differences
+
+One repo for both machines. Differences are picked by hostname (`/etc/hostname`), so nothing has to be switched by hand:
+
+- **Hyprland:** `hypr/.config/hypr/lua/host.lua` gives `host.name`, `host.is_pc` and `host.file(dir, base, ext)`. Use `if host.is_pc then … else … end` for a setting that differs.
+- **Other programs:** an optional `<base>-<hostname>.<ext>` next to the shared file. It includes the shared file and overrides only what differs. `host.file()` finds it.
+
+| What | Laptop `bauarch` | Desktop `bauarch-pc` | Where |
+| --- | --- | --- | --- |
+| Monitors | internal panel, scale 2 | two AOC screens | `hypr/lua/monitors.lua` |
+| Waybar AI button (`custom/ai`, `ai-webui.sh`) | yes | no (2026-11-04: the desktop is a headless AI node instead) | `waybar/config-bauarch-pc.jsonc` |
 
 ---
 

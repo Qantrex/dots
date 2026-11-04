@@ -3,15 +3,9 @@
 
 -- Each machine gets its own layout: the same port name means different things
 -- on the laptop (HDMI mirrors the panel) and the desktop (HDMI is the main screen).
-local function hostname()
-    local file = io.open("/etc/hostname")
-    if not file then return "" end
-    local name = file:read("*l") or ""
-    file:close()
-    return name
-end
+local host = require("lua.host")
 
-if hostname() == "bauarch-pc" then
+if host.is_pc then
     -- Main screen, matched by model so it stays right whichever port it's on.
     hl.monitor({
         output   = "desc:AOC Q27G2G4",

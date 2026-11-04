@@ -37,7 +37,7 @@ hl.bind(
 -- and waybar was never killed or restarted -- the bind did nothing but reload.
 hl.bind(
     mod .. " + SHIFT + R",
-    hl.dsp.exec_cmd("hyprctl reload; pkill -x " .. apps.bar .. "; sleep 0.3; " .. apps.bar),
+    hl.dsp.exec_cmd("hyprctl reload; pkill -x " .. apps.bar .. "; sleep 0.3; " .. apps.barStart),
     { description = "Reload config and restart bar" }
 )
 

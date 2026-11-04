@@ -3,6 +3,11 @@
 --
 -- Commands are run through `sh -c`, so `~` and shell syntax are fine.
 
+local host = require("lua.host")
+
+-- waybar reads config-<hostname>.jsonc when the machine has one (it includes the shared config.jsonc).
+local barConfig = host.file("waybar", "config", "jsonc")
+
 return {
     terminal    = "foot",
     fileManager = "dolphin",
@@ -30,7 +35,8 @@ return {
     claudeScreen = "~/.config/scripts/claude-screen/capture.py",
 
     lock        = "hyprlock",
-    bar         = "waybar",
+    bar         = "waybar",   -- process name, for pkill -x
+    barStart    = barConfig and ("waybar -c " .. barConfig) or "waybar",
 
     -- Absolute path: hyprpaper does not expand `~`.
     wallpaperImage = "/home/kbauer/Pictures/Wallpapers/synthwave-mountain-sun.jpg",

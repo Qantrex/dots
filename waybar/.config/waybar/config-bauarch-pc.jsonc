@@ -1,0 +1,18 @@
+// Desktop (bauarch-pc): the shared config.jsonc, with only these keys changed.
+// Keys here win over the included file (waybar: "the first defined value takes precedence").
+// Started by hypr/lua/apps.lua (barStart) because this file exists for this hostname.
+{
+  "include": ["~/.config/waybar/config.jsonc"],
+  // No custom/ai: the Open WebUI button is laptop-only (owner, 2026-11-04). The PC is the AI node instead.
+  "modules-right": [
+    "memory",
+    "network",
+    "bluetooth",
+    "pulseaudio",
+    "custom/touchpad",
+    "custom/vault",
+    "battery",
+    "custom/powerprofile",
+    "tray"
+  ]
+}

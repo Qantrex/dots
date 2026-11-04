@@ -18,7 +18,7 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("systemctl --user start hyprpolkitagent")
 
     -- Shell components.
-    hl.exec_cmd(apps.bar)
+    hl.exec_cmd(apps.barStart)
     hl.exec_cmd("mako")
     hl.exec_cmd("swayosd-server")
     hl.exec_cmd("batsignal")
