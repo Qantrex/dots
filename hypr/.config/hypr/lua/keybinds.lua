@@ -3,6 +3,7 @@
 -- Dispatchers: https://wiki.hypr.land/configuring/core/dispatchers/
 
 local apps = require("lua.apps")
+local host = require("lua.host")
 
 local mod = "SUPER"
 
@@ -138,9 +139,16 @@ hl.bind(mod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 --   F2  Performance  aggressive fans, EPP=performance (full ~4.68 GHz boost)
 --   F3  Balanced     the middle setting
 
-for key, profile in pairs({ F1 = "quiet", F2 = "performance", F3 = "balanced" }) do
-    hl.bind(mod .. " + " .. key, hl.dsp.exec_cmd(apps.powerprofile .. " " .. profile),
-        { description = "Power profile: " .. profile })
+-- Desktop: no asusctl. SUPER+F1 runs `away` instead (lock, screens off,
+-- quiet mode; the AI node keeps running).
+if host.is_pc then
+    hl.bind(mod .. " + F1", hl.dsp.exec_cmd("~/.local/bin/away"),
+        { description = "Away: lock, screens off, quiet (AI node stays up)" })
+else
+    for key, profile in pairs({ F1 = "quiet", F2 = "performance", F3 = "balanced" }) do
+        hl.bind(mod .. " + " .. key, hl.dsp.exec_cmd(apps.powerprofile .. " " .. profile),
+            { description = "Power profile: " .. profile })
+    end
 end
 
 --------------------------------------------------------------------------

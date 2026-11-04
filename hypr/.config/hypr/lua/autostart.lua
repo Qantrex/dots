@@ -5,6 +5,7 @@
 -- `hyprctl reload`. It is the Lua equivalent of the old `exec-once`.
 
 local apps = require("lua.apps")
+local host = require("lua.host")
 
 hl.on("hyprland.start", function()
     -- Hand the session environment to systemd and D-Bus first, so services
@@ -24,7 +25,7 @@ hl.on("hyprland.start", function()
     hl.exec_cmd(apps.barStart)
     hl.exec_cmd("mako")
     hl.exec_cmd("swayosd-server")
-    hl.exec_cmd("batsignal")
+    if not host.is_pc then hl.exec_cmd("batsignal") end
 
     -- Wallpaper.
     --
@@ -46,10 +47,12 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("wl-paste --type text  --watch cliphist store")
     hl.exec_cmd("wl-paste --type image --watch cliphist store")
 
-    -- Always start quiet; opt into Performance deliberately with SUPER+F2.
-    hl.exec_cmd(apps.powerprofile .. " quiet")
+    -- Laptop: always start quiet; opt into Performance with SUPER+F2.
+    -- The desktop has no asusctl; it goes quiet through `away` (pc-quiet).
+    if not host.is_pc then hl.exec_cmd(apps.powerprofile .. " quiet") end
 
-    -- Idle handling: dim, lock, screen off, and suspend on battery.
+    -- Idle handling: dim, lock, screen off, and suspend on battery (the
+    -- desktop: lock + quiet mode, never suspend).
     -- See idle.sh for the timings and why it is a script.
     hl.exec_cmd(apps.idle)
 
