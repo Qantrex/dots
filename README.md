@@ -52,6 +52,7 @@ One repo for both machines. Differences are picked by hostname (`/etc/hostname`)
 | --- | --- | --- | --- |
 | Monitors | internal panel, scale 2 | two AOC screens | `hypr/lua/monitors.lua` |
 | Waybar AI button (`custom/ai`, `ai-webui.sh`) | yes | no (2026-11-04: the desktop is a headless AI node instead) | `waybar/config-bauarch-pc.jsonc` |
+| Waybar battery, touchpad, power profile | yes | no (no battery, touchpad or asusctl) | `waybar/config-bauarch-pc.jsonc` |
 
 ---
 

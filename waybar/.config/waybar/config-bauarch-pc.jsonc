@@ -3,16 +3,14 @@
 // Started by hypr/lua/apps.lua (barStart) because this file exists for this hostname.
 {
   "include": ["~/.config/waybar/config.jsonc"],
-  // No custom/ai: the Open WebUI button is laptop-only (owner, 2026-11-04). The PC is the AI node instead.
+  // Laptop-only, hidden here (owner, 2026-11-04): custom/ai (Open WebUI button; the PC is the AI node instead),
+  // battery, custom/touchpad and custom/powerprofile (asusctl).
   "modules-right": [
     "memory",
     "network",
     "bluetooth",
     "pulseaudio",
-    "custom/touchpad",
     "custom/vault",
-    "battery",
-    "custom/powerprofile",
     "tray"
   ]
 }
