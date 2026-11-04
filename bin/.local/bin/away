@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# "Shut down" the desktop without shutting it down: lock, screens off, quiet
+# mode. The PC stays on, so the AI node (Ollama, overnight code sessions,
+# agent jobs from pi-two) keeps working. Unlocking puts everything back.
+#
+#   away          lock now, screens off, quiet mode
+#   away --idle   what idle.sh runs after 5 minutes without input: the same,
+#                 but leaves the screens to swayidle and skips quiet mode
+#                 while a Steam game runs (a controller doesn't count as input)
+#
+# Quiet mode needs the root helper once: sudo ~/.config/scripts/setup-pc-quiet.sh
+# Without it, away still locks and turns the screens off.
+#
+# Not a suspend: nothing can wake this PC from sleep yet (Wake-on-LAN and the
+# doormouse wake proxy on pi-two are still open, see Homelab/AI-Node.md).
+
+set -uo pipefail
+
+idle=0
+case ${1:-} in
+    '')     ;;
+    --idle) idle=1 ;;
+    *)      sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 2 ;;
+esac
+
+# Already locked: the lock that is running owns the session.
+pidof hyprlock >/dev/null && exit 0
+
+quiet=0
+if [[ -x /usr/local/sbin/pc-quiet ]] && ! { ((idle)) && pgrep -x reaper >/dev/null; }; then
+    sudo -n /usr/local/sbin/pc-quiet on && quiet=1
+fi
+
+hyprlock &
+lock=$!
+
+if ((! idle)); then
+    sleep 1   # let hyprlock take the screens first
+    hyprctl dispatch 'hl.dsp.dpms({ action = "off" })' >/dev/null
+fi
+
+wait "$lock"
+
+((quiet)) && sudo -n /usr/local/sbin/pc-quiet off
+hyprctl dispatch 'hl.dsp.dpms({ action = "on" })' >/dev/null
