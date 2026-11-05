@@ -8,19 +8,31 @@ local host = require("lua.host")
 -- waybar reads config-<hostname>.jsonc when the machine has one (it includes the shared config.jsonc).
 local barConfig = host.file("waybar", "config", "jsonc")
 
+-- The big autostarted apps run in their own systemd scope
+-- (app.slice/app-<name>-<pid>.scope). Otherwise they share the session scope
+-- with Hyprland, which only root may push to swap, and `away` can't free their
+-- RAM for the AI node (2026-11-06: Firefox and most of Vesktop sat in
+-- session-N.scope). systemd-run --scope keeps the PID, so the workspace
+-- placement in autostart.lua still works. The terminal stays outside on
+-- purpose: what runs in it should never be pushed to swap.
+local function scoped(name, cmd)
+    return "systemd-run --user --scope --slice=app.slice --collect --quiet --unit=app-"
+        .. name .. "-$$ " .. cmd
+end
+
 return {
     terminal    = "foot",
     fileManager = "dolphin",
-    browser     = "firefox",
+    browser     = scoped("firefox", "firefox"),
     -- spotify-adblock ships a shared library, not an executable, so it has to
     -- be LD_PRELOADed into spotify. The old config ran "spotify-adblock"
     -- directly, which is not a command -- Spotify never actually autostarted.
-    music       = "env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify",
+    music       = scoped("spotify", "env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify"),
     -- aerc runs in its own foot window with a fixed app-id, so a window rule
     -- can send it to its workspace without catching every other terminal.
-    mail        = "foot --app-id=aerc aerc",
+    mail        = scoped("aerc", "foot --app-id=aerc aerc"),
     mailHelp    = "~/.config/scripts/aerc-cheatsheet.sh",
-    chat        = "vesktop --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto",
+    chat        = scoped("vesktop", "vesktop --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto"),
 
     menu        = 'wofi --show drun --prompt="App Launcher"',
     emoji       = "wofimoji",
