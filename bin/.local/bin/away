@@ -33,7 +33,7 @@ case ${1:-} in
 esac
 
 readonly APP_SLICE=/sys/fs/cgroup/user.slice/user-$UID.slice/user@$UID.service/app.slice
-readonly APPS_RE='^app-(firefox|vesktop|spotify|aerc)-[0-9]+\.scope$'
+readonly APPS_RE='^app-(firefox|vesktop|spotify|aerc|org\.chromium\.Chromium)-[0-9]+\.scope$'  # Spotify (CEF) moves itself into app-org.chromium.Chromium-*
 readonly LOG=${XDG_STATE_HOME:-$HOME/.local/state}/away.log
 
 # The big model is the one that spills into RAM; the small chat model fits the GPU.
