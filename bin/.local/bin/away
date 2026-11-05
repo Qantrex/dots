@@ -7,6 +7,14 @@
 #   away --idle   what idle.sh runs after 5 minutes without input: the same,
 #                 but leaves the screens to swayidle and skips quiet mode
 #                 while a Steam game runs (a controller doesn't count as input)
+#   away --reclaim-now   push the apps' memory to swap once (test, by hand)
+#
+# While the lock is up and the big local model (code/ha, ~9 GB of weights in
+# RAM) is loaded, the autostarted apps' memory (Firefox, Vesktop, Spotify,
+# aerc) is pushed to swap every 2 minutes, so the kernel doesn't drop the
+# model's weights instead (2026-11-05: that made a prompt 7x slower). Unlocking
+# reads them back as they're used. Never while a Steam game runs. Log:
+# ~/.local/state/away.log. Needs the apps in their own scopes (hypr apps.lua).
 #
 # Quiet mode needs the root helper once: sudo ~/.config/scripts/setup-pc-quiet.sh
 # Without it, away still locks and turns the screens off.
@@ -16,12 +24,46 @@
 
 set -uo pipefail
 
-idle=0
+idle=0 reclaim=0
 case ${1:-} in
     '')     ;;
     --idle) idle=1 ;;
-    *)      sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 2 ;;
+    --reclaim-now) reclaim=1 ;;
+    *)      sed -n '2,23s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac
+
+readonly APP_SLICE=/sys/fs/cgroup/user.slice/user-$UID.slice/user@$UID.service/app.slice
+readonly APPS_RE='^app-(firefox|vesktop|spotify|aerc)-[0-9]+\.scope$'
+readonly LOG=${XDG_STATE_HOME:-$HOME/.local/state}/away.log
+
+# The big model is the one that spills into RAM; the small chat model fits the GPU.
+big_model_loaded() {
+    curl -s -m 3 http://127.0.0.1:11434/api/ps 2>/dev/null | grep -qE '"name":"(code|ha)(:[^"]*)?"'
+}
+
+reclaim_apps() {
+    local d name cur moved=()
+    for d in "$APP_SLICE"/*.scope; do
+        name=${d##*/}
+        [[ $name =~ $APPS_RE && -w $d/memory.reclaim ]] || continue
+        cur=$(<"$d/memory.current")
+        ((cur > 100 * 1024 * 1024)) || continue
+        echo "$cur" >"$d/memory.reclaim" 2>/dev/null   # fails (EAGAIN) if not all of it could go: fine
+        moved+=("$name $((cur >> 20))->$(($(<"$d/memory.current") >> 20)) MB")
+    done
+    ((${#moved[@]})) || return 0
+    mkdir -p "${LOG%/*}"
+    echo "$(date '+%F %T') pushed to swap: ${moved[*]}" >>"$LOG"
+}
+
+reclaimer() {   # runs while the lock is up
+    while kill -0 "$lock" 2>/dev/null; do
+        big_model_loaded && ! pgrep -x reaper >/dev/null && reclaim_apps
+        sleep 120
+    done
+}
+
+if ((reclaim)); then reclaim_apps; tail -1 "$LOG" 2>/dev/null; exit 0; fi
 
 # Already locked: the lock that is running owns the session.
 pidof hyprlock >/dev/null && exit 0
@@ -33,6 +75,8 @@ fi
 
 hyprlock &
 lock=$!
+reclaimer &
+rec=$!
 
 if ((! idle)); then
     sleep 1   # let hyprlock take the screens first
@@ -40,6 +84,7 @@ if ((! idle)); then
 fi
 
 wait "$lock"
+kill "$rec" 2>/dev/null
 
 ((quiet)) && sudo -n /usr/local/sbin/pc-quiet off
 hyprctl dispatch 'hl.dsp.dpms({ action = "on" })' >/dev/null
