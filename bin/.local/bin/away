@@ -65,25 +65,39 @@ reclaimer() {   # runs while the lock is up
 
 if ((reclaim)); then reclaim_apps; tail -1 "$LOG" 2>/dev/null; exit 0; fi
 
-# Already locked: the lock that is running owns the session.
-pidof hyprlock >/dev/null && exit 0
+# One away at a time (idle.sh may start another while this one waits).
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/away.lock"
+flock -n 9 || exit 0
+
+# Already locked (lock before sleep, or another lock): attach to that lock, so
+# quiet mode and the reclaimer still run until it ends. Before 2026-11-06 away
+# exited here, so after a wake from sleep the idle lock never went quiet.
+lock=$(pidof -s hyprlock || true)
+started=0
 
 quiet=0
 if [[ -x /usr/local/sbin/pc-quiet ]] && ! { ((idle)) && pgrep -x reaper >/dev/null; }; then
     sudo -n /usr/local/sbin/pc-quiet on && quiet=1
 fi
 
-hyprlock &
-lock=$!
+if [[ -z $lock ]]; then
+    hyprlock &
+    lock=$!
+    started=1
+fi
 reclaimer &
 rec=$!
 
-if ((! idle)); then
+if ((started && ! idle)); then
     sleep 1   # let hyprlock take the screens first
     hyprctl dispatch 'hl.dsp.dpms({ action = "off" })' >/dev/null
 fi
 
-wait "$lock"
+if ((started)); then
+    wait "$lock"
+else
+    while kill -0 "$lock" 2>/dev/null; do sleep 3; done   # not our child: poll
+fi
 kill "$rec" 2>/dev/null
 
 ((quiet)) && sudo -n /usr/local/sbin/pc-quiet off
