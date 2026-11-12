@@ -172,7 +172,7 @@ Column {
             subtitle: unlocked ? "Open · click to lock" : "Locked"
             on: unlocked
             onToggled: unlocked ? Scripts.run("vault", ["lock"])
-                                : Scripts.runThen("vault", ["open"], "dolphin ~/Vault")
+                                : Scripts.runThen("vault", ["open"], "xdg-open ~/Vault")
         }
         Tile {
             Layout.fillWidth: true

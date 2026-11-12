@@ -1,0 +1,6 @@
+#!/bin/sh
+# Nautilus > right-click > Scripts: the selected folder (or the current one)
+# in yazi, in its own foot window.
+target=$PWD
+[ -d "$1" ] && target=$1
+exec foot --app-id=yazi -D "$target" yazi

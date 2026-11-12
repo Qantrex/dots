@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=yazi
+GenericName=File Manager
+Comment=Terminal file manager in its own foot window (replaces the packaged entry, which needs Terminal=true support)
+Exec=foot --app-id=yazi yazi %f
+Icon=system-file-manager
+Terminal=false
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;

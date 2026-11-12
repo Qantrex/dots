@@ -1,0 +1,5 @@
+#!/bin/sh
+# Nautilus > right-click > Scripts: foot in the selected folder (or the current one).
+target=$PWD
+[ -d "$1" ] && target=$1
+exec foot -D "$target"

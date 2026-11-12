@@ -60,7 +60,7 @@ Island {
         visible: Scripts.vault.loaded && Scripts.vault.state !== "locked"
         icon: "󰌿"
         tip: "Vault is open\nClick: open ~/Vault · right-click: lock"
-        onLeftClicked: Quickshell.execDetached(["dolphin", Host.home + "/Vault"])
+        onLeftClicked: Quickshell.execDetached(["xdg-open", Host.home + "/Vault"])
         onRightClicked: Scripts.run("vault", ["lock"])
     }
 

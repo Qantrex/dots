@@ -22,7 +22,11 @@ end
 
 return {
     terminal    = "foot",
-    fileManager = "dolphin",
+    -- yazi (in foot) is the everyday file manager, Nautilus the GUI one for
+    -- drag and drop, thumbnails and network places. --new-window, or a second
+    -- SUPER+CTRL+E would only focus the open one.
+    files       = "foot --app-id=yazi yazi",
+    fileManager = scoped("nautilus", "nautilus --new-window"),
     browser     = scoped("firefox", "firefox"),
     -- spotify-adblock ships a shared library, not an executable, so it has to
     -- be LD_PRELOADed into spotify. The old config ran "spotify-adblock"

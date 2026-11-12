@@ -1,0 +1,16 @@
+# yazi keys -- additions on top of the preset (`F1` or `~` lists them all).
+
+[[mgr.prepend_keymap]]
+on   = [ "g", "n" ]
+run  = "shell --orphan 'nautilus .'"
+desc = "Open this folder in Nautilus"
+
+[[mgr.prepend_keymap]]
+on   = [ "g", "T" ]
+run  = "shell --orphan 'foot'"
+desc = "Open a terminal here"
+
+[[mgr.prepend_keymap]]
+on   = [ "g", "v" ]
+run  = "cd ~/Notes"
+desc = "Go to the vault (~/Notes)"

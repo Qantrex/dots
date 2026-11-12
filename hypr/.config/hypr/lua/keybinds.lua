@@ -12,7 +12,8 @@ local mod = "SUPER"
 --------------------------------------------------------------------------
 
 hl.bind(mod .. " + T", hl.dsp.exec_cmd(apps.terminal),    { description = "Terminal" })
-hl.bind(mod .. " + E", hl.dsp.exec_cmd(apps.fileManager), { description = "File manager" })
+hl.bind(mod .. " + E", hl.dsp.exec_cmd(apps.files),       { description = "Files (yazi)" })
+hl.bind(mod .. " + CTRL + E", hl.dsp.exec_cmd(apps.fileManager), { description = "Files (Nautilus)" })
 hl.bind(mod .. " + A", hl.dsp.exec_cmd(apps.menu),        { description = "App launcher" })
 hl.bind(mod .. " + R", hl.dsp.exec_cmd(apps.menu),        { description = "App launcher" })
 hl.bind(mod .. " + C", hl.dsp.exec_cmd(apps.clipboard),   { description = "Clipboard history" })
@@ -24,10 +25,10 @@ hl.bind(mod .. " + SHIFT + E", hl.dsp.exec_cmd(apps.emoji),     { description = 
 hl.bind(mod .. " + SHIFT + W", hl.dsp.exec_cmd(apps.wallpaper), { description = "Wallpaper picker" })
 
 -- rbw asks for the Bitwarden master password, then the vault opens in the
--- file manager. Already unlocked: just opens it.
+-- default file manager (Nautilus). Already unlocked: just opens it.
 hl.bind(
     mod .. " + SHIFT + V",
-    hl.dsp.exec_cmd(apps.vault .. " open && " .. apps.fileManager .. " ~/Vault"),
+    hl.dsp.exec_cmd(apps.vault .. " open && xdg-open ~/Vault"),
     { description = "Unlock vault and open it" }
 )
 
