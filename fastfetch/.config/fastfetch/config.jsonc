@@ -1,0 +1,34 @@
+// fastfetch -- monochrome: white Arch logo, grey keys, white values.
+{
+  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+  "logo": {
+    "type": "builtin",
+    "source": "arch_small",
+    "color": { "1": "white", "2": "white" },
+    "padding": { "top": 1, "left": 2, "right": 3 }
+  },
+  "display": {
+    "separator": "  ",
+    "color": { "keys": "90", "title": "97", "output": "37" },
+    "key": { "width": 8 },
+    // Usage colours: grey when fine; the terminal's yellow/red (Rose Pine
+    // gold/love in foot) only when it gets full.
+    "percent": { "color": { "green": "37", "yellow": "33", "red": "31" } }
+  },
+  "modules": [
+    "title",
+    { "type": "custom", "format": "\u001b[90m────────────────────────────" },
+    { "type": "os",       "key": "os",     "format": "{name} {arch}" },
+    { "type": "kernel",   "key": "kernel" },
+    { "type": "uptime",   "key": "uptime" },
+    { "type": "packages", "key": "pkgs",   "format": "{all}" },
+    { "type": "wm",       "key": "wm",     "format": "{pretty-name}" },
+    { "type": "terminal", "key": "term" },
+    { "type": "shell",    "key": "shell",  "format": "{pretty-name}" },
+    { "type": "cpu",      "key": "cpu",    "format": "{name}" },
+    { "type": "memory",   "key": "mem" },
+    { "type": "disk",     "key": "disk",   "folders": "/" },
+    { "type": "battery",  "key": "bat",    "format": "{capacity} {status}" },
+    "break"
+  ]
+}

@@ -1,0 +1,15 @@
+# imv -- image viewer: black, Iosevka overlay, the overlay off until `o`.
+[options]
+background = 000000
+overlay = false
+overlay_font = IosevkaTerm Nerd Font Mono:13
+overlay_text_color = d0d0d0
+overlay_background_color = 000000
+overlay_background_alpha = cc
+overlay_text = [$imv_current_index/$imv_file_count] $imv_current_file  $imv_width x $imv_height  $imv_scale%
+suppress_default_binds = false
+
+[binds]
+o = overlay
+<Shift+D> = exec rm -- "$imv_current_file"; close
+w = exec hyprctl -q hyprpaper wallpaper ",$imv_current_file" && echo "$imv_current_file" > ~/.cache/wallpaper/last

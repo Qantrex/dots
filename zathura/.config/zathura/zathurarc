@@ -1,0 +1,39 @@
+# zathura -- PDF viewer on true black. Pages are recoloured (white text on
+# black, keeping hue off) for the OLED panel; Ctrl+R toggles back to paper.
+set font                    "IosevkaTerm Nerd Font Mono 11"
+set selection-clipboard     clipboard
+set adjust-open             "best-fit"
+set scroll-page-aware       true
+set statusbar-h-padding     12
+set statusbar-v-padding     4
+set guioptions              "s"
+
+set recolor                 true
+set recolor-keephue         false
+set recolor-darkcolor       "#e0e0e0"
+set recolor-lightcolor      "#000000"
+
+set default-bg              "#000000"
+set default-fg              "#d0d0d0"
+set statusbar-bg            "#000000"
+set statusbar-fg            "#888888"
+set inputbar-bg             "#000000"
+set inputbar-fg             "#ffffff"
+set notification-bg         "#000000"
+set notification-fg         "#d0d0d0"
+set notification-error-bg   "#000000"
+set notification-error-fg   "#eb6f92"
+set notification-warning-bg "#000000"
+set notification-warning-fg "#f6c177"
+set highlight-color         "rgba(246,193,119,0.35)"
+set highlight-active-color  "rgba(255,255,255,0.45)"
+set completion-bg           "#000000"
+set completion-fg           "#a0a0a0"
+set completion-highlight-bg "#ffffff"
+set completion-highlight-fg "#000000"
+set completion-group-bg     "#000000"
+set completion-group-fg     "#555555"
+set index-bg                "#000000"
+set index-fg                "#d0d0d0"
+set index-active-bg         "#ffffff"
+set index-active-fg         "#000000"
