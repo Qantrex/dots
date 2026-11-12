@@ -12,11 +12,10 @@ PKG_DESKTOP=(
   hyprland hyprlock hyprpaper hyprpolkitagent
   xdg-desktop-portal-hyprland xdg-desktop-portal-gtk
   qt5-wayland qt6-wayland xorg-xwayland
-  waybar wofi wofimoji mako swayosd swayidle batsignal
+  quickshell swayidle                # the shell (bar, notifications, OSD, launcher)
   cliphist wl-clipboard grim slurp playerctl brightnessctl libnotify
-  imagemagick libvips               # wallpaper picker thumbnails
   polkit udisks2 upower xdg-user-dirs
-  blueman pavucontrol gnome-calendar  # waybar click actions
+  pavucontrol                       # right-click on the bar's status icons
 )
 
 # Only on a bare system: an existing Hyprland setup already has a working
@@ -49,7 +48,7 @@ PKG_GPU_INTEL=(mesa vulkan-intel intel-media-driver)
 PKG_GPU_NVIDIA=(nvidia-utils nvidia-settings)   # + nvidia-open / -dkms, see lib.sh
 PKG_GPU_HYBRID=(nvidia-prime envycontrol)       # iGPU + NVIDIA laptops (gpumode)
 PKG_LAPTOP=(tlp acpi)
-PKG_ASUS=(asusctl)                              # powerprofile.sh / waybar module
+PKG_ASUS=(asusctl)                              # powerprofile.sh / the shell's Power tile
 
 # Optional, needs the multilib repo -- see setup_gaming() in lib.sh.
 PKG_GAMING=(steam prismlauncher)

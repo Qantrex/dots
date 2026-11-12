@@ -52,12 +52,6 @@
 */.config/fnott/**/*.cache/
 
 ########################################
-# Waybar
-########################################
-*/.config/waybar/node_modules/
-*/.config/waybar/package-lock.json
-
-########################################
 # GTK -- per-machine chooser state
 ########################################
 */.config/gtk-3.0/bookmarks
@@ -65,8 +59,3 @@
 */.config/gtk-3.0/gtkfilechooser.ini.lock
 */.config/gtk-4.0/gtkfilechooser.ini
 */.config/gtk-4.0/gtkfilechooser.ini.lock
-
-########################################
-# Wofi -- launcher usage history
-########################################
-*/.config/wofi/history

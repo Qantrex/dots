@@ -7,7 +7,7 @@
 # already work, and leaves them alone: no GPU drivers, no PipeWire (it would
 # replace PulseAudio), no NetworkManager switch, and your display manager stays
 # unless there is none. Existing configs that these dotfiles replace (hypr,
-# waybar, wofi, foot, ...) are moved to ~/.dotfiles-backup/<date>/ first.
+# quickshell, foot, ...) are moved to ~/.dotfiles-backup/<date>/ first.
 #
 # Safe to re-run; run it again after first starting Spotify to theme it.
 
@@ -37,16 +37,16 @@ install_pkgs "system"           "${PKG_SYSTEM[@]}"
 check_hyprland_version
 
 step "Checking for things that clash with this setup"
-# These would fight mako / hyprpaper / swayidle, which the config autostarts.
-# dunst and swaync also claim notifications through D-Bus activation, so
+# These would fight the shell's notifications / hyprpaper / swayidle, which the config autostarts.
+# dunst, swaync and mako also claim notifications through D-Bus activation, so
 # being installed is enough to clash.
-for p in dunst swaync hypridle swww; do
+for p in dunst swaync mako hypridle swww; do
   pacman -Qq "$p" &>/dev/null && warn "$p is installed; this setup uses $(
-    case $p in dunst|swaync) echo mako ;; hypridle) echo swayidle ;; swww) echo hyprpaper ;; esac
+    case $p in dunst|swaync|mako) echo "the shell's notifications" ;; hypridle) echo swayidle ;; swww) echo hyprpaper ;; esac
   ) instead -- consider removing it"
 done
-command -v nmcli >/dev/null || info "NetworkManager isn't installed; waybar's network click (nmtui) won't work"
-pacman -Qq pipewire-pulse &>/dev/null || info "No PipeWire; waybar's volume module works with PulseAudio too"
+command -v nmcli >/dev/null || info "NetworkManager isn't installed; the shell's Wi-Fi list won't work"
+pacman -Qq pipewire-pulse &>/dev/null || info "No PipeWire; the shell's volume controls and OSD need it"
 
 link_dotfiles
 setup_shell

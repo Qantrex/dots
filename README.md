@@ -18,19 +18,16 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | Package | What it configures |
 | --- | --- |
 | 🌌 `hypr` | Hyprland compositor, hyprlock, hyprpaper |
-| 📊 `waybar` | Status bar |
+| 🧭 `quickshell` | The desktop shell ([Quickshell](#-shell-quickshell)): bar, popouts, notifications, OSD, launcher |
 | 🐚 `zsh` | `.zshrc` (oh-my-zsh), `.zsh_aliases`, functions (`gpumode`, `fixnet`, `hyprr`, …) |
 | 🚀 `starship` | Prompt |
 | 🐟 `fish` | Fish config (zsh is the login shell) |
 | 🖼 `foot` | Terminal emulator |
 | ✍️ `micro` | Terminal editor |
-| 🔔 `mako` | Notification daemon: true-black monochrome |
 | 🔕 `fnott` | Older notification config, not running |
-| 🔍 `wofi` | Application launcher |
 | 🎨 `gtk` | GTK 3/4 theming |
 | 🎛 `qt5ct` / `qt6ct` | Qt5 / Qt6 theming (monochrome palette in `colors/`) |
 | 🗂 `kde` | `kdeglobals` colours for KDE apps (Dolphin) |
-| 🔊 `swayosd` | Volume/brightness OSD style |
 | 🪟 `tmux` | `~/.tmux.conf` |
 | 💬 `vesktop` | Discord theme (`themes/` only) |
 | 🎵 `spicetify` | Spotify theme (Ziro + `monochrome` scheme) |
@@ -51,10 +48,11 @@ One repo for both machines. Differences are picked by hostname (`/etc/hostname`)
 | What | Laptop `bauarch` | Desktop `bauarch-pc` | Where |
 | --- | --- | --- | --- |
 | Monitors | internal panel, scale 2 | two AOC screens | `hypr/lua/monitors.lua` |
-| Waybar AI button (`custom/ai`, `ai-webui.sh`) | yes | no (2026-11-04: the desktop is a headless AI node instead) | `waybar/config-bauarch-pc.jsonc` |
-| Waybar battery, touchpad, power profile | yes | no (no battery, touchpad or asusctl) | `waybar/config-bauarch-pc.jsonc` |
+| Shell: Local AI tile/icon (`ai-webui.sh`) | yes | no (2026-11-04: the desktop is a headless AI node instead) | `quickshell/.../services/Scripts.qml` (`Host.isLaptop`) |
+| Shell: battery, touchpad, power profile, brightness | yes | no (no battery, touchpad, asusctl or backlight) | `quickshell/.../services/` |
+| Shell: GPU in the System popout (`nvidia-smi`) | no (it would wake the dGPU) | yes | `quickshell/.../services/Sys.qml` |
 | Idle | dim, lock, screens off, suspend on battery | lock + quiet mode (`away --idle`), screens off, **never suspends** (AI node; only pc-guard may sleep it) | `scripts/idle.sh` |
-| Power | asusctl profiles, SUPER+F1/F2/F3, `batsignal` | none of those; SUPER+F1 or `away`: lock, screens off, `pc-quiet on` (CPU boost off, EPP power, GPU at 125 W) until unlock. One-time: `sudo ~/.config/scripts/setup-pc-quiet.sh` (the installer offers it). Fans are the BIOS's job: Q-Fan custom curve, flat ~20–30 % up to ~60 °C, then up to 100 % at ~80 °C, a few seconds of fan step up/down | `bin/away`, `scripts/pc-quiet`, `hypr/lua/keybinds.lua` |
+| Power | asusctl profiles, SUPER+F1/F2/F3, low-battery warnings from the shell | none of those; SUPER+F1 or `away`: lock, screens off, `pc-quiet on` (CPU boost off, EPP power, GPU at 125 W) until unlock. One-time: `sudo ~/.config/scripts/setup-pc-quiet.sh` (the installer offers it). Fans are the BIOS's job: Q-Fan custom curve, flat ~20–30 % up to ~60 °C, then up to 100 % at ~80 °C, a few seconds of fan step up/down | `bin/away`, `scripts/pc-quiet`, `hypr/lua/keybinds.lua` |
 
 ---
 
@@ -100,9 +98,9 @@ git clone https://github.com/Qantrex/dots.git ~/dotfiles
 
 Same as above, except it leaves graphics drivers, the audio stack, the
 network manager and your display manager alone (greetd only if there is
-none). Your old `hypr`, `waybar`, `wofi`, ... configs are moved to
+none). Your old `hypr`, `quickshell`, `foot`, ... configs are moved to
 `~/.dotfiles-backup/<date>/`, and it warns about things that clash with
-this setup (dunst/swaync vs mako, hypridle vs swayidle, swww vs hyprpaper).
+this setup (dunst/swaync/mako vs the shell's notifications, hypridle vs swayidle, swww vs hyprpaper).
 
 ### After the first login
 
@@ -167,6 +165,8 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | --- | --- |
 | `T` / `E` / `A`,`R` | Terminal / file manager / launcher |
 | `C` / `L` | Clipboard history / lock |
+| `N` / `Escape` | Notifications / session menu (lock, suspend, log out, restart, shut down) |
+| `SHIFT+E` / `SHIFT+W` | Emoji / wallpaper picker |
 | `SHIFT+T` | Typing test (homerow) |
 | `Q` / `V` / `F` | Close / float / fullscreen |
 | `arrows` | Move focus (`+SHIFT` moves the window) |
@@ -176,12 +176,73 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `CTRL+S` | Screenshot region → file + clipboard |
 | `SHIFT+F` | Screenshot region (flameshot) → Claude Code → answer as a faint bottom-right overlay (`~/.config/scripts/claude-screen/`) |
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
-| `SHIFT+R` | Reload config and restart the bar |
+| `SHIFT+S` | Screenshot menu: region, window, monitor, all screens |
+| `SHIFT+R` | Reload config and restart the shell |
 | `SHIFT+V` | Unlock `~/Vault` and open it ([Vault](#-vault)) |
 
-`Fn+F6` (no `SUPER`) turns the touchpad on and off, as does clicking the mouse
-icon in waybar. The state survives reloads and reboots
+`Fn+F6` (no `SUPER`) turns the touchpad on and off, as does the Touchpad tile in
+the control centre (a crossed-out mouse in the bar means it is off). The state survives reloads and reboots
 (`~/.config/scripts/touchpad.sh`).
+
+---
+
+## 🧭 Shell (Quickshell)
+
+One Quickshell process (`quickshell/.config/quickshell`, QML) is the whole
+desktop shell. It replaced waybar, mako, swayosd, batsignal and the wofi menus
+on 2026-11-12. The idea: **quiet by default, visible when something needs you**,
+and every click opens something you can act in instead of another program.
+
+**Bar** (32 px, three floating islands, blurred by Hyprland):
+
+- **Left:** occupied workspaces as their apps' icons (greyed); the active one is
+  a white pill, urgent ones pulse. A pin shows while the scratchpad has windows.
+- **Centre:** the time, plus the next deadline when one is due within 2 days
+  (`· ITP tomorrow`, gold on the day). The player shows while music plays (and
+  5 minutes after a pause): click = media popout, middle = play/pause, scroll =
+  previous/next.
+- **Right, exceptions** (each only while it applies): mic / camera / screen share
+  in use (love), homelab problems (love) or approvals waiting (gold), vault open,
+  touchpad off, power profile above Quiet, local AI on, RAM over 85 % (gold),
+  caffeine, Do Not Disturb, unread notifications, no or limited network.
+- **Right, status:** network, Bluetooth (only with a device connected), volume,
+  battery (percentage only on battery; gold under 30 %, love under 15 %). One
+  click target: the control centre. Scroll = volume, middle = mute, right =
+  pavucontrol. The tray hides behind the chevron.
+
+**Popouts:** *control centre* (volume, mic and per-app sliders, output/input
+device, brightness, Wi-Fi list with password entry, Bluetooth devices with
+battery and pairing, power profile, touchpad, vault, Do Not Disturb, caffeine,
+local AI, battery time, lock/suspend/restart/shut down); *day* (click the clock:
+date, weather, month calendar with deadline dots, today's lessons, deadlines,
+to-dos you can tick off); *media*; *system* (CPU, RAM, temperature, fan, GPU on
+the PC); *notifications*; *homelab*; *tray*.
+
+**The day popout's data** comes from the homelab agent's Companion API
+(`GET /api/v1/state`, the same as the iOS app: WebUntis, Moodle, the notes'
+`due:` dates, Home Assistant to-dos), reached over the tailnet. Its URL is not
+in this repo: put it in `~/.config/homelab/api-url` (one line). Without it the
+popout shows the calendar only.
+
+**Launcher** (`SUPER+A`/`R`): apps (ranked by use), clipboard (`SUPER+C`), emoji
+(`SUPER+SHIFT+E`), screenshot (`SUPER+SHIFT+S`), wallpaper (`SUPER+SHIFT+W`) and
+session (`SUPER+Escape`). Tab switches mode, Enter runs, Shift+Del removes a
+clipboard entry. The emoji list is generated: `python3 -I tools/gen-emoji.py`.
+
+**Notifications:** popups top right, 5 s (critical ones stay, with a love
+border); hover pauses them. Everything stays in the history (`SUPER+N`) until
+dismissed. Do Not Disturb keeps critical ones only.
+
+**OSD:** volume (from anywhere), mic mute and brightness, bottom centre.
+
+**IPC** (`qs ipc show` lists all): the scripts call `qs ipc call bar refresh
+<vault|touchpad|powerprofile|ai>` after a change; keybinds use `launcher toggle
+<mode>`, `bar popout <name>`, `osd brightness`; also `notifs dnd`, `caffeine
+toggle`, `homelab refresh`.
+
+Quickshell reloads itself when a file changes; `qs` runs the config from
+`~/.config/quickshell`, and its log is `qs log`. Look and colours live in
+`services/Theme.qml`.
 
 ---
 
@@ -193,7 +254,7 @@ CPU energy-performance preference. This Vivobook does **not** support custom fan
 curves or PPT tuning (`asusctl fan-curve` reports no `FanCurves` interface and
 `asusctl armoury list` is empty), so the platform profile is the only fan lever.
 
-Switch with `SUPER+F1`/`F2`, the waybar module, or:
+Switch with `SUPER+F1`/`F2`, the Power tile in the control centre, or:
 
 ```bash
 ~/.config/scripts/powerprofile.sh quiet|balanced|performance|toggle|cycle
@@ -291,7 +352,7 @@ depends on it, and toolchains you invoke directly (`dotnet-sdk`, `clang`,
 ## 🖤 Theme
 
 Everything is **true-black monochrome** (`#000000`, white and greys) for the
-OLED panel, like waybar. Selections, buttons and active states are greys or
+OLED panel, like the shell. Selections, buttons and active states are greys or
 white. Rosé Pine Moon colour appears only where it helps reading: love / gold
 for errors and warnings, and rose / iris for Discord mentions and links and for
 syntax highlighting. It is never used as a full-app theme.
@@ -301,7 +362,7 @@ syntax highlighting. It is never used as a full-app theme.
 | GTK3 / GTK4 apps | `Monochrome` theme in `gtk/.local/share/themes/`, generated from Adwaita-dark by `~/.config/scripts/build-gtk-monochrome.py` (re-run after a gtk update) |
 | libadwaita apps | `gtk/.config/gtk-4.0/gtk.css` |
 | Icons | `Papirus-Mono` (Papirus-Dark with grey folders), built into `~/.local/share/icons` by `~/.config/scripts/build-papirus-mono.sh` |
-| App launcher | `wofi/` |
+| Bar, popouts, notifications, launcher | `quickshell/.../services/Theme.qml` |
 | Discord | `vesktop/.../themes/monochrome.theme.css` (derived from rose-pine/discord, palette swapped) |
 | Spotify | Ziro theme, `[monochrome]` scheme in `spicetify/.../Themes/Ziro/color.ini` |
 | Qt / KDE | `qt*ct/.../colors/monochrome.conf`, `kde/.config/kdeglobals` |
@@ -342,9 +403,9 @@ has *master password re-prompt* on, so `rbw` asks for the master password on
 every unlock, even while it is otherwise unlocked. The key goes straight from
 `rbw` into gocryptfs and is never shown or copied.
 
-Unlock with `SUPER+SHIFT+V` (opens Dolphin), a click on the lock icon in
-waybar, or `vault`. `vault lock` or a right-click on the icon closes it; the icon
-is dimmed and closed while locked, white and open while unlocked.
+Unlock with `SUPER+SHIFT+V` (opens Dolphin), the Vault tile in the control
+centre, or `vault`. While it is open an open-lock icon sits in the bar: a click
+opens `~/Vault`, a right-click (or `vault lock`, or the tile) closes it.
 
 One-time setup (needs `gocryptfs` and a logged-in `rbw`):
 
@@ -363,7 +424,7 @@ key is still in Bitwarden.
 
 ## ⚠️ Notes
 
-- Machine-specific state (`fish_variables`, `micro/buffers`, `wofi/history`) is
+- Machine-specific state (`fish_variables`, `micro/buffers`) is
   ignored via `.gitignore`. The patterns must be written as `*/.config/...` to
   match the stow layout — an unprefixed `.config/...` pattern anchors to the
   repo root and silently matches nothing.
