@@ -38,7 +38,9 @@ hl.on("hyprland.start", function()
             hyprctl hyprpaper listactive >/dev/null 2>&1 && break
             sleep 0.2
         done
-        hyprctl hyprpaper wallpaper ",%s" >/dev/null 2>&1
+        w=$(cat "$HOME/.cache/wallpaper/last" 2>/dev/null)
+        [ -f "$w" ] || w="%s"
+        hyprctl hyprpaper wallpaper ",$w" >/dev/null 2>&1
     ]], apps.wallpaperImage))
 
     -- Clipboard history.
