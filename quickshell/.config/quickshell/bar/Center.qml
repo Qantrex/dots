@@ -20,6 +20,7 @@ Island {
         id: clockItem
         active: root.bar.isOpen("day")
         onLeftClicked: root.bar.pop("day", clockItem)
+        tip: Qt.formatDate(clock.date, "dddd, d MMMM yyyy") + (Homelab.urgent ? "\n" + Homelab.urgent.title + " · " + Homelab.dayWord(Homelab.urgent.days) : "")
         spacing: 8
 
         Label {
@@ -59,6 +60,7 @@ Island {
         onLeftClicked: root.bar.pop("media", mediaItem)
         onMiddleClicked: Media.toggle()
         onScrolled: dir => dir > 0 ? Media.previous() : Media.next()
+        tip: (Media.player ? Media.player.identity + (Media.active ? "" : " (paused)") : "") + "\nMiddle: play/pause · scroll: previous/next"
 
         Connections {
             target: Media

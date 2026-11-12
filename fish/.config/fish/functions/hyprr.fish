@@ -5,9 +5,7 @@ function hyprr
 
     # Quickshell reloads itself on file changes; this is for when it got stuck.
     echo "Restarting the shell..."
-    pkill -x qs
-    sleep 0.3
-    hyprctl dispatch exec qs >/dev/null
+    ~/.config/scripts/shell.sh restart
 
     echo "Successful!"
 end

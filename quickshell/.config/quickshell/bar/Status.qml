@@ -22,6 +22,11 @@ Island {
         onMiddleClicked: Audio.toggleMute()
         onRightClicked: Quickshell.execDetached(["pavucontrol"])
         onScrolled: dir => Audio.step(dir * 0.05)
+        tip: [Net.wired ? "Wired" : (Net.active ? "Wi-Fi: " + Net.active.name + " (" + Math.round(Net.strength * 100) + " %)" : Net.label),
+              Bt.connected.length ? "Bluetooth: " + Bt.connected.map(d => d.name + (d.batteryAvailable ? " " + Math.round(d.battery * 100) + " %" : "")).join(", ") : "",
+              "Volume: " + (Audio.muted ? "muted" : Math.round(Audio.volume * 100) + " %") + " · " + Audio.deviceName(Audio.sink),
+              Power.present ? "Battery: " + Power.percent + " %" + (Power.timeText ? " · " + Power.timeText : "") : ""]
+             .filter(x => x).join("\n") + "\nScroll: volume · middle: mute · right: pavucontrol"
 
         Glyph {
             anchors.verticalCenter: parent.verticalCenter
@@ -49,7 +54,7 @@ Island {
             }
             Label {
                 anchors.verticalCenter: parent.verticalCenter
-                visible: Power.onBattery
+                visible: Power.onBattery || (Power.charging && Power.percent < 95)
                 text: Power.percent + "%"
                 size: Theme.fontSmall
                 color: Power.critical ? Theme.love : (Power.low ? Theme.gold : Theme.fgMuted)
@@ -64,6 +69,7 @@ Island {
         delegate: BarItem {
             required property var modelData
             hpad: 6
+            tip: modelData.tooltipTitle || modelData.title || modelData.id
             onLeftClicked: modelData.activate()
             onRightClicked: {
                 const p = mapToItem(null, 0, height);
@@ -77,6 +83,7 @@ Island {
         id: tray
         visible: SystemTray.items.values.length > 0
         hpad: 5
+        tip: "Tray: " + SystemTray.items.values.map(i => i.tooltipTitle || i.title || i.id).join(", ")
         active: root.bar.isOpen("tray")
         onLeftClicked: root.bar.pop("tray", tray)
         Glyph {

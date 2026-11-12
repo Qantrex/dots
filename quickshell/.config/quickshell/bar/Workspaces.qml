@@ -44,9 +44,17 @@ Island {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: modelData.activate()
-            onWheel: w => Hyprland.dispatch("workspace " + (w.angleDelta.y > 0 ? "e-1" : "e+1"))
+            // The config is Lua, so dispatches are Lua too (`workspace e+1` fails).
+            onWheel: w => Hyprland.dispatch('hl.dsp.focus({ workspace = "' + (w.angleDelta.y > 0 ? "e-1" : "e+1") + '" })')
 
             Behavior on implicitWidth { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
+
+            Tooltip {
+                target: ws
+                show: ws.containsMouse
+                text: "Workspace " + ws.modelData.name + "\n"
+                      + ws.modelData.toplevels.values.map(t => "· " + (t.title || t.wayland?.appId || "")).join("\n")
+            }
 
             Rectangle {
                 id: pill
@@ -112,7 +120,8 @@ Island {
     BarItem {
         visible: root.special !== null
         hpad: 6
-        onLeftClicked: Hyprland.dispatch("togglespecialworkspace magic")
+        tip: "Scratchpad (SUPER+S)"
+        onLeftClicked: Hyprland.dispatch('hl.dsp.workspace.toggle_special("magic")')
         Glyph { text: "󰐃"; color: Theme.fgMuted; size: 13 }
     }
 }

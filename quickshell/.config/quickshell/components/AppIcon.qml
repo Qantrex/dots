@@ -27,7 +27,9 @@ Item {
         anchors.fill: parent
         source: img
         saturation: -1
-        brightness: root.tint.a > 0 ? 0 : root.brightness
+        // A black tint means a solid black silhouette (the white active pill);
+        // colorization alone keeps the icon's light parts light.
+        brightness: root.tint.a > 0 ? (root.tint.hslLightness < 0.5 ? -1 : 1) : root.brightness
         colorization: root.tint.a > 0 ? 1 : 0
         colorizationColor: root.tint
     }

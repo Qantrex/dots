@@ -240,9 +240,17 @@ dismissed. Do Not Disturb keeps critical ones only.
 <mode>`, `bar popout <name>`, `osd brightness`; also `notifs dnd`, `caffeine
 toggle`, `homelab refresh`.
 
-Quickshell reloads itself when a file changes; `qs` runs the config from
-`~/.config/quickshell`, and its log is `qs log`. Look and colours live in
-`services/Theme.qml`.
+Every bar icon has a tooltip (what it is, what the clicks do).
+
+`scripts/shell.sh` starts it (autostart) and restarts it if it crashes, so a
+crash never leaves the session without a bar and notifications; `shell.sh
+restart` (SUPER+SHIFT+R, `hyprr`) restarts it on purpose. Quickshell also
+reloads itself when a file changes. The config is `~/.config/quickshell`, the
+log `qs log`, the look and colours `services/Theme.qml`.
+
+The Hyprland config is Lua, so dispatches from the shell and scripts are Lua as
+well: `hyprctl dispatch 'hl.dsp.focus({ workspace = "e+1" })'`, not
+`hyprctl dispatch workspace e+1` (that fails).
 
 ---
 

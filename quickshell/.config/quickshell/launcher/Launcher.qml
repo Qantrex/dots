@@ -164,7 +164,7 @@ PanelWindow {
             return [
                 { icon: "󰌾", title: "Lock", subtitle: "hyprlock", run: () => Quickshell.execDetached(["hyprlock"]) },
                 { icon: "󰤄", title: "Suspend", subtitle: "Locks first", run: () => Quickshell.execDetached(["systemctl", "suspend"]) },
-                { icon: "󰍃", title: "Log out", subtitle: "Ends the Hyprland session", run: () => Quickshell.execDetached(["hyprctl", "dispatch", "exit"]) },
+                { icon: "󰍃", title: "Log out", subtitle: "Ends the Hyprland session", run: () => Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.exit()"]) },
                 { icon: "󰜉", title: "Restart", subtitle: "", run: () => Quickshell.execDetached(["systemctl", "reboot"]) },
                 { icon: "󰐥", title: "Shut down", subtitle: "", run: () => Quickshell.execDetached(["systemctl", "poweroff"]) }
             ].filter(i => !q || score(q, i.title) > 0);

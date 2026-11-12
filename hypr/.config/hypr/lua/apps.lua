@@ -49,8 +49,9 @@ return {
     claudeScreen = "~/.config/scripts/claude-screen/capture.py",
 
     lock        = "hyprlock",
-    -- Started through the `qs` symlink, so that is the process name (pkill -x qs).
-    shell       = "qs",
+    -- qs under a supervisor that restarts it after a crash; `shell.sh restart`
+    -- restarts it on purpose. (The process is `qs`, the symlink, not `quickshell`.)
+    shell       = "~/.config/scripts/shell.sh",
 
     -- Absolute path: hyprpaper does not expand `~`.
     wallpaperImage = "/home/kbauer/Pictures/Wallpapers/synthwave-mountain-sun.jpg",

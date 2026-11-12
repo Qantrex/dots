@@ -35,7 +35,7 @@ hl.bind(
 -- when a file changes; the restart is for when it got stuck.
 hl.bind(
     mod .. " + SHIFT + R",
-    hl.dsp.exec_cmd("hyprctl reload; pkill -x " .. apps.shell .. "; sleep 0.3; " .. apps.shell),
+    hl.dsp.exec_cmd("hyprctl reload; " .. apps.shell .. " restart"),
     { description = "Reload config and restart the shell" }
 )
 

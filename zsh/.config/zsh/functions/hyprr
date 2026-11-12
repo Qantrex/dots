@@ -8,10 +8,7 @@ if ! hyprctl reload; then
 fi
 
 # Quickshell reloads itself on file changes; this is for when it got stuck.
-# It runs as `qs` (the symlink), so that is the process name.
 echo "--> Restarting the shell..."
-pkill -x qs 2>/dev/null
-sleep 0.3
-hyprctl dispatch exec qs >/dev/null
+~/.config/scripts/shell.sh restart
 
 echo "✅ Reload complete."

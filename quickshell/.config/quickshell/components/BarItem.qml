@@ -41,4 +41,10 @@ MouseArea {
         anchors.centerIn: parent
         spacing: 6
     }
+
+    Tooltip {
+        target: root
+        text: root.tip
+        show: root.containsMouse && !root.active && !root.pressed
+    }
 }
