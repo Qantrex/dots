@@ -332,23 +332,12 @@ enable_services() {  # enable_services [--now] UNIT...
 
 setup_greetd() {
   step "Login screen (greetd + tuigreet)"
-  local session=Hyprland
-  [[ -x /usr/bin/start-hyprland ]] && session=start-hyprland
-  local command="tuigreet --time --remember --asterisks --cmd $session"
-  # A machine with its own file in install/greeter/ gets tuigreet inside Hyprland,
-  # which can pick the monitor and font size that the kernel console can't.
-  local host_greeter
-  host_greeter=$DOTFILES/install/greeter/$(cat /etc/hostname 2>/dev/null).lua
-  if [[ -f $host_greeter ]]; then
-    run sudo install -m 644 "$host_greeter" /etc/greetd/hyprland-greeter.lua
-    command="env HOME=/tmp XDG_CACHE_HOME=/tmp/greeter-cache Hyprland --config /etc/greetd/hyprland-greeter.lua"
-  fi
-  root_write /etc/greetd/config.toml "[terminal]
-vt = 1
-
-[default_session]
-command = \"$command\"
-user = \"greeter\""
+  # setup-boot-style.sh --greeter writes /etc/greetd/config.toml and the shared
+  # /etc/greetd/tuigreet.sh. A machine with its own file in install/greeter/
+  # gets tuigreet inside a small Hyprland, which can pick the monitor and font
+  # size that the kernel console can't.
+  run sudo "$DOTFILES/scripts/.config/scripts/setup-boot-style.sh" --greeter \
+    || FAILED+=("setup-boot-style.sh --greeter")
   enable_services greetd.service
 }
 
@@ -457,6 +446,9 @@ run_root_scripts() {
   fi
   if ask "Maintenance: prune the pacman cache, enable paccache/fstrim timers (maintain.sh)?" y; then
     run sudo "$s/maintain.sh" || FAILED+=("maintain.sh")
+  fi
+  if ask "Boot style: terminal splash, grey console palette, Terminus console font (setup-boot-style.sh)?" y; then
+    run sudo "$s/setup-boot-style.sh" --boot || FAILED+=("setup-boot-style.sh --boot")
   fi
   # Written for the Vivobook's systemd-boot entries and kernel command line.
   info "optimize-boot.sh edits boot entries and was written for one specific laptop;"

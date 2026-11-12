@@ -323,12 +323,34 @@ sudo ~/.config/scripts/optimize-boot.sh   # --dry-run / --show also available
 One-time pass that fixes a `quit` → `quiet` typo in the kernel cmdline, wires
 up `amd-ucode`, adds a fallback boot entry (there was none, and
 `loader.conf` has `timeout 0` — hold Space at boot for the menu), trims the
-initramfs for the current GPU mode, drops the plymouth boot splash (~500 ms
-across its four units), and socket-activates docker and libvirtd.
+initramfs for the current GPU mode, and socket-activates docker and libvirtd.
+It used to drop the plymouth splash (~500 ms); it leaves it alone now that
+`setup-boot-style.sh` sets one up (below).
 
 > Containers with `restart: always` and VMs marked autostart will no longer
 > come up by themselves at boot — they start when something first touches
 > docker/libvirt.
+
+### Boot and login style
+
+```bash
+sudo ~/.config/scripts/setup-boot-style.sh   # --dry-run / --boot / --greeter / --undo
+```
+
+- **Splash:** plymouth theme `install/plymouth/terminal`. Every unit systemd
+  starts scrolls by as `[  ok  ] started NetworkManager.service` (real, not
+  decoration), with a progress bar and a blinking cursor, in Iosevka Term on
+  black. Esc shows the raw log; the fallback entry boots without the splash.
+- **Console:** grey 16-colour palette on the kernel command line
+  (`vt.default_red/grn/blu`) and Terminus 32 px (`ter-v32b`), so TTYs match the
+  desktop and are readable on the 2880x1800 panel.
+- **Login:** greetd runs `/etc/greetd/tuigreet.sh` (`install/greeter/tuigreet.sh`,
+  shared by both machines): grey theme, remembered user, DOOM fire in greys on
+  the console, matrix rain inside the desktop's Hyprland greeter. F4 turns the
+  animation off.
+
+Needs `plymouth ttf-iosevkaterm-nerd terminus-font`. Costs the ~500 ms the
+splash takes.
 
 ---
 
@@ -375,6 +397,10 @@ syntax highlighting. It is never used as a full-app theme.
 | Spotify | Ziro theme, `[monochrome]` scheme in `spicetify/.../Themes/Ziro/color.ini` |
 | Qt / KDE | `qt*ct/.../colors/monochrome.conf`, `kde/.config/kdeglobals` |
 | micro | `micro/.../colorschemes/monochrome.micro` |
+| Terminal | foot, Iosevka Term 13 (`ttf-iosevkaterm-nerd`); tmux bar in `tmux/.tmux.conf` |
+| Lock screen | `hypr/.config/hypr/hyprlock.conf`: a TTY login prompt (`Password: ****`) and a big clock |
+| Boot, console, login | `setup-boot-style.sh`, see [Boot time](#-boot-time) |
+| Wallpaper | `~/Pictures/Wallpapers/ascii-creation-of-adam.png` (from JaxonWright/omarchy-midnight-theme); SUPER+SHIFT+W picks another, kept across logins |
 
 ### Spotify: spicetify + adblock
 
