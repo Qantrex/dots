@@ -70,6 +70,7 @@ fi
 run xdg-user-dirs-update
 
 setup_icon_theme
+setup_default_apps
 setup_vesktop
 setup_spicetify
 setup_firefox_theme

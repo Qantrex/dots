@@ -341,6 +341,11 @@ setup_greetd() {
   enable_services greetd.service
 }
 
+setup_default_apps() {
+  step "Default apps (folders, images, PDFs, audio, text) and GNOME settings"
+  run "$DOTFILES/scripts/.config/scripts/set-default-apps.sh" || FAILED+=("set-default-apps.sh")
+}
+
 setup_icon_theme() {
   step "Icon theme (Papirus-Mono: Papirus-Dark with grey folders)"
   run "$DOTFILES/scripts/.config/scripts/build-papirus-mono.sh" \

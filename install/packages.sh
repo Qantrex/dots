@@ -37,7 +37,7 @@ PKG_THEME=(
   rose-pine-hyprcursor rose-pine-cursor
 )
 
-PKG_APPS=(foot firefox dolphin vesktop spotify spotify-adblock spicetify-cli)
+PKG_APPS=(foot firefox nautilus yazi imv zathura zathura-pdf-mupdf ffmpegthumbnailer resvg mpv fastfetch vesktop spotify spotify-adblock spicetify-cli)
 
 # The root setup scripts in scripts/.config/scripts need these.
 PKG_SYSTEM=(nftables pacman-contrib)
