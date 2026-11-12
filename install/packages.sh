@@ -24,12 +24,12 @@ PKG_DESKTOP=(
 # unasked.
 PKG_AUDIO=(pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber)
 PKG_NETWORK=(networkmanager bluez bluez-utils)
-PKG_LOGIN=(greetd greetd-tuigreet)
+PKG_LOGIN=(greetd greetd-tuigreet plymouth terminus-font)
 
 # Shell and terminal tools (.zshrc / .zsh_aliases / tmux / micro use these).
 PKG_SHELL=(zsh fish starship tmux micro fzf zoxide eza bat ripgrep fd btop)
 
-PKG_FONTS=(ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols noto-fonts noto-fonts-emoji noto-fonts-cjk)
+PKG_FONTS=(ttf-iosevkaterm-nerd ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols noto-fonts noto-fonts-emoji noto-fonts-cjk)
 
 # Themes referenced by name from gtk/qt/hypr configs.
 PKG_THEME=(

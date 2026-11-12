@@ -23,13 +23,15 @@
 #    "microcode" hook is already in HOOKS; the boot entry just needs the
 #    initrd line, which must come before the main initramfs.
 #
-# 4. Trims the initramfs for the current GPU mode. envycontrol is in
+# 4. No longer removes plymouth when setup-boot-style.sh set up the splash.
+#
+# 5. Trims the initramfs for the current GPU mode. envycontrol is in
 #    "integrated" mode, which blacklists the NVIDIA modules -- yet mkinitcpio
 #    still packed them plus ~109 MB of GSP firmware. Measured: 142 MB -> 48 MB,
 #    and decompression 0.220s -> 0.041s. `gpumode on/off` now keeps this in
 #    sync, so this step is only for the first run.
 #
-# 5. Socket-activates docker and libvirtd. docker.service sat directly on the
+# 6. Socket-activates docker and libvirtd. docker.service sat directly on the
 #    critical chain to graphical.target at 2.1s. Both still start on first use.
 #    NOTE: containers with restart:always and VMs marked autostart will no
 #    longer come up by themselves at boot.
@@ -127,26 +129,25 @@ else
 fi
 
 # --------------------------------------------------------------- 4. plymouth
-# Boot splash, ~500ms across plymouth-start/read-write/quit/quit-wait. Dropping
-# the hook and the "splash" parameter is enough; the plymouth-*.service units
-# are all `static` and only get pulled in by those two. The package can stay
-# installed. Safe here because root is plain ext4 -- on an encrypted root
-# plymouth provides the passphrase prompt and removing it would be a mistake.
-# To restore: re-add "plymouth" to HOOKS and "splash" to the options line.
+# Used to drop the boot splash (~500ms). Since 2026-11-12 the splash is wanted:
+# setup-boot-style.sh installs the "terminal" theme, its hook and "splash".
+# So this only removes plymouth when that theme is not the configured one.
 step "Boot splash (plymouth)"
-if grep -qE '^HOOKS=.*\bplymouth\b' "$MKCONF"; then
+if grep -qs '^Theme=terminal' /etc/plymouth/plymouthd.conf; then
+    say "   terminal theme configured (setup-boot-style.sh); keeping plymouth"
+elif grep -qE '^HOOKS=.*\bplymouth\b' "$MKCONF"; then
     run "sed -i 's/\\bplymouth\\b *//; s/  */ /g; s/ )/)/' '$MKCONF'"
     say "   removed the plymouth hook"
+    for e in "$ENTRY" "$FALLBACK_ENTRY"; do
+        [[ -f $e ]] || continue
+        if grep -qE '^options .*\bsplash\b' "$e"; then
+            run "sed -i '/^options /{s/\\bsplash\\b *//; s/  */ /g; s/ \$//}' '$e'"
+            say "   removed 'splash' from $(basename "$e")"
+        fi
+    done
 else
     say "   plymouth hook already absent"
 fi
-for e in "$ENTRY" "$FALLBACK_ENTRY"; do
-    [[ -f $e ]] || continue
-    if grep -qE '^options .*\bsplash\b' "$e"; then
-        run "sed -i '/^options /{s/\\bsplash\\b *//; s/  */ /g; s/ \$//}' '$e'"
-        say "   removed 'splash' from $(basename "$e")"
-    fi
-done
 
 # ------------------------------------------------------------- 5. initramfs
 step "initramfs for the current GPU mode"
