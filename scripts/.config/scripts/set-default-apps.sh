@@ -62,6 +62,14 @@ if command -v gsettings >/dev/null; then
     gsettings set org.gtk.gtk4.Settings.FileChooser sort-directories-first true 2>/dev/null
     gsettings set org.gnome.nautilus.preferences show-delete-permanently true
   fi
-  echo "  gsettings: accent slate, monospace Iosevka Term"
+  # localsearch (Nautilus' indexer) defaults to all of $HOME, which here means
+  # ~/models, ~/vms and the mail store: hours of CPU on battery. Index the
+  # folders worth searching; $HOME itself only one level deep.
+  if gsettings list-schemas | grep -qx org.freedesktop.Tracker3.Miner.Files; then
+    gsettings set org.freedesktop.Tracker3.Miner.Files index-recursive-directories \
+      "['&DOCUMENTS', '&DOWNLOAD', '&PICTURES', '&MUSIC', '&VIDEOS', '\$HOME/Notes', '\$HOME/Projects']"
+    gsettings set org.freedesktop.Tracker3.Miner.Files index-single-directories "['\$HOME', '&DESKTOP']"
+  fi
+  echo "  gsettings: accent slate, monospace Iosevka Term, search index limited"
 fi
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
