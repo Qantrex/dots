@@ -23,6 +23,7 @@ LINKS=(
   ".config/kdeglobals|kde"
   ".config/scripts|scripts"
   ".local/bin/decide|bin"
+  ".local/bin/away|bin"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"
