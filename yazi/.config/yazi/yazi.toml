@@ -13,3 +13,26 @@ scrolloff      = 8
 wrap       = "yes"
 max_width  = 1800
 max_height = 1800
+
+# What opens what. Enter = the desktop's default app in its own window
+# (text -> micro in foot, PDF -> zathura, image -> imv, video -> mpv; see
+# ~/.config/scripts/set-default-apps.sh), so yazi works like a GUI file
+# manager. Shift+Enter (or O) shows every choice, e.g. editing inside yazi.
+[opener]
+window    = [ { run = "xdg-open %s1",            orphan = true, desc = "Default app (new window)" } ]
+edit-here = [ { run = "micro %s",                block = true,  desc = "Edit here in yazi (micro)" } ]
+nautilus  = [ { run = "nautilus --select %s1",   orphan = true, desc = "Show in Nautilus" } ]
+folder-gui = [ { run = "nautilus --new-window %s1", orphan = true, desc = "Open in Nautilus" } ]
+terminal  = [ { run = "foot -D %s1",             orphan = true, desc = "Terminal in this folder" } ]
+
+[open]
+prepend_rules = [
+	# Enter steps into folders (plugins/smart-enter); `o` on one opens Nautilus.
+	{ mime = "folder/*", use = [ "folder-gui", "terminal" ] },
+	{ mime = "text/*", use = [ "window", "edit-here", "nautilus" ] },
+	{ mime = "application/{json,ndjson,javascript,toml,x-yaml,yaml,x-shellscript,xml,wine-extension-ini}", use = [ "window", "edit-here", "nautilus" ] },
+	{ mime = "inode/empty", use = [ "window", "edit-here", "nautilus" ] },
+	{ mime = "image/*", use = [ "window", "nautilus" ] },
+	{ mime = "{audio,video}/*", use = [ "window", "nautilus" ] },
+	{ mime = "application/{pdf,epub+zip}", use = [ "window", "nautilus" ] },
+]

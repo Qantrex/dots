@@ -14,3 +14,8 @@ desc = "Open a terminal here"
 on   = [ "g", "v" ]
 run  = "cd ~/Notes"
 desc = "Go to the vault (~/Notes)"
+
+[[mgr.prepend_keymap]]
+on   = "<Enter>"
+run  = "plugin smart-enter"
+desc = "Enter the folder, or open the file in its app"
