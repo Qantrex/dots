@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Touchpad on/off, behind Fn+F6 and the waybar icon.
+# Touchpad on/off, behind Fn+F6 and the bar icon.
 #
 # Fn+F6 arrives as KEY_TOUCHPAD_TOGGLE (XF86TouchpadToggle) from "Asus WMI
 # hotkeys"; the firmware leaves the touchpad itself alone, so this does the
@@ -11,13 +11,12 @@
 #   touchpad.sh toggle   on <-> off   (Fn+F6, click)
 #   touchpad.sh on|off   set it
 #   touchpad.sh get      print on/off
-#   touchpad.sh status   print waybar JSON
+#   touchpad.sh status   print the bar's JSON
 
 set -uo pipefail
 
 # Keep in sync with input.lua.
 readonly STATE_FILE=$HOME/.local/state/touchpad-off
-readonly WAYBAR_SIGNAL=10
 # hid-multitouch exposes the pad as two nodes; the mouse one is a fallback the
 # pad only uses outside precision-touchpad mode. Both go off together.
 readonly DEVICES=(asue1a00:00-04f3:31de-touchpad asue1a00:00-04f3:31de-mouse)
@@ -31,7 +30,7 @@ icon_for() {
     esac
 }
 
-refresh_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
+refresh_bar() { qs ipc call bar refresh touchpad >/dev/null 2>&1 || true; }
 
 set_state() {
     local want=$1 enabled=true lua="" d
@@ -51,7 +50,7 @@ set_state() {
         rm -f "$STATE_FILE"
     fi
 
-    refresh_waybar
+    refresh_bar
     notify-send -a "Touchpad" -t 2000 \
         -h "string:x-canonical-private-synchronous:touchpad" \
         "$(icon_for "$want")  Touchpad ${want}" 2>/dev/null || true

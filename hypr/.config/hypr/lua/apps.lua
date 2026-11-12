@@ -3,10 +3,10 @@
 --
 -- Commands are run through `sh -c`, so `~` and shell syntax are fine.
 
-local host = require("lua.host")
-
--- waybar reads config-<hostname>.jsonc when the machine has one (it includes the shared config.jsonc).
-local barConfig = host.file("waybar", "config", "jsonc")
+-- The shell (bar, popouts, notifications, OSD, launcher) is Quickshell:
+-- ~/.config/quickshell (dotfiles: quickshell/). The launcher's modes are opened
+-- over its IPC; `qs ipc show` lists every entry point.
+local function launcher(mode) return "qs ipc call launcher toggle " .. mode end
 
 -- The big autostarted apps run in their own systemd scope
 -- (app.slice/app-<name>-<pid>.scope). Otherwise they share the session scope
@@ -34,11 +34,13 @@ return {
     mailHelp    = "~/.config/scripts/aerc-cheatsheet.sh",
     chat        = scoped("vesktop", "vesktop --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto"),
 
-    menu        = 'wofi --show drun --prompt="App Launcher"',
-    emoji       = "wofimoji",
-    clipboard   = "~/.config/scripts/wofi-cliphist.sh",
-    wallpaper   = "~/.config/scripts/wofi-wallpaper.sh",
-    screenshot  = "~/.config/scripts/wofi-screenshot.sh",
+    menu        = launcher("apps"),
+    emoji       = launcher("emoji"),
+    clipboard   = launcher("clipboard"),
+    wallpaper   = launcher("wallpaper"),
+    screenshot  = launcher("screenshot"),
+    session     = launcher("power"),
+    notifications = "qs ipc call bar popout notifs",
     powerprofile = "~/.config/scripts/powerprofile.sh",
     touchpad    = "~/.config/scripts/touchpad.sh",
     vault       = "~/.config/scripts/vault.sh",
@@ -47,8 +49,8 @@ return {
     claudeScreen = "~/.config/scripts/claude-screen/capture.py",
 
     lock        = "hyprlock",
-    bar         = "waybar",   -- process name, for pkill -x
-    barStart    = barConfig and ("waybar -c " .. barConfig) or "waybar",
+    -- Started through the `qs` symlink, so that is the process name (pkill -x qs).
+    shell       = "qs",
 
     -- Absolute path: hyprpaper does not expand `~`.
     wallpaperImage = "/home/kbauer/Pictures/Wallpapers/synthwave-mountain-sun.jpg",

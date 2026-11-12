@@ -18,7 +18,7 @@ ollama create nico -f Modelfile.nico
 
 ## Use them
 
-Pick them in Open WebUI's model selector (the robot icon in waybar starts it),
+Pick them in Open WebUI's model selector (the Local AI tile in the shell's control centre starts it),
 or straight from a terminal with `ollama run qwen-uncensored` / `ollama run nico`.
 
 Thinking can't be set in a Modelfile (Ollama rejects `PARAMETER think`); it's

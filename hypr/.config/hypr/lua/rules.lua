@@ -71,21 +71,23 @@ hl.on("window.open", function(win)
     end
 end)
 
--- Notifications (mako) get blurred, and see through to the wallpaper.
+-- The shell's layers (Quickshell, namespaces qs-*) are blurred. Their
+-- backgrounds are translucent black; ignore_alpha keeps the fully transparent
+-- parts (around the bar's islands, the launcher's backdrop) unblurred.
 hl.layer_rule({
-    name  = "blur-notifications",
-    match = { namespace = "^notifications$" },
-
-    blur         = true,
-    ignore_alpha = 0.15,
-    xray         = true,
-})
-
--- The bar gets the same treatment.
-hl.layer_rule({
-    name  = "blur-bar",
-    match = { namespace = "^waybar$" },
+    name  = "blur-shell",
+    match = { namespace = "^qs-(bar|popout|notifications|osd)$" },
 
     blur         = true,
     ignore_alpha = 0.3,
+})
+
+-- The launcher dims the screen with a 0.35 black backdrop: only its box
+-- (0.88) is blurred, not the whole screen.
+hl.layer_rule({
+    name  = "blur-launcher",
+    match = { namespace = "^qs-launcher$" },
+
+    blur         = true,
+    ignore_alpha = 0.5,
 })

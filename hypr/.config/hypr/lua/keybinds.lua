@@ -31,34 +31,28 @@ hl.bind(
     { description = "Unlock vault and open it" }
 )
 
--- Reload Hyprland and restart the bar.
---
--- The old bind ran `hyprctl reload && pkill waybar waybar &`. pkill rejects a
--- second pattern ("only one pattern can be provided"), so it exited non-zero
--- and waybar was never killed or restarted -- the bind did nothing but reload.
+-- Reload Hyprland and restart the shell. Quickshell reloads its own config
+-- when a file changes; the restart is for when it got stuck.
 hl.bind(
     mod .. " + SHIFT + R",
-    hl.dsp.exec_cmd("hyprctl reload; pkill -x " .. apps.bar .. "; sleep 0.3; " .. apps.barStart),
-    { description = "Reload config and restart bar" }
+    hl.dsp.exec_cmd("hyprctl reload; pkill -x " .. apps.shell .. "; sleep 0.3; " .. apps.shell),
+    { description = "Reload config and restart the shell" }
 )
+
+-- Notifications and the session menu (lock, suspend, log out, restart, shut down).
+hl.bind(mod .. " + N",      hl.dsp.exec_cmd(apps.notifications), { description = "Notifications" })
+hl.bind(mod .. " + Escape", hl.dsp.exec_cmd(apps.session),       { description = "Session menu" })
 
 --------------------------------------------------------------------------
 -- Screenshots
 --------------------------------------------------------------------------
 
--- Menu: region / window / monitor / all screens, in wofi's style.
+-- Menu: region / window / monitor / all screens (the launcher's screenshot mode).
 hl.bind(mod .. " + SHIFT + S", hl.dsp.exec_cmd(apps.screenshot), { description = "Screenshot menu" })
 
--- grimblast is not installed on this machine, so the old bind was dead. grim,
--- slurp and wl-copy are installed, so this does the same job: select a region,
--- save it, and put it on the clipboard.
-hl.bind(mod .. " + CTRL + S", hl.dsp.exec_cmd([[
-    mkdir -p ~/Pictures/Screenshots &&
-    f=~/Pictures/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png &&
-    grim -g "$(slurp)" "$f" &&
-    wl-copy < "$f" &&
-    notify-send -i "$f" "Screenshot saved" "$f"
-]]), { description = "Screenshot region to file and clipboard" })
+-- Straight to a region: saved to ~/Pictures/Screenshots and on the clipboard.
+hl.bind(mod .. " + CTRL + S", hl.dsp.exec_cmd("~/.config/scripts/screenshot.sh region"),
+    { description = "Screenshot region to file and clipboard" })
 
 -- Region with flameshot, ask Claude Code about it, answer opens in a floating
 -- foot and lands on the clipboard. Screenshots and answers: ~/.cache/claude-screen
@@ -132,7 +126,7 @@ hl.bind(mod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 --------------------------------------------------------------------------
 --
 -- Goes through powerprofile.sh rather than calling asusctl directly, so the
--- waybar module refreshes and a notification is shown. No root needed:
+-- bar refreshes and a notification is shown. No root needed:
 -- asusctl is authorised through polkit.
 --
 --   F1  Quiet        lazy fan curve, EPP=power        (heat over noise)
@@ -155,22 +149,22 @@ end
 -- Media and laptop function keys
 --------------------------------------------------------------------------
 
--- swayosd-client both applies the change and draws the on-screen indicator.
---
--- The old config bound each of these keys twice -- once to wpctl/brightnessctl
--- and again to swayosd-client. Hyprland runs every matching bind in order, so
--- each press moved the volume twice (~10% per tap instead of 5%).
+-- wpctl / brightnessctl do the change; the shell's OSD shows it. Volume
+-- changes reach the OSD through PipeWire by themselves; brightness has no
+-- change event, so those binds tell the shell. Bind each key once only:
+-- Hyprland runs every matching bind, so a second one doubles the step.
 local osd = { locked = true, repeating = true }
+local brightness = "brightnessctl -q -e4 -n2 set 5%%%s && qs ipc call osd brightness"
 
-hl.bind("XF86AudioRaiseVolume",  hl.dsp.exec_cmd("swayosd-client --output-volume raise"),      osd)
-hl.bind("XF86AudioLowerVolume",  hl.dsp.exec_cmd("swayosd-client --output-volume lower"),      osd)
-hl.bind("XF86AudioMute",         hl.dsp.exec_cmd("swayosd-client --output-volume mute-toggle"), osd)
-hl.bind("XF86AudioMicMute",      hl.dsp.exec_cmd("swayosd-client --input-volume mute-toggle"),  osd)
-hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("swayosd-client --brightness raise"),          osd)
-hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("swayosd-client --brightness lower"),          osd)
+hl.bind("XF86AudioRaiseVolume",  hl.dsp.exec_cmd("wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"), osd)
+hl.bind("XF86AudioLowerVolume",  hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"),        osd)
+hl.bind("XF86AudioMute",         hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),       osd)
+hl.bind("XF86AudioMicMute",      hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"),     osd)
+hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd(string.format(brightness, "+")),                    osd)
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd(string.format(brightness, "-")),                    osd)
 
 -- Fn+F6. The firmware only sends the key; touchpad.sh does the switching and
--- updates the waybar icon.
+-- updates the bar.
 hl.bind("XF86TouchpadToggle", hl.dsp.exec_cmd(apps.touchpad .. " toggle"),
     { description = "Toggle touchpad" })
 

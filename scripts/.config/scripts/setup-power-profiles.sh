@@ -121,7 +121,7 @@ else
 $BEGIN
 # Managed by ~/.config/scripts/setup-power-profiles.sh -- re-run it to change.
 #
-# The ASUS platform profile (SUPER+F1/F2, or the waybar module) is the single
+# The ASUS platform profile (SUPER+F1/F2, or the bar) is the single
 # source of truth. Empty value = "TLP does not touch this".
 PLATFORM_PROFILE_ON_AC=
 PLATFORM_PROFILE_ON_BAT=
@@ -160,4 +160,4 @@ fi
 
 echo
 echo "Done. Switch profiles with SUPER+F1 (Quiet) / SUPER+F2 (Performance),"
-echo "or click the waybar module. No password needed for switching."
+echo "or use the bar (control centre). No password needed for switching."

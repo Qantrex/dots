@@ -18,14 +18,13 @@
 #   vault [open]   unlock if needed
 #   vault lock     close it again
 #   vault get      print locked/unlocked
-#   vault status   print waybar JSON (lock icon)
+#   vault status   print the bar's JSON (lock icon)
 
 set -uo pipefail
 
 readonly CIPHER=${VAULT_CIPHER:-$HOME/.vault}
 readonly PLAIN=${VAULT_DIR:-$HOME/Vault}
 readonly ENTRY=${VAULT_ENTRY:-"Vault (gocryptfs)"}
-readonly WAYBAR_SIGNAL=11
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 readonly SELF
 
@@ -57,7 +56,7 @@ icon_for() {
     esac
 }
 
-refresh_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
+refresh_bar() { qs ipc call bar refresh vault >/dev/null 2>&1 || true; }
 
 status_json() {
     local s hint
@@ -134,7 +133,7 @@ unlock() {
         fi
         return 1
     fi
-    refresh_waybar
+    refresh_bar
     [[ -t 1 ]] && echo "vault: unlocked at $PLAIN"
     return 0
 }
@@ -149,7 +148,7 @@ lock() {
         return 1
     fi
     rmdir "$PLAIN"
-    refresh_waybar
+    refresh_bar
     say "locked"
 }
 

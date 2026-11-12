@@ -21,11 +21,9 @@ hl.on("hyprland.start", function()
     -- Hardware lighting off (desktop only; one-shot, nothing keeps running).
     hl.exec_cmd("sh -c 'command -v openrgb >/dev/null && for d in 0 1 2 3 4 5; do openrgb -d $d -m direct -c 000000; done'")
 
-    -- Shell components.
-    hl.exec_cmd(apps.barStart)
-    hl.exec_cmd("mako")
-    hl.exec_cmd("swayosd-server")
-    if not host.is_pc then hl.exec_cmd("batsignal") end
+    -- The shell: bar, notifications, OSD, launcher and the low-battery
+    -- warnings, all in one Quickshell process.
+    hl.exec_cmd(apps.shell)
 
     -- Wallpaper.
     --

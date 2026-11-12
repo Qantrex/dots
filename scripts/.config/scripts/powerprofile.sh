@@ -19,12 +19,11 @@
 #   powerprofile.sh toggle                       Quiet <-> Performance
 #   powerprofile.sh cycle                        step through all three
 #   powerprofile.sh get                          print the current profile
-#   powerprofile.sh status                       print waybar JSON
+#   powerprofile.sh status                       print the bar's JSON
 
 set -uo pipefail
 
 readonly PROFILE_FILE=/sys/firmware/acpi/platform_profile
-readonly WAYBAR_SIGNAL=8
 
 # Find a hwmon directory by its `name`. Numbering is not stable across boots,
 # so never hard-code hwmonN.
@@ -64,7 +63,7 @@ label_for() {
     esac
 }
 
-refresh_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
+refresh_bar() { qs ipc call bar refresh powerprofile >/dev/null 2>&1 || true; }
 
 set_profile() {
     local want=$1
@@ -85,7 +84,7 @@ set_profile() {
         sleep 0.05
     done
 
-    refresh_waybar
+    refresh_bar
     notify-send -a "Power profile" -t 2000 \
         -h "string:x-canonical-private-synchronous:powerprofile" \
         "$(icon_for "$want")  $(label_for "$want")" \

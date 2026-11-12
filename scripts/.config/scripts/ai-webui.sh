@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local AI (Open WebUI) behind the waybar icon.
+# Local AI (Open WebUI) behind the bar icon.
 #
 # Only Ollama runs all the time: 36 MB idle, and the GPU stays asleep until a
 # model loads. Open WebUI and SearXNG (its web search) are started and stopped
@@ -14,7 +14,7 @@
 #   ai-webui.sh toggle     off: start, then open in Firefox; on: stop   (click)
 #   ai-webui.sh open       open Open WebUI in Firefox                    (right-click)
 #   ai-webui.sh images     open Image Studio in Firefox                  (middle-click)
-#   ai-webui.sh status     print waybar JSON
+#   ai-webui.sh status     print the bar's JSON
 #   ai-webui.sh autostop   stop after IDLE_MINUTES unused (ai-autostop.timer)
 
 set -uo pipefail
@@ -24,7 +24,6 @@ readonly STUDIO_URL=http://127.0.0.1:7801
 readonly OLLAMA=http://127.0.0.1:11434
 readonly CONTAINERS=(searxng open-webui)
 readonly IDLE_MINUTES=45
-readonly WAYBAR_SIGNAL=9
 readonly STATE=${XDG_CACHE_HOME:-$HOME/.cache}/ai-webui
 readonly ACTIVITY=$STATE/last-activity
 readonly STARTING=$STATE/starting
@@ -40,7 +39,7 @@ studio_running() { systemctl --user is-active -q image-studio.service; }
 loaded_model()  { curl -sf -m 1 "$OLLAMA/api/ps" | jq -r '.models[0].name // empty' 2>/dev/null; }
 starting()      { [[ -f $STARTING ]] && kill -0 "$(<"$STARTING")" 2>/dev/null; }
 
-refresh_waybar() { pkill -RTMIN+$WAYBAR_SIGNAL waybar 2>/dev/null || true; }
+refresh_bar() { qs ipc call bar refresh ai >/dev/null 2>&1 || true; }
 
 notify() {
     notify-send -a "AI" -u "${3:-normal}" \
@@ -63,13 +62,13 @@ open_images() {
             return 1
         }
     fi
-    refresh_waybar
+    refresh_bar
     open_ui "$STUDIO_URL"
 }
 
 fail() {
     rm -f "$STARTING"
-    refresh_waybar
+    refresh_bar
     notify "AI failed to start" "$1" critical
     exit 1
 }
@@ -77,7 +76,7 @@ fail() {
 start() {
     mkdir -p "$STATE"
     echo $$ > "$STARTING"
-    refresh_waybar
+    refresh_bar
 
     local hint="Opens in Firefox when ready."
     [[ -d /sys/module/nvidia ]] || hint="GPU is off (gpumode hybrid, then reboot). $hint"
@@ -94,7 +93,7 @@ start() {
     rm -f "$STARTING"
     touch "$ACTIVITY"
     systemctl --user start ai-autostop.timer
-    refresh_waybar
+    refresh_bar
     notify "AI ready" "Started in $(( SECONDS - t0 )) s."
     open_ui
 }
@@ -107,7 +106,7 @@ stop() {
     model=$(loaded_model)
     [[ -n $model ]] && curl -sf -m 30 -o /dev/null "$OLLAMA/api/generate" \
         -d "{\"model\":\"$model\",\"keep_alive\":0}"
-    refresh_waybar
+    refresh_bar
     notify "AI stopped" "${1:-Open WebUI, SearXNG and Image Studio are off.}"
 }
 
