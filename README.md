@@ -24,10 +24,9 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | 🐟 `fish` | Fish config (zsh is the login shell) |
 | 🖼 `foot` | Terminal emulator |
 | ✍️ `micro` | Terminal editor |
-| 🔕 `fnott` | Older notification config, not running |
 | 🎨 `gtk` | GTK 3/4 theming |
 | 🎛 `qt5ct` / `qt6ct` | Qt5 / Qt6 theming (monochrome palette in `colors/`) |
-| 🗂 `kde` | `kdeglobals` colours for KDE apps (kdeconnect, kid3, …) |
+| 🗂 `kde` | `kdeglobals` colours for KDE apps (kid3, ghostwriter, …) |
 | 🪟 `tmux` | `~/.tmux.conf` |
 | 💬 `vesktop` | Discord theme (`themes/` only) |
 | 🎵 `spicetify` | Spotify theme (Ziro + `monochrome` scheme) |
