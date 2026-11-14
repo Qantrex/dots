@@ -89,4 +89,6 @@ fi
 # -----------------------------------------------------------------------------
 eval "$(starship init zsh)"
 export PATH="$HOME/.local/bin:$PATH"
-export PATH="$HOME/.npm-global/bin:$PATH"
+export EDITOR=micro VISUAL=micro
+# systemd user ssh-agent.socket; ~/.ssh/config adds keys on first use (AddKeysToAgent)
+[[ -z $SSH_AUTH_SOCK && -S $XDG_RUNTIME_DIR/ssh-agent.socket ]] && export SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/ssh-agent.socket
