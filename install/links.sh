@@ -44,6 +44,8 @@ LINKS=(
   ".config/imv|imv"
   ".config/zathura|zathura"
   ".local/share/nautilus/scripts|nautilus"
+  ".config/pacman/makepkg.conf|makepkg"
+  ".local/share/applications/aerc-foot.desktop|desktop-entries"
   ".local/share/applications/micro-foot.desktop|desktop-entries"
   ".local/share/applications/yazi.desktop|desktop-entries"
 )

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=aerc (foot)
+Comment=Write mail in aerc, in a foot window
+Exec=foot --app-id=aerc aerc %u
+Icon=mail-message-new
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/mailto;
