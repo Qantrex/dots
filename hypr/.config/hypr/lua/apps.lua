@@ -31,7 +31,8 @@ return {
     -- spotify-adblock ships a shared library, not an executable, so it has to
     -- be LD_PRELOADed into spotify. The old config ran "spotify-adblock"
     -- directly, which is not a command -- Spotify never actually autostarted.
-    music       = scoped("spotify", "env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify"),
+    -- Same Wayland flags as spotify.desktop, else it runs blurry under XWayland.
+    music       = scoped("spotify", "env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto"),
     -- aerc runs in its own foot window with a fixed app-id, so a window rule
     -- can send it to its workspace without catching every other terminal.
     mail        = scoped("aerc", "foot --app-id=aerc aerc"),
