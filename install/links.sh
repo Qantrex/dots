@@ -44,6 +44,7 @@ LINKS=(
   ".config/imv|imv"
   ".config/cmus/monochrome.theme|cmus"
   ".config/cmus/rc|cmus"
+  ".config/fontconfig|fontconfig"
   ".config/zathura|zathura"
   ".local/share/nautilus/scripts|nautilus"
   ".config/pacman/makepkg.conf|makepkg"
