@@ -1,0 +1,6 @@
+# File: ~/.config/zsh/functions/claude-here
+# Start Claude Code in the current folder, for the rare case where that matters
+# (the plain `claude` function always starts in ~).
+claude-here() {
+  command claude "$@"
+}
