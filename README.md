@@ -183,6 +183,7 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `S` | Scratchpad |
 | `ALT+F` | Maximize |
 | `D` / `SHIFT+D` | Quick ask (Claude, Sonnet) / a fresh quick ask about the clipboard, text or image (`claude-ask.sh`) |
+| `SHIFT+A` | Answer a waiting Claude session over the current workspace, in a floating window on its tmux window (`claude-peek.sh`); again to hide |
 | `CTRL+S` | Screenshot region → file + clipboard |
 | `SHIFT+F` | Screenshot region (flameshot) → Claude Code → answer as a faint bottom-right overlay (`~/.config/scripts/claude-screen/`) |
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
@@ -214,8 +215,8 @@ and every click opens something you can act in instead of another program.
 - **Right, exceptions** (each only while it applies): mic / camera / screen share
   in use (love), homelab problems (love) or approvals waiting (gold), vault open,
   touchpad off, power profile above Quiet, local AI on, Claude sessions waiting for
-  you (click: the oldest, right-click: dismiss; `claude-jump.sh`, fed by the session
-  hook in claude-config), Claude usage over 70 %, RAM over 85 % (gold),
+  you (click: answer it here, middle-click: go to its terminal, right-click: dismiss;
+  `claude-peek.sh` / `claude-jump.sh`, fed by the session hook in claude-config), Claude usage over 70 %, RAM over 85 % (gold),
   caffeine, Do Not Disturb, unread notifications, no or limited network.
 - **Right, status:** network, Bluetooth (only with a device connected), volume,
   battery (percentage only on battery; gold under 30 %, love under 15 %). One

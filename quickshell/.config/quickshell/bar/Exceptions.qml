@@ -99,13 +99,15 @@ Island {
         }
     }
 
-    // Claude sessions waiting for me. Click: the one that waited longest; right-click: dismiss.
+    // Claude sessions waiting for me. Click: answer the one that waited longest right here
+    // (peek window); middle-click: go to its terminal; right-click: dismiss.
     Flag {
         visible: ClaudeWaiting.count > 0
         icon: "󰭹"
         label: ClaudeWaiting.count > 1 ? String(ClaudeWaiting.count) : ""
-        tip: "Claude is waiting\n" + ClaudeWaiting.tooltip + "\nClick: open the oldest · right-click: dismiss all"
-        onLeftClicked: Quickshell.execDetached([Host.home + "/.config/scripts/claude-jump.sh", "--first"])
+        tip: "Claude is waiting\n" + ClaudeWaiting.tooltip + "\nClick: answer here (SUPER+SHIFT+A) · middle: go to the terminal · right: dismiss all"
+        onLeftClicked: Quickshell.execDetached([Host.home + "/.config/scripts/claude-peek.sh", "--first"])
+        onMiddleClicked: Quickshell.execDetached([Host.home + "/.config/scripts/claude-jump.sh", "--first"])
         onRightClicked: Quickshell.execDetached([Host.home + "/.config/scripts/claude-jump.sh", "--clear"])
     }
 
