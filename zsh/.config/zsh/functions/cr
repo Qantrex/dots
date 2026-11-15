@@ -1,0 +1,52 @@
+# File: ~/.config/zsh/functions/cr
+# Reopen the Claude sessions that were still open when the laptop shut down or the
+# terminal closed. A Claude Code hook (session-track.sh in ~/Projects/claude-config)
+# records each interactive session in ~/.local/state/claude-sessions and forgets it
+# when you close it on purpose (/exit, Ctrl+D, /clear).
+#   cr           reopen all of them, each in its own tmux window (foot windows outside tmux)
+#   cr -l        list them
+#   cr --count   just the number (for the greeting)
+cr() {
+  emulate -L zsh
+  setopt null_glob
+  local state=${XDG_STATE_HOME:-$HOME/.local/state}/claude-sessions
+  local hub=$HOME/.local/share/claude-hub
+  local f id cwd transcript pid name n=0
+  local -a left
+
+  for f in $state/*.json; do
+    id=$(jq -r .id $f) cwd=$(jq -r .cwd $f) transcript=$(jq -r .transcript $f) pid=$(jq -r .pid $f)
+    [[ -f $transcript ]] || { rm -f $f; continue; }          # session deleted
+    [[ $(cat /proc/$pid/comm 2>/dev/null) == claude ]] && continue   # still running
+    left+=($f)
+  done
+
+  if [[ $1 == --count ]]; then print ${#left}; return; fi
+  if (( ${#left} == 0 )); then print "No Claude sessions to reopen."; return; fi
+
+  for f in $left; do
+    id=$(jq -r .id $f) cwd=$(jq -r .cwd $f) transcript=$(jq -r .transcript $f)
+    # The /rename name, else the start of the first prompt, else the short id.
+    name=$(command grep '"type":"custom-title"' $transcript | tail -1 | jq -r '.customTitle // empty' 2>/dev/null)
+    [[ -n $name ]] || name=$(command grep -m1 '"type":"user"' $transcript |
+      jq -r '.message.content | if type == "string" then . else (map(.text? // empty) | join(" ")) end' 2>/dev/null |
+      tr -s '[:space:]' ' ' | cut -c1-28)
+    [[ -n $name ]] || name=${id:0:8}
+
+    if [[ $1 == -l ]]; then
+      print -r -- "${name}  ·  ${cwd/#$HOME/~}  ·  $id"
+      continue
+    fi
+
+    local -a run=(command claude --resume $id)
+    [[ $cwd == $hub ]] && run+=(--add-dir $HOME)
+    # No need to delete the record: a resumed session keeps its id and records itself again.
+    if [[ -n $TMUX ]]; then
+      tmux new-window -n "${name//[^[:alnum:] ._-]/}" -c $cwd "${(j: :)${(@q)run}}; exec zsh"
+    else
+      foot --working-directory=$cwd ${run[2,-1]} &!
+    fi
+    (( n++ ))
+  done
+  [[ $1 == -l ]] || print "Reopened $n Claude session(s)."
+}

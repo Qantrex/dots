@@ -81,6 +81,10 @@ if [[ $- == *i* ]]; then
   echo -n "$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
   echo -n "${reset_color} - uptime: ${fg[green]}"
   echo "$(uptime -p | sed 's/up //')"
+  # Claude sessions left open by a shutdown or a closed terminal (see the cr function).
+  open_claude=$(cr --count 2>/dev/null)
+  (( open_claude > 0 )) && print -P "%F{244}${open_claude} Claude session(s) left open · cr reopens them%f"
+  unset open_claude
 fi
 
 #
