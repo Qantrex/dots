@@ -45,6 +45,8 @@ LINKS=(
   ".config/cmus/monochrome.theme|cmus"
   ".config/cmus/rc|cmus"
   ".config/fontconfig|fontconfig"
+  ".config/glow/glow.yml|glow"
+  ".config/nvim|nvim"
   ".config/zathura|zathura"
   ".local/share/nautilus/scripts|nautilus"
   ".config/pacman/makepkg.conf|makepkg"
