@@ -99,6 +99,15 @@ Island {
         }
     }
 
+    // Claude plan usage: only from 70 % of the 5-hour or the weekly window.
+    Flag {
+        visible: ClaudeUsage.high
+        icon: "󰊚"
+        tint: ClaudeUsage.peak >= 90 ? Theme.love : Theme.gold
+        label: Math.round(ClaudeUsage.peak) + "%"
+        tip: "Claude usage\n" + ClaudeUsage.tooltip
+    }
+
     Flag {
         id: mem
         visible: Sys.memHigh
