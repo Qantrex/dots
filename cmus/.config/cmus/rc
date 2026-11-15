@@ -1,0 +1,2 @@
+# Loaded after autosave on every start, so the theme wins over colours saved earlier.
+colorscheme monochrome

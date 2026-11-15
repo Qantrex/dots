@@ -42,6 +42,8 @@ LINKS=(
   ".config/mpv|mpv"
   ".config/fastfetch|fastfetch"
   ".config/imv|imv"
+  ".config/cmus/monochrome.theme|cmus"
+  ".config/cmus/rc|cmus"
   ".config/zathura|zathura"
   ".local/share/nautilus/scripts|nautilus"
   ".config/pacman/makepkg.conf|makepkg"
