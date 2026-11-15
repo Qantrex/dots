@@ -17,7 +17,7 @@ Rectangle {
 
     implicitHeight: 54
     radius: Theme.radiusSmall
-    color: on ? Theme.fg : (main.containsMouse ? Theme.hover : Qt.rgba(1, 1, 1, 0.05))
+    color: on ? Theme.fg : (main.containsMouse ? Theme.hover : Theme.surface)
     border.width: 1
     border.color: accent.a > 0 ? accent : (on ? Theme.fg : Theme.border)
     Behavior on color { ColorAnimation { duration: Theme.animFast } }
@@ -48,7 +48,7 @@ Rectangle {
                 text: root.subtitle
                 visible: text !== ""
                 size: Theme.fontSmall
-                color: root.on ? Qt.rgba(0, 0, 0, 0.65) : Theme.fgMuted
+                color: root.on ? Theme.inverseMuted : Theme.fgMuted
             }
         }
     }
@@ -64,7 +64,7 @@ Rectangle {
         Rectangle {
             anchors { fill: parent; margins: 4 }
             radius: Theme.radiusSmall - 2
-            color: chevron.containsMouse ? (root.on ? Qt.rgba(0, 0, 0, 0.1) : Theme.hover) : "transparent"
+            color: chevron.containsMouse ? (root.on ? Theme.inverseHover : Theme.hover) : "transparent"
         }
         Glyph {
             anchors.centerIn: parent

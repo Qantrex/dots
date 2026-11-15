@@ -201,8 +201,8 @@ PanelWindow {
         height: Math.min(content.implicitHeight + 2 * Theme.pad, win.height * 0.7)
         x: (parent.width - width) / 2
         y: parent.height * 0.18
-        radius: Theme.radius + 4
-        color: Qt.rgba(0, 0, 0, 0.88)
+        radius: Theme.radius
+        color: Theme.bgSolid
         border.width: 1
         border.color: Theme.borderStrong
         opacity: win.open ? 1 : 0
@@ -222,7 +222,7 @@ PanelWindow {
                 width: parent.width
                 height: 44
                 radius: Theme.radius
-                color: Qt.rgba(1, 1, 1, 0.06)
+                color: Theme.surface
                 border.width: 1
                 border.color: Theme.border
 
@@ -286,7 +286,7 @@ PanelWindow {
                         onClicked: { Shell.launcherMode = modelData.id; search.forceActiveFocus(); }
                         Rectangle {
                             anchors.fill: parent
-                            radius: 13
+                            radius: Theme.radiusSmall
                             color: tab.current ? Theme.fg : (tab.containsMouse ? Theme.hover : "transparent")
                         }
                         Label {
@@ -331,7 +331,7 @@ PanelWindow {
                     Rectangle {
                         anchors { fill: parent; margins: 2 }
                         radius: Theme.radiusSmall
-                        color: cell.current ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
+                        color: cell.current ? Theme.selected : "transparent"
                         border.width: cell.current && cell.modelData.wallpaper ? 2 : 0
                         border.color: Theme.fg
                     }

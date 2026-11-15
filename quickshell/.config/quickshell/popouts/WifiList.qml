@@ -47,7 +47,7 @@ Column {
                 width: parent.width
                 height: visible ? 36 : 0
                 radius: Theme.radiusSmall
-                color: Qt.rgba(1, 1, 1, 0.06)
+                color: Theme.surface
                 border.width: 1
                 border.color: pw.activeFocus ? Theme.borderStrong : Theme.border
 

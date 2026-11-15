@@ -16,7 +16,7 @@ MouseArea {
     Rectangle {
         anchors.fill: parent
         radius: width / 2
-        color: root.filled ? (root.containsMouse ? Qt.rgba(1, 1, 1, 0.85) : Theme.fg)
+        color: root.filled ? (root.containsMouse ? Theme.fillHover : Theme.fg)
                            : (root.pressed ? Theme.pressed : (root.containsMouse ? Theme.hover : "transparent"))
     }
     Glyph { anchors.centerIn: parent; text: root.icon; size: root.iconSize; color: root.iconColor }

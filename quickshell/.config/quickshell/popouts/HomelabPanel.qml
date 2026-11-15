@@ -90,7 +90,7 @@ Column {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: { Homelab.open("/"); Shell.close(); }
-        Rectangle { anchors.fill: parent; radius: Theme.radiusSmall; color: parent.containsMouse ? Theme.hover : Qt.rgba(1, 1, 1, 0.05); border.width: 1; border.color: Theme.border }
+        Rectangle { anchors.fill: parent; radius: Theme.radiusSmall; color: parent.containsMouse ? Theme.hover : Theme.surface; border.width: 1; border.color: Theme.border }
         Label { anchors.centerIn: parent; text: "Open the agent chat"; size: Theme.fontSmall; color: Theme.iris }
     }
 }

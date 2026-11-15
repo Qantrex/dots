@@ -85,7 +85,7 @@ Column {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: { Shell.close(); Quickshell.execDetached(["foot", "-e", "btop"]); }
-            Rectangle { anchors.fill: parent; radius: Theme.radiusSmall; color: btop.containsMouse ? Theme.hover : Qt.rgba(1, 1, 1, 0.05); border.width: 1; border.color: Theme.border }
+            Rectangle { anchors.fill: parent; radius: Theme.radiusSmall; color: btop.containsMouse ? Theme.hover : Theme.surface; border.width: 1; border.color: Theme.border }
             Label { id: bl; anchors.centerIn: parent; text: "btop"; size: Theme.fontSmall }
         }
     }

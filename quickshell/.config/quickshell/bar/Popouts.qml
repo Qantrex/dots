@@ -44,8 +44,8 @@ PanelWindow {
         // Never taller than the screen below the bar; longer panels scroll.
         readonly property real maxHeight: win.bar.screen.height - Theme.barHeight - Theme.gap - 30
         height: loader.item ? Math.min(maxHeight, loader.item.implicitHeight + 2 * Theme.pad) : 0
-        radius: Theme.radius + 2
-        color: Qt.rgba(0, 0, 0, 0.86)
+        radius: Theme.radius
+        color: Theme.bg
         border.width: 1
         border.color: Theme.border
         clip: true

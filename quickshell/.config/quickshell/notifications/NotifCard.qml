@@ -21,7 +21,7 @@ Rectangle {
     implicitWidth: 380
     implicitHeight: col.implicitHeight + 24
     radius: Theme.radius
-    color: popup ? Qt.rgba(0, 0, 0, 0.82) : Qt.rgba(1, 1, 1, 0.04)
+    color: popup ? Theme.bg : Theme.surface
     border.width: 1
     border.color: critical ? Theme.love : (popup ? Theme.borderStrong : Theme.border)
 

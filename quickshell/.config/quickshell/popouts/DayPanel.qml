@@ -106,7 +106,7 @@ Column {
                         text: parent.date.getDate()
                         size: Theme.fontSmall + 1
                         bold: parent.today
-                        color: parent.today ? Theme.inverse : (parent.inMonth ? (index % 7 >= 5 ? Theme.fgMuted : Theme.fg) : Qt.rgba(1, 1, 1, 0.18))
+                        color: parent.today ? Theme.inverse : (parent.inMonth ? (index % 7 >= 5 ? Theme.fgMuted : Theme.fg) : Theme.fgDim)
                     }
                     Rectangle {
                         visible: parent.due > 0 && parent.inMonth

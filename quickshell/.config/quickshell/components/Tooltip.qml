@@ -35,7 +35,7 @@ Item {
                 width: Math.min(label.implicitWidth, 360) + 20
                 height: label.implicitHeight + 12
                 radius: Theme.radiusSmall
-                color: Qt.rgba(0, 0, 0, 0.92)
+                color: Theme.bgSolid
                 border.width: 1
                 border.color: Theme.borderStrong
 

@@ -66,7 +66,7 @@ PanelWindow {
         id: box
         anchors.fill: parent
         radius: height / 2
-        color: Qt.rgba(0, 0, 0, 0.86)
+        color: Theme.bg
         border.width: 1
         border.color: Theme.border
         opacity: win.shown ? 1 : 0

@@ -30,7 +30,7 @@ Column {
             id: cover
             width: 96; height: 96
             radius: Theme.radiusSmall
-            color: Qt.rgba(1, 1, 1, 0.06)
+            color: Theme.surface
             clip: true
             Image {
                 id: art

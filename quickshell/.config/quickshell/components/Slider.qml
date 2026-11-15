@@ -21,7 +21,7 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: root.iconClicked()
-        Rectangle { anchors.fill: parent; radius: 15; color: iconBtn.containsMouse ? Theme.hover : "transparent" }
+        Rectangle { anchors.fill: parent; radius: Theme.radiusSmall; color: iconBtn.containsMouse ? Theme.hover : "transparent" }
         Glyph { anchors.centerIn: parent; text: root.icon; color: root.off ? Theme.fgDim : Theme.fg }
     }
 

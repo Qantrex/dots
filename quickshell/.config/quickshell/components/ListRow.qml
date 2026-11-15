@@ -21,7 +21,7 @@ MouseArea {
     Rectangle {
         anchors.fill: parent
         radius: Theme.radiusSmall
-        color: root.highlighted ? Qt.rgba(1, 1, 1, 0.08) : (root.containsMouse ? Theme.hover : "transparent")
+        color: root.highlighted ? Theme.selected : (root.containsMouse ? Theme.hover : "transparent")
     }
 
     Glyph {

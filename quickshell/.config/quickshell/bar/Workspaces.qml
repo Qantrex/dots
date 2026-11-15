@@ -47,7 +47,7 @@ Island {
             // The config is Lua, so dispatches are Lua too (`workspace e+1` fails).
             onWheel: w => Hyprland.dispatch('hl.dsp.focus({ workspace = "' + (w.angleDelta.y > 0 ? "e-1" : "e+1") + '" })')
 
-            Behavior on implicitWidth { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
+            Behavior on implicitWidth { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutQuint } }
 
             Tooltip {
                 target: ws
