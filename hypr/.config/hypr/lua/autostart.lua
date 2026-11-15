@@ -29,8 +29,9 @@ hl.on("hyprland.start", function()
     hl.exec_cmd(apps.ask .. " --preload")
 
     -- Wallpaper: start hyprpaper without a config file, wait for its socket, then
-    -- set the last picked wallpaper over IPC. (hyprpaper 0.8.4 ignored its config
-    -- file on this system, so the file was dropped on 2026-11-15.)
+    -- set the last picked wallpaper over IPC. hyprpaper.conf only turns off the
+    -- splash text (on by default since hyprpaper 0.8); the old preload/wallpaper
+    -- lines there were ignored, so the picture is set here.
     hl.exec_cmd(string.format([[
         hyprpaper &
         for _ in $(seq 1 50); do
