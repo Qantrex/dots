@@ -403,7 +403,7 @@ syntax highlighting. It is never used as a full-app theme.
 | Qt / KDE | `qt*ct/.../colors/monochrome.conf`, `kde/.config/kdeglobals` |
 | micro | `micro/.../colorschemes/monochrome.micro` |
 | Terminal | foot, Iosevka Term 13 (`ttf-iosevkaterm-nerd`); tmux bar in `tmux/.tmux.conf` |
-| Lock screen | `hypr/.config/hypr/hyprlock.conf`: pure black, a big clock, the date, one thin password field |
+| Lock screen | `hypr/.config/hypr/hyprlock.conf`: the dimmed ASCII "Creation of Adam" wallpaper, the clock above, and the password typed into the gap between the two fingers |
 | Files | yazi: `yazi/.config/yazi/theme.toml` (generated); Nautilus: libadwaita, so `gtk-4.0/gtk.css` |
 | btop / cava / htop | `btop/.../themes/monochrome.theme`, cava gradient in `cava/.../config`; htop uses its Monochromatic scheme |
 | Viewers | `mpv.conf`, `imv/config`, `zathurarc` (PDFs recoloured white-on-black, Ctrl+R for paper) |
