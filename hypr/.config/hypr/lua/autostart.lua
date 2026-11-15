@@ -28,13 +28,9 @@ hl.on("hyprland.start", function()
     -- The quick-ask Claude window (SUPER+D) starts hidden, so it opens instantly.
     hl.exec_cmd(apps.ask .. " --preload")
 
-    -- Wallpaper.
-    --
-    -- hyprpaper 0.8.4 does not read its config file on this system -- even a
-    -- deliberately invalid key in hyprpaper.conf produces no error, and
-    -- `preload`/`wallpaper` lines there are never applied. Setting it over IPC
-    -- does work, so start hyprpaper, wait for its socket, then set it.
-    -- (hyprpaper.conf is kept for when that is fixed upstream.)
+    -- Wallpaper: start hyprpaper without a config file, wait for its socket, then
+    -- set the last picked wallpaper over IPC. (hyprpaper 0.8.4 ignored its config
+    -- file on this system, so the file was dropped on 2026-11-15.)
     hl.exec_cmd(string.format([[
         hyprpaper &
         for _ in $(seq 1 50); do

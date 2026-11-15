@@ -77,9 +77,9 @@ bindkey '^H' backward-delete-word
 # Greeting - Runs only in interactive shells
 if [[ $- == *i* ]]; then
   autoload -U colors && colors
-  echo -n "${fg[red]}🌹 $USER${fg[magenta]}@bauarch ${reset_color}on ${fg[cyan]}"
+  echo -n "${fg[white]}$USER${reset_color}@bauarch on "
   echo -n "$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
-  echo -n "${reset_color} - uptime: ${fg[green]}"
+  echo -n " - uptime: "
   echo "$(uptime -p | sed 's/up //')"
   # Claude sessions left open by a shutdown or a closed terminal (see the cr function).
   open_claude=$(cr --count 2>/dev/null)
