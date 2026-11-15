@@ -1,9 +1,13 @@
 # File: ~/.config/zsh/functions/claude
-# Claude Code always starts in ~, whatever folder the shell is in: the global rules
-# and the one memory folder load, and Claude reads an area's own CLAUDE.md when it
-# works there. `claude --resume` then lists every session in one place.
-# `claude-here` starts it in the current folder instead. Scripts that call the
-# binary (wh, llm-eval) are not affected: this is an interactive-shell function.
+# Claude Code always starts in one place, whatever folder the shell is in, with
+# all of ~ added as a working directory. It can't start in ~ itself: Claude Code
+# never saves trust for the home directory, so it would ask on every launch.
+# The hub folder ~/.local/share/claude-hub is trusted once, and `claude --resume`
+# lists every session in one place. Memory goes to one folder (autoMemoryDirectory
+# in ~/.claude/settings.json). `claude-here` starts in the current folder instead.
+# Scripts that call the binary (wh, llm-eval) are not affected.
 claude() {
-  ( cd ~ && command claude "$@" )
+  local hub=~/.local/share/claude-hub
+  mkdir -p "$hub"
+  ( cd "$hub" && command claude --add-dir ~ "$@" )
 }
