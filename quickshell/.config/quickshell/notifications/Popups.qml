@@ -16,7 +16,7 @@ PanelWindow {
     exclusionMode: ExclusionMode.Normal
     exclusiveZone: 0
     margins { top: 6; right: 15 }
-    implicitWidth: 380
+    implicitWidth: 440
     implicitHeight: Math.max(1, col.implicitHeight)
 
     WlrLayershell.namespace: "qs-notifications"

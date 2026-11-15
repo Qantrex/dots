@@ -18,8 +18,8 @@ Rectangle {
     readonly property var buttons: notif ? notif.actions.filter(a => a.identifier !== "default") : []
     readonly property string icon: notif ? Notifs.icon(notif) : ""
 
-    implicitWidth: 380
-    implicitHeight: col.implicitHeight + 24
+    implicitWidth: 440
+    implicitHeight: col.implicitHeight + 32
     radius: Theme.radius
     color: popup ? Theme.bg : Theme.surface
     border.width: 1
@@ -44,14 +44,14 @@ Rectangle {
 
     Row {
         id: row
-        anchors { fill: parent; margins: 12 }
-        spacing: 12
+        anchors { fill: parent; margins: 16 }
+        spacing: 14
 
         Item {
             id: iconBox
             visible: root.icon !== ""
-            width: visible ? 36 : 0
-            height: 36
+            width: visible ? 40 : 0
+            height: 40
             IconImage {
                 anchors.fill: parent
                 source: root.icon
@@ -62,15 +62,15 @@ Rectangle {
         Column {
             id: col
             width: row.width - iconBox.width - (iconBox.visible ? row.spacing : 0)
-            spacing: 4
+            spacing: 6
 
             Item {
                 width: parent.width
-                height: 16
+                height: 18
                 Label {
                     width: parent.width - closeBtn.width - 4
                     text: (root.notif ? root.notif.appName || "" : "")
-                    size: 10
+                    size: Theme.fontSmall
                     dim: true
                     bold: true
                     font.letterSpacing: 0.8
@@ -88,6 +88,7 @@ Rectangle {
                 width: parent.width
                 text: root.notif ? root.notif.summary : ""
                 bold: true
+                size: Theme.fontLarge - 1
                 wrapMode: Text.WordWrap
                 maximumLineCount: 2
                 color: root.critical ? Theme.love : Theme.fg
@@ -100,9 +101,9 @@ Rectangle {
                 linkColor: Theme.iris
                 onLinkActivated: l => Qt.openUrlExternally(l)
                 muted: true
-                size: Theme.fontSmall + 1
+                size: Theme.fontSize
                 wrapMode: Text.WordWrap
-                maximumLineCount: root.popup ? 4 : 8
+                maximumLineCount: root.popup ? 6 : 8
             }
             Row {
                 visible: root.buttons.length > 0
@@ -113,12 +114,12 @@ Rectangle {
                     delegate: MouseArea {
                         id: btn
                         required property var modelData
-                        width: bt.implicitWidth + 20; height: 26
+                        width: bt.implicitWidth + 24; height: 30
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: { modelData.invoke(); }
                         Rectangle { anchors.fill: parent; radius: Theme.radiusSmall; color: btn.containsMouse ? Theme.pressed : Theme.hover }
-                        Label { id: bt; anchors.centerIn: parent; text: btn.modelData.text; size: Theme.fontSmall }
+                        Label { id: bt; anchors.centerIn: parent; text: btn.modelData.text }
                     }
                 }
             }
