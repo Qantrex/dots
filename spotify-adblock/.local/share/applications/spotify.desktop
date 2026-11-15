@@ -4,7 +4,7 @@ Name=Spotify
 GenericName=Music Player
 Icon=spotify-client
 TryExec=spotify
-Exec=env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto %U
+Exec=env LD_PRELOAD=/usr/lib/spotify-adblock.so spotify --enable-features=UseOzonePlatform,WaylandWindowDecorations --ozone-platform=wayland %U
 Terminal=false
 MimeType=x-scheme-handler/spotify;
 Categories=Audio;Music;Player;AudioVideo;
