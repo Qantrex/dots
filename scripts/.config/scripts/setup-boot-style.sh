@@ -4,6 +4,7 @@
 #   sudo ~/.config/scripts/setup-boot-style.sh             everything below
 #   sudo ~/.config/scripts/setup-boot-style.sh --boot      only 1-4
 #   sudo ~/.config/scripts/setup-boot-style.sh --greeter   only 5
+#   sudo ~/.config/scripts/setup-boot-style.sh --palette   only the console colours (3), no initramfs rebuild
 #   sudo ~/.config/scripts/setup-boot-style.sh --dry-run   show, change nothing
 #   sudo ~/.config/scripts/setup-boot-style.sh --undo      revert 1-4
 #
@@ -44,16 +45,19 @@ STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
 
 #                0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15
 #              blk red grn yel blu mag cyn wht  -- bright --
-readonly VT_R=(0 235 176 246 112 196 144 208 80 255 224 255 160 238 192 255)
-readonly VT_G=(0 111 176 193 112 167 144 208 80 152 224 235 160 208 192 255)
-readonly VT_B=(0 146 176 119 112 231 144 208 80 186 224 158 160 255 192 255)
+# Same greys as foot.ini (2026-11-15: every text colour readable at 4.9:1 or better), except
+# slot 0, which is the console background here and stays pure black.
+readonly VT_R=(0 235 192 246 138 196 163 208 122 255 224 255 168 238 200 255)
+readonly VT_G=(0 111 192 193 138 167 163 208 122 152 224 235 168 208 200 255)
+readonly VT_B=(0 146 192 119 138 231 163 208 122 186 224 158 168 255 200 255)
 
-DRY=0 DO_BOOT=1 DO_GREETER=1 UNDO=0
+DRY=0 DO_BOOT=1 DO_GREETER=1 UNDO=0 PALETTE_ONLY=0
 for arg in "$@"; do
     case $arg in
         --dry-run) DRY=1 ;;
         --boot)    DO_GREETER=0 ;;
         --greeter) DO_BOOT=0 ;;
+        --palette) PALETTE_ONLY=1 DO_BOOT=0 DO_GREETER=0 ;;
         --undo)    UNDO=1 DO_GREETER=0 ;;
         -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
@@ -91,6 +95,18 @@ set_entry_options() {
         sed -i -E "0,/^options .*/s||options $(sed 's/[&|]/\\&/g' <<<"$opts")|" "$entry"
 }
 
+# splash (not on fallback entries) and the console palette on every boot entry.
+apply_entries() {
+    for e in "$ENTRIES"/*.conf; do
+        [[ -f $e ]] || continue
+        if grep -qiE 'fallback' <<<"$(basename "$e") $(grep -m1 '^title' "$e")"; then
+            set_entry_options "$e" "$palette_opts"
+        else
+            set_entry_options "$e" "splash $palette_opts"
+        fi
+    done
+}
+
 hooks_line() { grep -E '^HOOKS=' "$MKCONF"; }
 
 rebuild_initramfs() {
@@ -116,6 +132,15 @@ if (( UNDO )); then
 fi
 
 # ----------------------------------------------------------------- 1. theme
+if (( PALETTE_ONLY )); then
+    step "Boot entries (console palette only)"
+    compgen -G "$ENTRIES/*.conf" >/dev/null || { warn "no systemd-boot entries in $ENTRIES"; exit 1; }
+    apply_entries
+    say ""
+    say "Done. The new console colours show from the next boot."
+    exit 0
+fi
+
 if (( DO_BOOT )); then
     step "Plymouth theme"
     command -v plymouth-set-default-theme >/dev/null || { echo "plymouth is not installed: pacman -S plymouth" >&2; exit 1; }
@@ -168,14 +193,7 @@ EOF
         warn "no systemd-boot entries in $ENTRIES. Add this to the kernel command line by hand:"
         warn "splash $palette_opts"
     fi
-    for e in "$ENTRIES"/*.conf; do
-        [[ -f $e ]] || continue
-        if grep -qiE 'fallback' <<<"$(basename "$e") $(grep -m1 '^title' "$e")"; then
-            set_entry_options "$e" "$palette_opts"
-        else
-            set_entry_options "$e" "splash $palette_opts"
-        fi
-    done
+    apply_entries
 
     # ------------------------------------------------------ 4. console font
     step "Console font"
