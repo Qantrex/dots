@@ -37,6 +37,8 @@ return {
     -- can send it to its workspace without catching every other terminal.
     mail        = scoped("aerc", "foot --app-id=aerc aerc"),
     mailHelp    = "~/.config/scripts/aerc-cheatsheet.sh",
+    -- Quick-ask Claude window (Sonnet) on a special workspace; see the script.
+    ask         = "~/.config/scripts/claude-ask.sh",
     chat        = scoped("vesktop", "vesktop --enable-features=WaylandWindowDecorations --ozone-platform-hint=auto"),
 
     menu        = launcher("apps"),

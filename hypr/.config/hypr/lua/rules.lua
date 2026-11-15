@@ -55,6 +55,18 @@ hl.window_rule({
     workspace = "8 silent",
 })
 
+-- Quick-ask Claude (SUPER+D, ~/.config/scripts/claude-ask.sh): floating and
+-- centred on its own special workspace, so SUPER+D can hide it and bring it back.
+hl.window_rule({
+    name  = "claude-ask",
+    match = { class = "^(claude-ask)$" },
+
+    workspace = "special:ask silent",
+    float     = true,
+    size      = "900 600",
+    center    = true,
+})
+
 -- The aerc cheatsheet (SUPER+H) tiles next to aerc, and takes you there.
 hl.window_rule({
     name  = "mail-cheatsheet-to-workspace-8",

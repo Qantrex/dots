@@ -19,6 +19,7 @@ hl.bind(mod .. " + R", hl.dsp.exec_cmd(apps.menu),        { description = "App l
 hl.bind(mod .. " + C", hl.dsp.exec_cmd(apps.clipboard),   { description = "Clipboard history" })
 hl.bind(mod .. " + L", hl.dsp.exec_cmd(apps.lock),        { description = "Lock screen" })
 hl.bind(mod .. " + H", hl.dsp.exec_cmd(apps.mailHelp),    { description = "Toggle aerc cheatsheet" })
+hl.bind(mod .. " + D", hl.dsp.exec_cmd(apps.ask),         { description = "Quick ask (Claude)" })
 
 hl.bind(mod .. " + SHIFT + T", hl.dsp.exec_cmd(apps.typing),    { description = "Typing test (homerow)" })
 hl.bind(mod .. " + SHIFT + E", hl.dsp.exec_cmd(apps.emoji),     { description = "Emoji picker" })
