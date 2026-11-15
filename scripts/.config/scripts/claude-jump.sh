@@ -13,7 +13,7 @@ foot_of() {
     local p=$1
     while [[ -n $p && $p != 1 && $p != 0 ]]; do
         [[ $(cat /proc/"$p"/comm 2>/dev/null) == foot ]] && { echo "$p"; return; }
-        p=$(awk '{print $4}' /proc/"$p"/stat 2>/dev/null)
+        p=$(awk '/^PPid:/{print $2}' /proc/"$p"/status 2>/dev/null)
     done
 }
 
