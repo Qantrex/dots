@@ -4,6 +4,7 @@
 # records each interactive session in ~/.local/state/claude-sessions and forgets it
 # when you close it on purpose (/exit, Ctrl+D, /clear).
 #   cr           reopen all of them, each in its own tmux window (foot windows outside tmux)
+#   cr <name>    reopen only the ones whose name (or id) contains <name>, e.g. `cr system-plan`
 #   cr -l        list them
 #   cr --count   just the number (for the greeting)
 # Sessions that were started in ~ itself reopen in the hub folder instead: Claude Code
@@ -18,6 +19,8 @@ cr() {
   local hub=$HOME/.local/share/claude-hub
   local f id cwd transcript pid name n=0
   local -a left found
+  local filter=""
+  [[ -n $1 && $1 != -* ]] && filter=$1
 
   for f in $state/*.json; do
     id=$(jq -r .id $f) pid=$(jq -r .pid $f)
@@ -42,6 +45,7 @@ cr() {
       jq -r '.message.content | if type == "string" then . else (map(.text? // empty) | join(" ")) end' 2>/dev/null |
       tr -s '[:space:]' ' ' | cut -c1-28)
     [[ -n $name ]] || name=${id:0:8}
+    [[ -z $filter || ${(L)name} == *${(L)filter}* || $id == ${filter}* ]] || continue
 
     if [[ $1 == -l ]]; then
       print -r -- "${name}  ·  ${cwd/#$HOME/~}  ·  $id"
@@ -59,4 +63,5 @@ cr() {
     (( n++ ))
   done
   [[ $1 == -l ]] || print "Reopened $n Claude session(s)."
+  [[ -n $filter && $n == 0 ]] && print "None matches \"$filter\" (cr -l lists them)."
 }
