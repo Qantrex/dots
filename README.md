@@ -212,7 +212,9 @@ and every click opens something you can act in instead of another program.
   previous/next.
 - **Right, exceptions** (each only while it applies): mic / camera / screen share
   in use (love), homelab problems (love) or approvals waiting (gold), vault open,
-  touchpad off, power profile above Quiet, local AI on, RAM over 85 % (gold),
+  touchpad off, power profile above Quiet, local AI on, Claude sessions waiting for
+  you (click: the oldest, right-click: dismiss; `claude-jump.sh`, fed by the session
+  hook in claude-config), Claude usage over 70 %, RAM over 85 % (gold),
   caffeine, Do Not Disturb, unread notifications, no or limited network.
 - **Right, status:** network, Bluetooth (only with a device connected), volume,
   battery (percentage only on battery; gold under 30 %, love under 15 %). One
