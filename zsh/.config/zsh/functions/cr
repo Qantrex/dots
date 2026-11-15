@@ -6,22 +6,10 @@
 #   cr           reopen all of them, each in its own tmux window (foot windows outside tmux)
 #   cr -l        list them
 #   cr --count   just the number (for the greeting)
-# Sessions that were started in ~ itself are moved into the hub folder before they reopen:
-# Claude Code never saves trust for the home folder, so they would ask on every resume.
-
-# Move one stopped session (record file $1) from ~'s project folder into the hub's.
-_cr_move_to_hub() {
-  emulate -L zsh
-  local f=$1 hub=$HOME/.local/share/claude-hub
-  local id=$(jq -r .id $f) transcript=$(jq -r .transcript $f)
-  local from=${transcript:h} to=$HOME/.claude/projects/${${hub//\//-}//./-}
-  mkdir -p $to || return 1
-  mv $transcript $to/ || return 1
-  if [[ -d $from/$id && ! -L $from/$id ]]; then
-    mv $from/$id $to/ && ln -s $to/$id $from/$id   # old absolute paths in the transcript keep working
-  fi
-  jq --arg c $hub --arg t $to/$id.jsonl '.cwd = $c | .transcript = $t' $f > $f.tmp && mv $f.tmp $f
-}
+# Sessions that were started in ~ itself reopen in the hub folder instead: Claude Code
+# never saves trust for the home folder, so they would ask on every resume. That needs no
+# file moves: `claude --resume <id>` finds the transcript in any project folder and keeps
+# writing to it there.
 
 cr() {
   emulate -L zsh
@@ -29,11 +17,13 @@ cr() {
   local state=${XDG_STATE_HOME:-$HOME/.local/state}/claude-sessions
   local hub=$HOME/.local/share/claude-hub
   local f id cwd transcript pid name n=0
-  local -a left
+  local -a left found
 
   for f in $state/*.json; do
-    id=$(jq -r .id $f) cwd=$(jq -r .cwd $f) transcript=$(jq -r .transcript $f) pid=$(jq -r .pid $f)
-    [[ -f $transcript ]] || { rm -f $f; continue; }          # session deleted
+    id=$(jq -r .id $f) pid=$(jq -r .pid $f)
+    # Look the transcript up by id: the stored path can be stale after a resume elsewhere.
+    found=($HOME/.claude/projects/*/$id.jsonl)
+    (( ${#found} )) || { rm -f $f; continue; }                       # session deleted
     [[ $(cat /proc/$pid/comm 2>/dev/null) == claude ]] && continue   # still running
     left+=($f)
   done
@@ -42,7 +32,9 @@ cr() {
   if (( ${#left} == 0 )); then print "No Claude sessions to reopen."; return; fi
 
   for f in $left; do
-    id=$(jq -r .id $f) cwd=$(jq -r .cwd $f) transcript=$(jq -r .transcript $f)
+    id=$(jq -r .id $f) cwd=$(jq -r .cwd $f)
+    found=($HOME/.claude/projects/*/$id.jsonl) transcript=${found[1]}
+    [[ $cwd == $HOME || ! -d $cwd ]] && cwd=$hub
     # The /rename name, else the start of the first prompt, else the short id.
     name=$(command grep '"type":"custom-title"' $transcript | tail -1 | jq -r '.customTitle // empty' 2>/dev/null)
     [[ -n $name ]] || name=$(command grep -m1 '"type":"user"' $transcript |
@@ -53,11 +45,6 @@ cr() {
     if [[ $1 == -l ]]; then
       print -r -- "${name}  ·  ${cwd/#$HOME/~}  ·  $id"
       continue
-    fi
-
-    if [[ $cwd == $HOME ]]; then
-      _cr_move_to_hub $f || { print -u2 "cr: could not move $id into the hub, reopening it in ~"; }
-      cwd=$(jq -r .cwd $f)
     fi
 
     local -a run=(command claude --resume $id)
