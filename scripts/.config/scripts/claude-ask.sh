@@ -13,6 +13,12 @@
 open() { hyprctl clients -j | jq -e 'any(.[]; .class == "claude-ask")' >/dev/null; }
 
 start() {
+    # Started from inside another Claude session (a test, a `!` command), the
+    # window would inherit that session's variables, e.g. the child-session
+    # marker that turns transcript saving off. Never pass them on.
+    local v
+    for v in $(compgen -e | grep -E '^(CLAUDE|AI_AGENT)'); do unset "$v"; done
+
     # The loop restarts Claude after /exit; the sleep keeps a failing start
     # (no network, logged out) from spinning.
     foot --app-id=claude-ask --title="claude ask" \
