@@ -5,7 +5,9 @@ import qs.services
 import qs.components
 
 // Occupied workspaces of this screen, each shown as the icons of its apps
-// (up to three). The active one is a white pill; urgent ones pulse.
+// (up to three). The active one sits on a light grey pill with its icons at full
+// strength, the others are dimmed; urgent ones pulse. (A white pill turned the icons
+// into black silhouettes, and filled icons like foot's became plain squares.)
 Island {
     id: root
     required property var bar
@@ -60,7 +62,7 @@ Island {
                 id: pill
                 anchors.fill: parent
                 radius: Theme.radiusSmall
-                color: ws.active ? Theme.fg : (ws.containsMouse ? Theme.hover : "transparent")
+                color: ws.active ? Theme.pressed : (ws.containsMouse ? Theme.hover : "transparent")
                 border.width: ws.modelData.urgent && !ws.active ? 1 : 0
                 border.color: Theme.fg
                 Behavior on color { ColorAnimation { duration: Theme.anim } }
@@ -93,15 +95,15 @@ Island {
                             anchors.fill: parent
                             visible: parent.iconPath !== ""
                             source: parent.iconPath
-                            tint: ws.active ? Theme.inverse : "transparent"
-                            brightness: ws.containsMouse ? 0.3 : 0.1
+                            opacity: ws.active ? 1 : (ws.containsMouse ? 0.85 : 0.55)
+                            brightness: ws.active ? 0.25 : 0.1
                         }
                         Glyph {
                             anchors.centerIn: parent
                             visible: parent.iconPath === ""
                             text: "󰣆"
                             size: 14
-                            color: ws.active ? Theme.inverse : Theme.fgMuted
+                            color: ws.active ? Theme.fg : Theme.fgMuted
                         }
                     }
                 }
@@ -110,7 +112,7 @@ Island {
                     visible: ws.apps.length === 0
                     text: ws.modelData.name
                     bold: ws.active
-                    color: ws.active ? Theme.inverse : Theme.fgMuted
+                    color: ws.active ? Theme.fg : Theme.fgMuted
                 }
             }
         }
