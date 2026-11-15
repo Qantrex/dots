@@ -25,6 +25,9 @@ hl.on("hyprland.start", function()
     -- warnings, all in one Quickshell process.
     hl.exec_cmd(apps.shell)
 
+    -- The quick-ask Claude window (SUPER+D) starts hidden, so it opens instantly.
+    hl.exec_cmd(apps.ask .. " --preload")
+
     -- Wallpaper.
     --
     -- hyprpaper 0.8.4 does not read its config file on this system -- even a
