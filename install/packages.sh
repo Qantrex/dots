@@ -34,7 +34,7 @@ PKG_FONTS=(ttf-iosevkaterm-nerd ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols n
 # Themes referenced by name from gtk/qt/hypr configs.
 PKG_THEME=(
   qt5ct qt6ct papirus-icon-theme breeze-icons
-  rose-pine-hyprcursor rose-pine-cursor
+  adwaita-cursors
 )
 
 PKG_APPS=(foot firefox nautilus yazi imv zathura zathura-pdf-mupdf ffmpegthumbnailer resvg mpv fastfetch vesktop spotify spotify-adblock spicetify-cli)

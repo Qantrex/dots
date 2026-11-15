@@ -62,7 +62,7 @@ hl.on("hyprland.start", function()
     -- Cursor theme for GTK applications. `cursor.sync_gsettings_theme` is on
     -- by default and usually covers this, but setting it explicitly costs
     -- nothing and survives other tools overwriting the value.
-    hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-theme 'BreezeX-RosePine-Linux'")
+    hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-theme 'Adwaita'")
     hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-size 24")
 
     -- Dark everywhere. On Wayland, GTK apps take their theme from gsettings
