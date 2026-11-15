@@ -10,11 +10,10 @@ hl.config({
 
         col = {
             active_border   = { colors = { "rgba(848484aa)", "rgba(f9f9f9aa)" }, angle = 45 },
-            -- Was rgba(000000aa): pure black, invisible against a dark
-            -- wallpaper, so unfocused tiles had no discernible edge. A faint
-            -- white keeps the layout readable without competing with the
-            -- focused window's gradient and glow.
-            inactive_border = "rgba(ffffff14)",
+            -- About #2e2e2e on black: unfocused tiles keep a visible edge (the old
+            -- ffffff14 came out near #141414, which the eye couldn't find) without
+            -- competing with the focused window's gradient and glow.
+            inactive_border = "rgba(ffffff2e)",
         },
 
         -- Resize windows by dragging borders/gaps.
@@ -50,10 +49,11 @@ hl.config({
             color_inactive = "rgba(00000000)",
         },
 
-        -- Larger and softer than the old range = 4, which was tight enough to
-        -- look like a border artifact rather than a shadow.
+        -- Off: a black shadow can't be seen on true black, and it costs GPU on
+        -- battery. The focused window's glow gives the depth. Settings kept for
+        -- a lighter wallpaper.
         shadow = {
-            enabled        = true,
+            enabled        = false,
             range          = 20,
             render_power   = 3,
             color          = "rgba(000000aa)",
@@ -122,7 +122,7 @@ hl.curve("quick",          { type = "bezier", points = { { 0.15, 0 },    { 0.1, 
 
 hl.animation({ leaf = "global",        enabled = true, speed = 10,   bezier = "default" })
 hl.animation({ leaf = "border",        enabled = true, speed = 5.39, bezier = "easeOutQuint" })
-hl.animation({ leaf = "windows",       enabled = true, speed = 4.79, bezier = "easeOutQuint" })
+hl.animation({ leaf = "windows",       enabled = true, speed = 3.5,  bezier = "easeOutQuint" })
 hl.animation({ leaf = "windowsIn",     enabled = true, speed = 4.1,  bezier = "easeOutQuint", style = "popin 87%" })
 hl.animation({ leaf = "windowsOut",    enabled = true, speed = 1.49, bezier = "linear",       style = "popin 87%" })
 hl.animation({ leaf = "fadeIn",        enabled = true, speed = 1.73, bezier = "almostLinear" })
