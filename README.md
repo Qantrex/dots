@@ -182,6 +182,7 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `1`–`0` | Workspace (`+SHIFT` moves the window there) |
 | `S` | Scratchpad |
 | `ALT+F` | Maximize |
+| `D` / `SHIFT+D` | Quick ask (Claude, Sonnet) / a fresh quick ask about the clipboard, text or image (`claude-ask.sh`) |
 | `CTRL+S` | Screenshot region → file + clipboard |
 | `SHIFT+F` | Screenshot region (flameshot) → Claude Code → answer as a faint bottom-right overlay (`~/.config/scripts/claude-screen/`) |
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
