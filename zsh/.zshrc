@@ -91,6 +91,9 @@ fi
 # -----------------------------------------------------------------------------
 # PROMPT (Must be loaded at the end)
 # -----------------------------------------------------------------------------
+# Monochrome colours for ls, completion, highlighting, fzf, bat, less.
+source ~/.config/zsh/colors.zsh
+
 eval "$(starship init zsh)"
 export PATH="$HOME/.local/bin:$PATH"
 export EDITOR=micro VISUAL=micro
