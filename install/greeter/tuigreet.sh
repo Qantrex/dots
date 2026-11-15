@@ -6,21 +6,13 @@
 #
 # Colours are the 16 console colour names. On the kernel console they come
 # from the vt.default_* palette on the kernel command line (also set by
-# setup-boot-style.sh): gray = #d0d0d0, darkgray = #505050, white = #ffffff.
+# setup-boot-style.sh): gray = #d0d0d0, darkgray = #7a7a7a, white = #ffffff.
 #
-# Background: matrix rain where a real font renders it (the Hyprland greeter);
-# DOOM fire in greys on the kernel console, whose font has block characters
-# but no katakana. F4 switches it off.
+# Plain black around the box, no animated background: the DOOM fire and matrix
+# rain were removed on 2026-11-15 as decoration that imitated nothing real.
 
 session=Hyprland
 [ -x /usr/bin/start-hyprland ] && session=start-hyprland
-
-if [ -n "$WAYLAND_DISPLAY" ]; then
-    set -- --background matrix --background-fps 24 --matrix-colors white,gray,darkgray "$@"
-else
-    set -- --background doom --background-fps 20 --doom-colors black,darkgray,darkgray \
-        --doom-height 3 --doom-spread 3 "$@"
-fi
 
 exec tuigreet \
     --cmd "$session" \

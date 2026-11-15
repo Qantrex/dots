@@ -30,5 +30,5 @@ hl.config({
 -- tuigreet's flags live in /etc/greetd/tuigreet.sh (install/greeter/tuigreet.sh);
 -- the -o colours are the kernel console palette, so both machines look alike.
 hl.on("hyprland.start", function()
-    hl.exec_cmd([[foot -c /dev/null -F -o "font=IosevkaTerm Nerd Font Mono:size=16" -o colors-dark.background=000000 -o colors-dark.foreground=d0d0d0 -o colors-dark.regular0=000000 -o colors-dark.regular7=d0d0d0 -o colors-dark.bright0=505050 -o colors-dark.bright7=ffffff sh -c "/etc/greetd/tuigreet.sh; pkill -x -u greeter Hyprland"]])
+    hl.exec_cmd([[foot -c /dev/null -F -o "font=IosevkaTerm Nerd Font Mono:size=16" -o colors-dark.background=000000 -o colors-dark.foreground=d0d0d0 -o colors-dark.regular0=000000 -o colors-dark.regular7=d0d0d0 -o colors-dark.bright0=7a7a7a -o colors-dark.bright7=ffffff sh -c "/etc/greetd/tuigreet.sh; pkill -x -u greeter Hyprland"]])
 end)
