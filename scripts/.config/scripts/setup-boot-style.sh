@@ -1,28 +1,26 @@
 #!/usr/bin/env bash
-# Boot and login in the desktop's style: black, greys, Iosevka Term.
+# Boot and login in the desktop's style: black, greys, plain text.
 #
 #   sudo ~/.config/scripts/setup-boot-style.sh             everything below
-#   sudo ~/.config/scripts/setup-boot-style.sh --boot      only 1-4
-#   sudo ~/.config/scripts/setup-boot-style.sh --greeter   only 5
-#   sudo ~/.config/scripts/setup-boot-style.sh --palette   only the console colours (3), no initramfs rebuild
+#   sudo ~/.config/scripts/setup-boot-style.sh --boot      only 1-3
+#   sudo ~/.config/scripts/setup-boot-style.sh --greeter   only 4
+#   sudo ~/.config/scripts/setup-boot-style.sh --palette   only the console colours (2), no initramfs rebuild
 #   sudo ~/.config/scripts/setup-boot-style.sh --dry-run   show, change nothing
-#   sudo ~/.config/scripts/setup-boot-style.sh --undo      revert 1-4
+#   sudo ~/.config/scripts/setup-boot-style.sh --undo      revert 1-3
 #
-# Needs: plymouth, ttf-iosevkaterm-nerd, terminus-font, greetd-tuigreet.
+# Needs: terminus-font, greetd-tuigreet.
 # Safe to re-run; every file it edits is copied to *.bak-<date> first.
 #
-# 1. Plymouth theme "terminal" (install/plymouth/terminal): systemd's units
-#    scroll by as "[  ok  ] started NetworkManager.service" lines, real ones.
-#    DeviceScale=1 so the script plugin draws text at native resolution.
-#    Costs ~0.5 s of boot (optimize-boot.sh had removed plymouth for that).
-# 2. "plymouth" in the mkinitcpio HOOKS, "splash" on the boot entries (not on
-#    the fallback entry, which keeps the raw log for when something breaks).
-# 3. Console palette on the kernel command line (vt.default_red/grn/blu): the
+# 1. No boot splash: the plain console with the quiet flags is black for a second
+#    or two, then the login. (Until 2026-11-15 this installed a plymouth theme that
+#    animated a fake boot log; this step removes it: the "plymouth" hook, "splash"
+#    on the boot entries and the theme files.)
+# 2. Console palette on the kernel command line (vt.default_red/grn/blu): the
 #    16 colours become black, greys, white, and Rose Pine love/gold/iris for
 #    red/yellow/magenta. Every TTY uses it, tuigreet included.
-# 4. Console font Terminus 32 px bold (ter-v32b), readable on the 2880x1800
+# 3. Console font Terminus 32 px bold (ter-v32b), readable on the 2880x1800
 #    panel instead of 8x16 dots. 180x56 characters there.
-# 5. greetd runs /etc/greetd/tuigreet.sh (install/greeter/tuigreet.sh) as the
+# 4. greetd runs /etc/greetd/tuigreet.sh (install/greeter/tuigreet.sh) as the
 #    greeter user. On a host with install/greeter/<host>.lua it runs inside
 #    that small Hyprland instead, like before.
 #
@@ -33,7 +31,6 @@ set -euo pipefail
 
 readonly HERE="$(dirname "$(readlink -f "$0")")"
 readonly DOTFILES="$(cd "$HERE/../../.." && pwd)"
-readonly THEME_SRC="$DOTFILES/install/plymouth/terminal"
 readonly THEME_DST=/usr/share/plymouth/themes/terminal
 readonly PLYCONF=/etc/plymouth/plymouthd.conf
 readonly MKCONF=/etc/mkinitcpio.conf
@@ -95,15 +92,11 @@ set_entry_options() {
         sed -i -E "0,/^options .*/s||options $(sed 's/[&|]/\\&/g' <<<"$opts")|" "$entry"
 }
 
-# splash (not on fallback entries) and the console palette on every boot entry.
+# The console palette on every boot entry; set_entry_options drops "splash" on the way.
 apply_entries() {
     for e in "$ENTRIES"/*.conf; do
         [[ -f $e ]] || continue
-        if grep -qiE 'fallback' <<<"$(basename "$e") $(grep -m1 '^title' "$e")"; then
-            set_entry_options "$e" "$palette_opts"
-        else
-            set_entry_options "$e" "splash $palette_opts"
-        fi
+        set_entry_options "$e" "$palette_opts"
     done
 }
 
@@ -127,7 +120,7 @@ if (( UNDO )); then
         act "removed FONT=$CONSOLE_FONT from $VCONSOLE" sed -i "/^FONT=$CONSOLE_FONT/d" "$VCONSOLE"
     fi
     rebuild_initramfs
-    say ""; say "Done. The theme files in $THEME_DST and $PLYCONF are left in place."
+    say ""; say "Done."
     exit 0
 fi
 
@@ -142,60 +135,32 @@ if (( PALETTE_ONLY )); then
 fi
 
 if (( DO_BOOT )); then
-    step "Plymouth theme"
-    command -v plymouth-set-default-theme >/dev/null || { echo "plymouth is not installed: pacman -S plymouth" >&2; exit 1; }
-    fc-list 'IosevkaTerm Nerd Font Mono' family | grep -q . \
-        || warn "Iosevka Term not installed (pacman -S ttf-iosevkaterm-nerd); the splash falls back to another monospace font"
-    host="$(cat /etc/hostname 2>/dev/null || echo arch)"
-    if (( DRY )); then
-        say "   [dry-run] install $THEME_SRC -> $THEME_DST (host: $host)"
-    else
-        install -d -m 755 "$THEME_DST"
-        install -m 644 "$THEME_SRC/terminal.plymouth" "$THEME_DST/terminal.plymouth"
-        sed "s/@HOST@/$host/g" "$THEME_SRC/terminal.script" > "$THEME_DST/terminal.script"
-        chmod 644 "$THEME_DST/terminal.script"
-        say "   installed $THEME_DST (host: $host)"
-    fi
-    backup "$PLYCONF"
-    if (( DRY )); then
-        say "   [dry-run] write $PLYCONF: Theme=terminal, ShowDelay=0, DeviceScale=1"
-    else
-        mkdir -p "$(dirname "$PLYCONF")"
-        cat > "$PLYCONF" <<'EOF'
-# Managed by ~/.config/scripts/setup-boot-style.sh
-[Daemon]
-Theme=terminal
-ShowDelay=0
-# The script plugin draws text at scale 1 and would pixel-double it on HiDPI;
-# the theme sizes its font from the screen height instead.
-DeviceScale=1
-EOF
-        say "   wrote $PLYCONF"
-    fi
-
-    # -------------------------------------------------------------- 2. hook
-    step "mkinitcpio hook"
+    rebuild=0
+    step "No boot splash"
     if hooks_line | grep -qw plymouth; then
-        say "   plymouth already in HOOKS"
-    else
         backup "$MKCONF"
-        # After kms (early KMS gives plymouth the real resolution), else after
-        # systemd/udev, which it needs.
-        anchor=udev
-        hooks_line | grep -qw systemd && anchor=systemd
-        hooks_line | grep -qw kms && anchor=kms
-        act "added plymouth after $anchor" sed -i -E "/^HOOKS=/{s/\\b$anchor\\b/& plymouth/}" "$MKCONF"
+        act "removed the plymouth hook" sed -i -E '/^HOOKS=/{s/ plymouth\b//}' "$MKCONF"
+        rebuild=1
+    else
+        say "   no plymouth hook"
+    fi
+    if [[ -d $THEME_DST ]]; then
+        act "removed the theme $THEME_DST" rm -rf "$THEME_DST"
+    fi
+    if grep -q '^Theme=terminal' "$PLYCONF" 2>/dev/null; then
+        backup "$PLYCONF"
+        act "removed $PLYCONF" rm -f "$PLYCONF"
     fi
 
-    # ------------------------------------------------- 2 + 3. boot entries
-    step "Boot entries (splash, console palette)"
+    # ----------------------------------------------- 2. palette on the entries
+    step "Boot entries (console palette, no splash)"
     if ! compgen -G "$ENTRIES/*.conf" >/dev/null; then
         warn "no systemd-boot entries in $ENTRIES. Add this to the kernel command line by hand:"
-        warn "splash $palette_opts"
+        warn "$palette_opts"
     fi
     apply_entries
 
-    # ------------------------------------------------------ 4. console font
+    # ------------------------------------------------------ 3. console font
     step "Console font"
     if [[ ! -f /usr/share/kbd/consolefonts/$CONSOLE_FONT.psf.gz ]]; then
         warn "$CONSOLE_FONT missing (pacman -S terminus-font); keeping the current console font"
@@ -210,14 +175,15 @@ EOF
             echo "FONT=$CONSOLE_FONT" >> "$VCONSOLE"
             say "   set FONT=$CONSOLE_FONT in $VCONSOLE"
         fi
+        rebuild=1
     fi
     hooks_line | grep -qwE 'consolefont|sd-vconsole' \
         || warn "HOOKS has neither consolefont nor sd-vconsole; the font only applies once systemd-vconsole-setup runs"
 
-    rebuild_initramfs
+    if (( rebuild )); then rebuild_initramfs; else say "   initramfs unchanged, no rebuild needed"; fi
 fi
 
-# ---------------------------------------------------------------- 5. greetd
+# ---------------------------------------------------------------- 4. greetd
 if (( DO_GREETER )); then
     step "Login screen (greetd + tuigreet)"
     command="/etc/greetd/tuigreet.sh"
@@ -256,7 +222,5 @@ fi
 
 step "Done"
 (( DRY )) && { say "Dry run -- nothing was changed."; exit 0; }
-say "Reboot to see it. Test the splash without rebooting, from a text console"
-say "(Ctrl+Alt+F3, log in):"
-say "  sudo plymouthd; sudo plymouth show-splash; sleep 5; sudo plymouth quit"
+say "Reboot to see it."
 say "Undo the boot part: sudo $0 --undo  (backups: *.bak-$STAMP)"

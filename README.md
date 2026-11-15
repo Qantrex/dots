@@ -330,8 +330,8 @@ One-time pass that fixes a `quit` → `quiet` typo in the kernel cmdline, wires
 up `amd-ucode`, adds a fallback boot entry (there was none, and
 `loader.conf` has `timeout 0` — hold Space at boot for the menu), trims the
 initramfs for the current GPU mode, and socket-activates docker and libvirtd.
-It used to drop the plymouth splash (~500 ms); it leaves it alone now that
-`setup-boot-style.sh` sets one up (below).
+It used to drop the plymouth splash (~500 ms); there is no splash any more
+(see below).
 
 > Containers with `restart: always` and VMs marked autostart will no longer
 > come up by themselves at boot — they start when something first touches
@@ -340,23 +340,22 @@ It used to drop the plymouth splash (~500 ms); it leaves it alone now that
 ### Boot and login style
 
 ```bash
-sudo ~/.config/scripts/setup-boot-style.sh   # --dry-run / --boot / --greeter / --undo
+sudo ~/.config/scripts/setup-boot-style.sh   # --dry-run / --boot / --greeter / --palette / --undo
 ```
 
-- **Splash:** plymouth theme `install/plymouth/terminal`. Every unit systemd
-  starts scrolls by as `[  ok  ] started NetworkManager.service` (real, not
-  decoration), with a progress bar and a blinking cursor, in Iosevka Term on
-  black. Esc shows the raw log; the fallback entry boots without the splash.
-- **Console:** grey 16-colour palette on the kernel command line
-  (`vt.default_red/grn/blu`) and Terminus 32 px (`ter-v32b`), so TTYs match the
-  desktop and are readable on the 2880x1800 panel.
+- **Boot:** no splash. With the quiet flags the plain console stays black for a
+  second or two, then the login. (A plymouth theme that animated a fake boot log
+  was removed on 2026-11-15; `--boot` takes out its hook, `splash` and the theme.)
+- **Console:** the same grey 16-colour palette as foot on the kernel command line
+  (`vt.default_red/grn/blu`, slot 0 stays black as the background) and Terminus
+  32 px (`ter-v32b`), so TTYs match the desktop and are readable on the
+  2880x1800 panel. `--palette` updates only the colours, without rebuilding the
+  initramfs.
 - **Login:** greetd runs `/etc/greetd/tuigreet.sh` (`install/greeter/tuigreet.sh`,
-  shared by both machines): grey theme, remembered user, DOOM fire in greys on
-  the console, matrix rain inside the desktop's Hyprland greeter. F4 turns the
-  animation off.
+  shared by both machines): plain tuigreet on black, grey theme, remembered user,
+  date and time. No animated background.
 
-Needs `plymouth ttf-iosevkaterm-nerd terminus-font`. Costs the ~500 ms the
-splash takes.
+Needs `terminus-font greetd-tuigreet`.
 
 ---
 
@@ -404,7 +403,7 @@ syntax highlighting. It is never used as a full-app theme.
 | Qt / KDE | `qt*ct/.../colors/monochrome.conf`, `kde/.config/kdeglobals` |
 | micro | `micro/.../colorschemes/monochrome.micro` |
 | Terminal | foot, Iosevka Term 13 (`ttf-iosevkaterm-nerd`); tmux bar in `tmux/.tmux.conf` |
-| Lock screen | `hypr/.config/hypr/hyprlock.conf`: a TTY login prompt (`Password: ****`) and a big clock |
+| Lock screen | `hypr/.config/hypr/hyprlock.conf`: pure black, a big clock, the date, one thin password field |
 | Files | yazi: `yazi/.config/yazi/theme.toml` (generated); Nautilus: libadwaita, so `gtk-4.0/gtk.css` |
 | btop / cava / htop | `btop/.../themes/monochrome.theme`, cava gradient in `cava/.../config`; htop uses its Monochromatic scheme |
 | Viewers | `mpv.conf`, `imv/config`, `zathurarc` (PDFs recoloured white-on-black, Ctrl+R for paper) |

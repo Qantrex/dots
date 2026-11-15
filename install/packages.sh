@@ -24,7 +24,7 @@ PKG_DESKTOP=(
 # unasked.
 PKG_AUDIO=(pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber)
 PKG_NETWORK=(networkmanager bluez bluez-utils)
-PKG_LOGIN=(greetd greetd-tuigreet plymouth terminus-font)
+PKG_LOGIN=(greetd greetd-tuigreet terminus-font)
 
 # Shell and terminal tools (.zshrc / .zsh_aliases / tmux / micro use these).
 PKG_SHELL=(zsh fish starship tmux micro fzf zoxide eza bat ripgrep fd btop)
