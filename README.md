@@ -132,7 +132,9 @@ To add a config: put it in a stow package, add its path to
 `install/links.sh`, and if it needs packages, add them to
 `install/packages.sh`.
 
-Check the links at any time with `~/dotfiles/verify-dotfiles.sh`.
+Check the links at any time with `~/dotfiles/verify-dotfiles.sh`. After a
+`git pull` that added, moved or removed configs, `~/dotfiles/install-hyprland.sh --links`
+renders the theme and redoes the links, without packages or sudo.
 
 ---
 

@@ -16,6 +16,7 @@ source "$DOTFILES/install/packages.sh"
 source "$DOTFILES/install/links.sh"
 
 ASSUME_YES=0
+LINKS_ONLY=0
 DRY_RUN=0
 FAILED=()      # things that went wrong, reported by summary()
 TODO=()        # things the user still has to do, reported by summary()
@@ -98,6 +99,8 @@ Usage: ${0##*/} [options]
 
   -y, --yes       don't ask; take the default answer to every question
   -n, --dry-run   print what would be done, change nothing
+  -l, --links     only render the theme and redo the links (after a git pull
+                  that added, moved or removed configs); no packages, no sudo
   -h, --help      show this help
 
 The run is logged to $LOG and can be repeated safely.
@@ -109,6 +112,7 @@ parse_args() {
     case $1 in
       -y|--yes)     ASSUME_YES=1 ;;
       -n|--dry-run) DRY_RUN=1 ;;
+      -l|--links)   LINKS_ONLY=1 ;;
       -h|--help)    usage; exit 0 ;;
       *)            usage; die "unknown option: $1" ;;
     esac
@@ -282,11 +286,20 @@ link_dotfiles() {
   for entry in "${LINKS[@]}"; do
     path=${entry%%|*} pkg=${entry##*|}
     live=$HOME/$path src=$DOTFILES/$pkg/$path
-    [[ -e $src ]] || { warn "missing in repo: $pkg/$path"; continue; }
+    [[ -e $src || -L $src ]] || { warn "missing in repo: $pkg/$path"; continue; }
     # The parent has to exist as a real directory, or stow would link it
-    # instead (e.g. all of ~/.config/vesktop, session data included).
-    [[ -d $(dirname "$live") ]] || run mkdir -p "$(dirname "$live")"
+    # instead (e.g. all of ~/.config/vesktop, session data included). A parent
+    # that an older layout linked as a whole (~/.config/fontconfig) is unfolded.
+    local parent
+    parent=$(dirname "$live")
+    if [[ -L $parent && $(readlink -f "$parent") == "$DOTFILES"/* ]]; then
+      run rm "$parent"
+    fi
+    [[ -d $parent ]] || run mkdir -p "$parent"
     if [[ -L $live && $(readlink -f "$live") == "$(readlink -f "$src")" ]]; then
+      # stow ignores absolute links and then reports them as conflicts: let it
+      # make its own relative one.
+      [[ $(readlink "$live") == /* ]] && run rm "$live"
       continue
     fi
     if [[ -e $live || -L $live ]]; then

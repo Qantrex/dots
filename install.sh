@@ -4,7 +4,7 @@
 # wheel group with sudo. No GUI, maybe not even git.
 #
 #   curl -fsSL https://raw.githubusercontent.com/Qantrex/dots/main/install.sh | bash
-#   ~/dotfiles/install.sh [--yes] [--dry-run]
+#   ~/dotfiles/install.sh [--yes] [--dry-run] [--links]
 #
 # Already running Hyprland? Use install-hyprland.sh instead -- it leaves your
 # audio, network and login manager alone.
@@ -25,6 +25,12 @@ fi
 source "$here/install/lib.sh"
 
 parse_args "$@"
+if ((LINKS_ONLY)); then
+  setup_theme
+  link_dotfiles
+  summary "Links and theme are up to date."
+  exit
+fi
 preflight
 system_upgrade
 install_bootstrap

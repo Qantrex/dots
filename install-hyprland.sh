@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Put these dotfiles on a machine that already runs a small Hyprland setup.
 #
-#   ~/dotfiles/install-hyprland.sh [--yes] [--dry-run]
+#   ~/dotfiles/install-hyprland.sh [--yes] [--dry-run] [--links]
 #
 # Compared to install.sh this assumes graphics, audio, network and login
 # already work, and leaves them alone: no GPU drivers, no PipeWire (it would
@@ -18,6 +18,12 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$here/install/lib.sh"
 
 parse_args "$@"
+if ((LINKS_ONLY)); then
+  setup_theme
+  link_dotfiles
+  summary "Links and theme are up to date."
+  exit
+fi
 preflight
 command -v Hyprland >/dev/null || die "Hyprland isn't installed -- use install.sh for a bare system."
 
