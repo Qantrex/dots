@@ -22,6 +22,8 @@ Rectangle {
     border.color: accent.a > 0 ? accent : (on ? Theme.accent : Theme.border)
     Behavior on color { ColorAnimation { duration: Theme.animFast } }
 
+    NekoFrame { anchors.fill: parent; frame: false; ears: true; earWidth: 11; earHeight: 7; earInset: 6; visible: Neko.enabled && root.on }
+
     MouseArea {
         id: main
         anchors { left: parent.left; top: parent.top; bottom: parent.bottom; right: root.expandable ? chevron.left : parent.right }

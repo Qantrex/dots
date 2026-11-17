@@ -324,6 +324,11 @@ PanelWindow {
                             anchors.fill: parent
                             radius: Theme.radiusSmall
                             color: tab.current ? Theme.accent : (tab.containsMouse ? Theme.hover : "transparent")
+                            NekoFrame {
+                                anchors.fill: parent
+                                frame: false; ears: true; earWidth: 8; earHeight: 6; earInset: 2
+                                visible: Neko.enabled && (tab.current || tab.containsMouse)
+                            }
                         }
                         Label {
                             id: tl

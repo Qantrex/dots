@@ -34,6 +34,11 @@ MouseArea {
         radius: Theme.radiusSmall
         color: root.active ? Theme.pressed : (root.containsMouse ? Theme.hover : "transparent")
         Behavior on color { ColorAnimation { duration: Theme.animFast } }
+        NekoFrame {
+            anchors.fill: parent
+            frame: false; ears: true; earWidth: 8; earHeight: 6; earInset: 2
+            visible: Neko.enabled && (root.active || root.containsMouse)
+        }
     }
 
     Row {

@@ -68,6 +68,13 @@ Island {
                 border.color: Theme.fg
                 Behavior on color { ColorAnimation { duration: Theme.anim } }
 
+                NekoFrame {
+                    anchors.fill: parent
+                    radius: Theme.radiusSmall
+                    frame: false; ears: true; earWidth: 8; earHeight: 6; earInset: 2
+                    visible: Neko.enabled && (ws.active || ws.containsMouse)
+                }
+
                 SequentialAnimation on opacity {
                     running: ws.modelData.urgent && !ws.active
                     loops: Animation.Infinite

@@ -9,6 +9,8 @@ Item {
     id: root
     property real radius: Theme.radius
     property bool ears: false
+    property bool frame: true          // false: only the ears (on pills)
+    property real earInset: Math.max(radius * 1.1, 10)   // from the box's side
     property real earWidth: 15
     property real earHeight: 8
     property real lineWidth: 1.6
@@ -22,6 +24,7 @@ Item {
     Canvas {
         id: border
         anchors.fill: parent
+        visible: root.frame
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
         onVisibleChanged: if (visible) requestPaint()
@@ -51,6 +54,8 @@ Item {
         height: root.earHeight + 2
         y: -root.earHeight + 1
         transformOrigin: mirrored ? Item.BottomLeft : Item.BottomRight
+        // Created while hidden (before neko.json is read), so paint on showing.
+        onVisibleChanged: if (visible) requestPaint()
         onPaint: {
             const ctx = getContext("2d");
             ctx.reset();
@@ -83,13 +88,13 @@ Item {
     Ear {
         id: leftEar
         visible: root.ears
-        x: Math.max(root.radius * 1.1, 10)
+        x: root.earInset
     }
     Ear {
         id: rightEar
         visible: root.ears
         mirrored: true
-        x: root.width - width - Math.max(root.radius * 1.1, 10)
+        x: root.width - width - root.earInset
     }
 
     Timer {
