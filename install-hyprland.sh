@@ -48,6 +48,7 @@ done
 command -v nmcli >/dev/null || info "NetworkManager isn't installed; the shell's Wi-Fi list won't work"
 pacman -Qq pipewire-pulse &>/dev/null || info "No PipeWire; the shell's volume controls and OSD need it"
 
+setup_theme
 link_dotfiles
 setup_shell
 setup_micro

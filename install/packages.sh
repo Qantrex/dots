@@ -4,8 +4,9 @@
 # same list as official ones.
 
 # Needed before anything else (git + stow for the repo, pciutils for GPU
-# detection, jq for editing app JSON settings, acl for spicetify's write access).
-PKG_BOOTSTRAP=(git stow base-devel pciutils jq acl)
+# detection, jq for editing app JSON settings, acl for spicetify's write access,
+# python for `theme`, which renders the configs the links point at).
+PKG_BOOTSTRAP=(git stow base-devel pciutils jq acl python)
 
 # The compositor and the pieces its config starts or calls.
 PKG_DESKTOP=(

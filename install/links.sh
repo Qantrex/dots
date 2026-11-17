@@ -8,6 +8,9 @@
 # installer creates each path's parent directory first, so stow links at exactly
 # this level instead of folding a whole ~/.config/vesktop or ~/.local into the
 # repo.
+#
+# Many of these are, in the repo, symlinks into theme/current (the rendered theme,
+# see the README, "Themes"), so install/lib.sh renders a theme before linking.
 
 LINKS=(
   ".config/hypr|hypr"
@@ -17,13 +20,14 @@ LINKS=(
   ".config/fish|fish"
   ".config/gtk-3.0|gtk"
   ".config/gtk-4.0|gtk"
-  ".local/share/themes/Monochrome|gtk"
+  ".local/share/themes/Current|gtk"
   ".config/qt5ct|qt5ct"
   ".config/qt6ct|qt6ct"
   ".config/kdeglobals|kde"
   ".config/scripts|scripts"
   ".local/bin/decide|bin"
   ".local/bin/away|bin"
+  ".local/bin/theme|bin"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"
@@ -31,20 +35,21 @@ LINKS=(
   ".zsh_aliases|zsh"
   ".config/starship.toml|starship"
   ".tmux.conf|tmux"
+  ".config/tmux/theme.conf|tmux"
   ".config/vesktop/themes|vesktop"
   ".config/spicetify/Themes|spicetify"
   ".config/spotify-adblock|spotify-adblock"
   ".local/share/applications/spotify.desktop|spotify-adblock"
   ".config/yazi|yazi"
   ".config/btop/btop.conf|btop"
-  ".config/btop/themes/monochrome.theme|btop"
+  ".config/btop/themes/theme.theme|btop"
   ".config/cava/config|cava"
   ".config/mpv|mpv"
   ".config/fastfetch|fastfetch"
   ".config/imv|imv"
   ".config/cmus/monochrome.theme|cmus"
   ".config/cmus/rc|cmus"
-  ".config/fontconfig|fontconfig"
+  ".config/fontconfig/fonts.conf|fontconfig"
   ".config/glow/glow.yml|glow"
   ".config/nvim|nvim"
   ".config/zathura|zathura"

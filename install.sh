@@ -45,6 +45,7 @@ install_pkgs "system"              "${PKG_SYSTEM[@]}"
 setup_gaming
 check_hyprland_version
 
+setup_theme
 link_dotfiles
 setup_shell
 setup_micro

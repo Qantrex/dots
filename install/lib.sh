@@ -266,6 +266,16 @@ setup_gaming() {
 
 # ----------------------------------------------------------------- dotfiles
 
+# Render the current theme (root on a fresh clone) into theme/current, which many
+# configs in the repo are symlinks into. Before link_dotfiles, so every link has a
+# target. The GTK part needs gtk3/gtk4; without them it is skipped until the next
+# `theme apply`.
+setup_theme() {
+  step "Theme (theme/current)"
+  run "$DOTFILES/bin/.local/bin/theme" apply --quiet || { FAILED+=("theme apply"); return; }
+  ok "$(readlink "$DOTFILES/theme/current" 2>/dev/null || echo rendered)"
+}
+
 link_dotfiles() {
   step "Linking dotfiles into $HOME"
   local entry path pkg live src moved=0
@@ -362,13 +372,14 @@ setup_vesktop() {
       run pkill -x vesktop
       ((DRY_RUN)) || sleep 2
     else
-      TODO+=("Vesktop: Settings > Themes > enable monochrome.theme.css")
+      TODO+=("Vesktop: Settings > Themes > enable theme.theme.css")
       return
     fi
   fi
-  json_set "$dir/settings/settings.json" '.enabledThemes = ["monochrome.theme.css"]'
+  # theme.theme.css links to the rendered theme (theme/current/vesktop.theme.css).
+  json_set "$dir/settings/settings.json" '.enabledThemes = ["theme.theme.css"]'
   json_set "$dir/settings.json" '.splashBackground = "rgb(0, 0, 0)" | .splashColor = "rgb(255, 255, 255)"'
-  ok "monochrome theme enabled"
+  ok "theme enabled"
 }
 
 setup_spicetify() {
@@ -391,7 +402,7 @@ setup_spicetify() {
   [[ -w /opt/spotify/Apps ]] \
     || run sudo setfacl -R -m "u:$USER:rwX" -m "d:u:$USER:rwX" /opt/spotify
   run "$sp" config prefs_path "$prefs" spotify_path /opt/spotify/ \
-    current_theme Ziro color_scheme monochrome inject_css 1 replace_colors 1
+    current_theme Ziro color_scheme theme inject_css 1 replace_colors 1
 
   # Backup state lives in config-xpui.ini: none yet -> make one; one for an
   # older Spotify -> refresh it; current -> just apply. -n: don't let spicetify
