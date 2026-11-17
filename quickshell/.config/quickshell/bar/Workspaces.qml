@@ -54,7 +54,8 @@ Island {
             Tooltip {
                 target: ws
                 show: ws.containsMouse
-                text: "Workspace " + ws.modelData.name + "\n"
+                // Each screen counts its own 1–10 (hypr/lua/workspaces.lua): 14 is the side screen's 4.
+                text: "Workspace " + ((ws.modelData.id - 1) % 10 + 1) + "\n"
                       + ws.modelData.toplevels.values.map(t => "· " + (t.title || t.wayland?.appId || "")).join("\n")
             }
 

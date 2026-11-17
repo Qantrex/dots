@@ -4,6 +4,8 @@
 --
 -- Rules are evaluated top to bottom; for a given effect, the LAST match wins.
 
+local ws = require("lua.workspaces")
+
 -- Ignore maximize requests from applications.
 hl.window_rule({
     name  = "suppress-maximize",
@@ -29,30 +31,31 @@ hl.window_rule({
     suppress_event   = "activate activatefocus",
 })
 
--- Chat and music get their own workspaces.
+-- Chat, music and mail get their own workspaces: on the PC the side screen's 1–3,
+-- on the laptop 10, 9 and 8 (lua/workspaces.lua).
 --
 -- The old rules matched `^(Vesktop)$` and `^(Spotify)$`. Both are
 -- case-sensitive and the real classes are lowercase (`hyprctl clients` reports
 -- `vesktop`), so neither rule ever fired. Matching both spellings fixes it.
 hl.window_rule({
-    name  = "chat-to-workspace-10",
+    name  = "chat-to-its-workspace",
     match = { class = "^([Vv]esktop|[Dd]iscord)$" },
 
-    workspace = "10 silent",
+    workspace = ws.chat .. " silent",
 })
 
 hl.window_rule({
-    name  = "music-to-workspace-9",
+    name  = "music-to-its-workspace",
     match = { class = "^([Ss]potify)$" },
 
-    workspace = "9 silent",
+    workspace = ws.music .. " silent",
 })
 
 hl.window_rule({
-    name  = "mail-to-workspace-8",
+    name  = "mail-to-its-workspace",
     match = { class = "^(aerc)$" },
 
-    workspace = "8 silent",
+    workspace = ws.mail .. " silent",
 })
 
 -- Quick-ask Claude (SUPER+D, ~/.config/scripts/claude-ask.sh): floating and
@@ -81,10 +84,10 @@ hl.window_rule({
 
 -- The aerc cheatsheet (SUPER+H) tiles next to aerc, and takes you there.
 hl.window_rule({
-    name  = "mail-cheatsheet-to-workspace-8",
+    name  = "mail-cheatsheet-to-mail-workspace",
     match = { class = "^(aerc-cheat)$" },
 
-    workspace = "8",
+    workspace = tostring(ws.mail),
 })
 
 -- Whichever of aerc and its cheatsheet opens second, keep the sheet narrow and

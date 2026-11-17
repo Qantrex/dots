@@ -57,6 +57,7 @@ One repo for both machines. Differences are picked by hostname (`/etc/hostname`)
 | What | Laptop `bauarch` | Desktop `bauarch-pc` | Where |
 | --- | --- | --- | --- |
 | Monitors | internal panel, scale 2 | two AOC screens | `hypr/lua/monitors.lua` |
+| Workspaces | one screen: 1–10, mail/music/chat on 8/9/10 | per screen 1–10 (side screen = Hyprland 11–20), chat/music/mail on the side screen's 1/2/3 | `hypr/lua/workspaces.lua` |
 | Shell: Local AI tile/icon (`ai-webui.sh`) | yes | no (2026-11-04: the desktop is a headless AI node instead) | `quickshell/.../services/Scripts.qml` (`Host.isLaptop`) |
 | Shell: battery, touchpad, power profile, brightness | yes | no (no battery, touchpad, asusctl or backlight) | `quickshell/.../services/` |
 | Shell: GPU in the System popout (`nvidia-smi`) | no (it would wake the dGPU) | yes | `quickshell/.../services/Sys.qml` |
@@ -178,8 +179,8 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `SHIFT+E` / `SHIFT+W` | Emoji / wallpaper picker |
 | `SHIFT+T` | Typing test (homerow) |
 | `Q` / `V` / `F` | Close / float / fullscreen |
-| `arrows` | Move focus (`+SHIFT` moves the window) |
-| `1`–`0` | Workspace (`+SHIFT` moves the window there) |
+| `arrows` | Move focus (`+SHIFT` moves the window, `+ALT` throws it to the screen on that side) |
+| `1`–`0` | Workspace on the screen you're on: each screen has its own 1–10 (`+SHIFT` moves the window there; `hypr/lua/workspaces.lua`) |
 | `S` | Scratchpad |
 | `ALT+F` | Maximize |
 | `D` / `SHIFT+D` | Quick ask (Claude, Sonnet) / a fresh quick ask about the clipboard, text or image (`claude-ask.sh`) |

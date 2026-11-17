@@ -6,6 +6,7 @@
 
 local apps = require("lua.apps")
 local host = require("lua.host")
+local ws   = require("lua.workspaces")
 
 hl.on("hyprland.start", function()
     -- Hand the session environment to systemd and D-Bus first, so services
@@ -72,10 +73,10 @@ hl.on("hyprland.start", function()
     -- Applications, each on its own workspace, without stealing focus.
     hl.exec_cmd(apps.terminal, { workspace = "1 silent" })
     hl.exec_cmd(apps.browser,  { workspace = "2 silent" })
-    hl.exec_cmd(apps.mail,     { workspace = "8 silent" })
-    hl.exec_cmd(apps.music,    { workspace = "9 silent" })
+    hl.exec_cmd(apps.mail,     { workspace = ws.mail .. " silent" })
+    hl.exec_cmd(apps.music,    { workspace = ws.music .. " silent" })
     -- The old config passed `%U` to vesktop. That is a .desktop field code and
     -- means nothing on a command line -- vesktop received it as a literal
     -- argument.
-    hl.exec_cmd(apps.chat,     { workspace = "10 silent" })
+    hl.exec_cmd(apps.chat,     { workspace = ws.chat .. " silent" })
 end)

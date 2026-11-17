@@ -4,6 +4,7 @@
 
 local apps = require("lua.apps")
 local host = require("lua.host")
+local ws   = require("lua.workspaces")
 
 local mod = "SUPER"
 
@@ -103,13 +104,19 @@ end
 -- Workspaces
 --------------------------------------------------------------------------
 
+-- Each screen has its own 1–10; they act on the screen you're on (lua/workspaces.lua).
 for i = 1, 10 do
     local key = i % 10 -- workspace 10 lives on the 0 key
-    hl.bind(mod .. " + " .. key, hl.dsp.focus({ workspace = i }),
-        { description = "Workspace " .. i })
-    hl.bind(mod .. " + SHIFT + " .. key, hl.dsp.window.move({ workspace = i }),
-        { description = "Move window to workspace " .. i })
+    hl.bind(mod .. " + " .. key, function() ws.go(i) end,
+        { description = "Workspace " .. i .. " on this screen" })
+    hl.bind(mod .. " + SHIFT + " .. key, function() ws.send(i) end,
+        { description = "Move window to workspace " .. i .. " on this screen" })
 end
+
+-- Throw the focused window straight to the screen on that side (and follow it),
+-- instead of stepping it through every tile with SUPER+SHIFT+arrow.
+hl.bind(mod .. " + ALT + left",  function() ws.throw("left") end,  { description = "Move window to the left screen" })
+hl.bind(mod .. " + ALT + right", function() ws.throw("right") end, { description = "Move window to the right screen" })
 
 -- Scratchpad.
 hl.bind(mod .. " + S", hl.dsp.workspace.toggle_special("magic"),
@@ -118,9 +125,9 @@ hl.bind(mod .. " + S", hl.dsp.workspace.toggle_special("magic"),
 hl.bind(mod .. " + ALT + S", hl.dsp.window.move({ workspace = "special:magic" }),
     { description = "Move window to scratchpad" })
 
--- Cycle workspaces with the scroll wheel.
-hl.bind(mod .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }))
-hl.bind(mod .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }))
+-- Cycle this screen's workspaces with the scroll wheel.
+hl.bind(mod .. " + mouse_down", hl.dsp.focus({ workspace = "m+1" }))
+hl.bind(mod .. " + mouse_up",   hl.dsp.focus({ workspace = "m-1" }))
 
 -- Drag to move, right-drag to resize.
 hl.bind(mod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
