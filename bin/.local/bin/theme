@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""theme: switch the whole desktop between the themes in ~/dotfiles/theme/themes/.
+
+    theme                    the current theme and the ones there are
+    theme set NAME           render NAME and switch everything to it
+    theme apply              render the current theme again (after editing a palette
+                             or a template), keeps the wallpaper you picked
+    theme render NAME DIR    only render NAME into DIR, change nothing (to diff or check)
+
+How it fits together (details in the README, "Themes"):
+
+  theme/themes/<name>/theme.toml   one palette, fonts, shape and assets per theme
+  theme/templates/                 one file per app, with {{ ... }} where colours go
+  theme/themes/<name>/templates/   optional: a theme's own version of a template
+  theme/generators/                files built in code (the GTK theme from Adwaita)
+  theme/current -> build/<name>-…  what the apps read (git-ignored, rendered here)
+
+The apps never see the templates. Each config in the repo points at theme/current,
+either with an include line (foot, tmux, zathura, mpv, hyprlock, nvim, Hyprland)
+or because the config file itself is a symlink into it (btop, cava, yazi, …).
+Switching renders everything once and swaps one symlink, so nothing runs between
+switches and tracked files never change.
+"""
+
+import importlib.util
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import tomllib
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.dont_write_bytecode = True  # no __pycache__ in theme/generators/
+
+REPO = Path(__file__).resolve().parents[3]
+ROOT = REPO / "theme"
+THEMES = ROOT / "themes"
+TEMPLATES = ROOT / "templates"
+GENERATORS = ROOT / "generators"
+BUILD = ROOT / "build"
+CURRENT = ROOT / "current"
+HOME = Path.home()
+
+QUIET = False
+
+
+def say(msg):
+    if not QUIET:
+        print(msg)
+
+
+# --- Colours ------------------------------------------------------------------
+
+
+class Color:
+    """An sRGB colour with an 8-bit alpha. str() gives #rrggbb (#rrggbbaa if translucent)."""
+
+    def __init__(self, r, g, b, a=255):
+        self.r, self.g, self.b, self.a8 = (max(0, min(255, round(v))) for v in (r, g, b, a))
+
+    @classmethod
+    def parse(cls, text):
+        h = text.strip().lstrip("#")
+        if not re.fullmatch(r"[0-9a-fA-F]{6}([0-9a-fA-F]{2})?", h):
+            raise ValueError(f"not a colour: {text!r} (use #rrggbb or #rrggbbaa)")
+        v = [int(h[i:i + 2], 16) for i in range(0, len(h), 2)]
+        return cls(*v)
+
+    def __str__(self):
+        return "#" + (self.hex if self.a8 == 255 else self.hexa)
+
+    def __repr__(self):
+        return f"Color({self})"
+
+    # Formats, for the different config syntaxes.
+    @property
+    def hex(self):            # rrggbb       (foot, imv, spicetify)
+        return f"{self.r:02x}{self.g:02x}{self.b:02x}"
+
+    @property
+    def hexa(self):           # rrggbbaa     (Hyprland rgba(...))
+        return self.hex + f"{self.a8:02x}"
+
+    @property
+    def argb(self):           # #aarrggbb    (Qt)
+        return f"#{self.a8:02x}{self.hex}"
+
+    @property
+    def dec(self):            # r, g, b      (hyprlock rgb(...), kdeglobals)
+        return f"{self.r}, {self.g}, {self.b}"
+
+    @property
+    def csv(self):            # r,g,b        (CSS-ish rgba(...) without spaces)
+        return f"{self.r},{self.g},{self.b}"
+
+    @property
+    def luma(self):
+        return 0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
+
+    def a(self, byte):
+        """The same colour with alpha as a byte, 0x00-0xff (exact, for Hyprland's rgba(rrggbbaa))."""
+        return Color(self.r, self.g, self.b, byte)
+
+    def alpha(self, f):
+        """The same colour with alpha as a fraction, 0-1."""
+        return Color(self.r, self.g, self.b, f * 255)
+
+    def mix(self, other, t):
+        """t of the way from this colour to other (0 = this, 1 = other)."""
+        return Color(*(s + (o - s) * t for s, o in
+                       zip((self.r, self.g, self.b, self.a8), (other.r, other.g, other.b, other.a8))))
+
+
+# --- Themes -------------------------------------------------------------------
+
+
+def theme_names():
+    return sorted(p.parent.name for p in THEMES.glob("*/theme.toml"))
+
+
+def current_name():
+    try:
+        return Path(os.readlink(CURRENT)).name.rsplit("-", 1)[0]
+    except OSError:
+        return None
+
+
+def expand(value):
+    return str(Path(value).expanduser()) if isinstance(value, str) and value.startswith("~") else value
+
+
+def load(name):
+    path = THEMES / name / "theme.toml"
+    if not path.is_file():
+        sys.exit(f"theme: no theme {name!r} (there are: {', '.join(theme_names()) or 'none'})")
+    with path.open("rb") as f:
+        data = tomllib.load(f)
+
+    def colours(table, where):
+        out = {}
+        for key, value in table.items():
+            try:
+                out[key] = Color.parse(value)
+            except ValueError as e:
+                sys.exit(f"theme: {path}: [{where}] {key}: {e}")
+        return out
+
+    colors = colours(data.get("colors", {}), "colors")
+    for key in ("bg", "fg", "text", "accent", "on_accent", "love", "gold", "iris"):
+        if key not in colors:
+            sys.exit(f"theme: {path}: [colors] needs {key}")
+    bg, fg = colors["bg"], colors["fg"]
+
+    def tone(level):
+        """A step from bg (0x00) to fg (0xff). In root, tone(0x55) is #555555."""
+        return bg.mix(fg, level / 255)
+
+    def ns(table):
+        return SimpleNamespace(**{k: expand(v) for k, v in table.items()})
+
+    mode = data.get("mode", "dark")
+    return {
+        **colors,
+        "theme": name,
+        "description": data.get("description", ""),
+        "mode": mode,
+        "dark": mode == "dark",
+        "term": SimpleNamespace(**colours(data.get("terminal", {}), "terminal")),
+        "font": ns(data.get("fonts", {})),
+        "look": ns(data.get("look", {})),
+        "asset": ns(data.get("assets", {})),
+        "home": str(HOME),
+        "tone": tone,
+        "mix": lambda a, b, t: a.mix(b, t),
+        "Color": Color.parse,
+        "lua": lambda v: "true" if v is True else "false" if v is False else repr(v).replace("'", '"'),
+    }
+
+
+# --- Rendering ----------------------------------------------------------------
+
+EXPR = re.compile(r"\{\{(.*?)\}\}")
+
+
+def render_text(text, ctx, where):
+    def sub(m):
+        try:
+            return str(eval(m.group(1), {"__builtins__": {}}, ctx))  # noqa: S307 -- our own templates
+        except Exception as e:  # noqa: BLE001
+            line = text.count("\n", 0, m.start()) + 1
+            sys.exit(f"theme: {where}:{line}: {{{{{m.group(1)}}}}}: {type(e).__name__}: {e}")
+    return EXPR.sub(sub, text)
+
+
+def templates(name):
+    """Relative path -> source file, the theme's own templates winning over the shared ones."""
+    found = {}
+    for base in (TEMPLATES, THEMES / name / "templates"):
+        for p in sorted(base.rglob("*")):
+            if p.is_file():
+                found[p.relative_to(base)] = p
+    return found
+
+
+def generator(stem):
+    spec = importlib.util.spec_from_file_location(f"theme_gen_{stem}", GENERATORS / f"{stem}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def render(name, out):
+    ctx = load(name)
+    out = Path(out)
+    for rel, src in templates(name).items():
+        dest = out / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(render_text(src.read_text(), ctx, src.relative_to(REPO)))
+        shutil.copymode(src, dest)
+    # The GTK theme is built from the installed GTK's own Adwaita, unless the theme
+    # names an installed GTK theme instead.
+    if not getattr(ctx["asset"], "gtk_theme", ""):
+        generator("gtk").build(ctx, out / "gtk")
+    return ctx
+
+
+def switch(name):
+    """Render NAME into a fresh build dir and point theme/current at it in one rename."""
+    BUILD.mkdir(exist_ok=True)
+    dest = BUILD / f"{name}-{time.strftime('%Y%m%d%H%M%S')}{time.time_ns() % 1000:03d}"
+    tmp = dest.with_name(dest.name + ".tmp")
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        ctx = render(name, tmp)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    tmp.rename(dest)
+    link = CURRENT.with_name(".current.tmp")
+    link.unlink(missing_ok=True)
+    link.symlink_to(dest.relative_to(ROOT))
+    link.replace(CURRENT)
+    for old in BUILD.iterdir():
+        if old != dest:
+            shutil.rmtree(old, ignore_errors=True)
+    return ctx
+
+
+# --- Telling the running programs ---------------------------------------------
+
+
+def run(*cmd, **kw):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=30, **kw).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def have(cmd):
+    return shutil.which(cmd) is not None
+
+
+def running(proc):
+    return run("pgrep", "-x", proc)
+
+
+def reload(ctx, changed):
+    """Make running programs pick up theme/current. Every step is best effort."""
+    done, later = [], []
+    a = ctx["asset"]
+    gtk_theme = getattr(a, "gtk_theme", "") or "Current"
+
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and have("hyprctl"):
+        if run("hyprctl", "reload"):
+            done.append("Hyprland")
+        cursor = getattr(a, "cursor_theme", "")
+        if cursor:
+            run("hyprctl", "setcursor", cursor, str(getattr(a, "cursor_size", 24)))
+        wallpaper = getattr(a, "wallpaper", "")
+        if changed and wallpaper and Path(wallpaper).is_file():
+            # A new theme brings its wallpaper. `theme apply` keeps the one you picked.
+            if run("hyprctl", "-q", "hyprpaper", "wallpaper", f",{wallpaper}"):
+                (HOME / ".cache/wallpaper").mkdir(parents=True, exist_ok=True)
+                (HOME / ".cache/wallpaper/last").write_text(wallpaper + "\n")
+                done.append("wallpaper")
+
+    if have("qs") and run("qs", "ipc", "call", "theme", "reload"):
+        done.append("shell")
+
+    if have("gsettings"):
+        iface = "org.gnome.desktop.interface"
+        # Setting a different name first makes running GTK apps load the new CSS.
+        run("gsettings", "set", iface, "gtk-theme", "Adwaita")
+        run("gsettings", "set", iface, "gtk-theme", gtk_theme)
+        run("gsettings", "set", iface, "color-scheme", "prefer-dark" if ctx["dark"] else "prefer-light")
+        for key, value in (("icon-theme", getattr(a, "icon_theme", "")),
+                           ("cursor-theme", getattr(a, "cursor_theme", "")),
+                           ("cursor-size", str(getattr(a, "cursor_size", ""))),
+                           ("font-name", f"{getattr(ctx['font'], 'sans', '')} 11"),
+                           ("monospace-font-name", f"{getattr(ctx['font'], 'mono', '')} 11")):
+            if value.strip():
+                run("gsettings", "set", iface, key, value)
+        done.append("GTK")
+
+    if have("tmux") and run("tmux", "source-file", str(HOME / ".tmux.conf")):
+        done.append("tmux")
+
+    if changed and have("spicetify"):
+        cfg = subprocess.run(["spicetify", "-c"], capture_output=True, text=True).stdout.strip()
+        text = Path(cfg).read_text() if cfg and Path(cfg).is_file() else ""
+        # -n: spicetify would restart Spotify without the adblocker (spotify-adblock).
+        if re.search(r"^current_theme\s*=\s*Ziro\s*$", text, re.M) and run("spicetify", "refresh", "-n", "-q"):
+            later.append("Spotify")
+
+    for proc, label in (("vesktop", "Discord"), ("foot", "open terminals"), ("btop", "btop"),
+                        ("zathura", "zathura"), ("yazi", "yazi"), ("nvim", "nvim")):
+        if running(proc):
+            later.append(label)
+    later.append("Firefox (its own theme, see the README)")
+    return done, later
+
+
+# --- Commands -----------------------------------------------------------------
+
+
+def cmd_list():
+    cur = current_name()
+    print(f"current: {cur or 'none rendered yet (run: theme set root)'}")
+    for n in theme_names():
+        with (THEMES / n / "theme.toml").open("rb") as f:
+            desc = tomllib.load(f).get("description", "")
+        print(f"  {'*' if n == cur else ' '} {n:<12} {desc}")
+
+
+def cmd_set(name, changed=True):
+    ctx = switch(name)
+    say(f"theme: {name} rendered into {os.readlink(CURRENT)}")
+    done, later = reload(ctx, changed)
+    if done:
+        say("  reloaded: " + ", ".join(done))
+    if later:
+        say("  next start: " + ", ".join(later))
+
+
+def main(argv):
+    global QUIET
+    if "--quiet" in argv or "-q" in argv:
+        QUIET = True
+        argv = [a for a in argv if a not in ("--quiet", "-q")]
+    if not argv or argv[0] in ("list", "ls"):
+        return cmd_list()
+    cmd, args = argv[0], argv[1:]
+    if cmd == "set" and len(args) == 1:
+        return cmd_set(args[0], changed=args[0] != current_name())
+    if cmd == "apply" and not args:
+        return cmd_set(current_name() or "root", changed=current_name() is None)
+    if cmd == "render" and len(args) == 2:
+        out = Path(args[1])
+        if out.exists() and any(out.iterdir()):
+            sys.exit(f"theme: {out} is not empty")
+        render(args[0], out)
+        return say(f"theme: {args[0]} rendered into {out}")
+    if cmd in ("-h", "--help", "help"):
+        return print(__doc__.strip())
+    sys.exit(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

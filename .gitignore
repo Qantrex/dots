@@ -58,3 +58,8 @@
 */.config/gtk-3.0/gtkfilechooser.ini.lock
 */.config/gtk-4.0/gtkfilechooser.ini
 */.config/gtk-4.0/gtkfilechooser.ini.lock
+
+# Rendered themes: `theme set <name>` writes them (README, "Themes")
+/theme/build/
+/theme/current
+/theme/.current.tmp

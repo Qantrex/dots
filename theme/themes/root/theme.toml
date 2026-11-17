@@ -1,0 +1,74 @@
+# root: the original look of this desktop. True-black monochrome for the OLED
+# panel: white and grey text and accents, never blue. Rosé Pine Moon colours only
+# where they carry meaning: love for errors, gold for warnings, iris for links.
+#
+# Every app's template reads these values. Greys in the templates are written as
+# tone(0x55): that many 255ths of the way from bg to fg, so here exactly #555555,
+# and in a theme with other bg/fg the same step between its own two ends.
+
+description = "True-black monochrome, white and grey, Rosé Pine Moon for meaning"
+mode = "dark"   # dark or light: GTK/libadwaita colour scheme and web pages follow it
+
+[colors]
+bg        = "#000000"  # every background
+fg        = "#ffffff"  # the brightest text; the far end of tone()
+text      = "#e6e6e6"  # body text in terminals and editors
+accent    = "#ffffff"  # fills that mark "this one": selection, active tab, focused tile
+on_accent = "#000000"  # text and icons on an accent fill
+love      = "#eb6f92"  # errors, destructive actions, critical
+gold      = "#f6c177"  # warnings, search hits, globs
+iris      = "#c4a7e7"  # links, keywords
+visited   = "#908caa"  # visited links (Rosé Pine Moon subtle)
+rose      = "#ea9a97"  # mentions in Discord
+
+# The 16 terminal colours (foot). Apps that only use colour names (cmus, starship,
+# fastfetch, glow, ls) follow these. Here every slot is a grey except red, yellow
+# and magenta, so untuned tools stop showing blue and teal.
+[terminal]
+black          = "#3d3d3d"
+red            = "#eb6f92"
+green          = "#c0c0c0"
+yellow         = "#f6c177"
+blue           = "#8a8a8a"
+magenta        = "#c4a7e7"
+cyan           = "#a3a3a3"
+white          = "#d0d0d0"
+bright_black   = "#7a7a7a"
+bright_red     = "#ff98ba"
+bright_green   = "#e0e0e0"
+bright_yellow  = "#ffeb9e"
+bright_blue    = "#a8a8a8"
+bright_magenta = "#eed0ff"
+bright_cyan    = "#c8c8c8"
+bright_white   = "#ffffff"
+
+[fonts]
+mono       = "IosevkaTerm Nerd Font Mono"  # terminals, viewers, the lock screen
+mono_size  = 13                            # foot
+shell      = "IosevkaTerm Nerd Font"       # the Quickshell bar and popouts
+shell_size = 13
+shell_small = 11
+shell_large = 16
+shell_icon = 15
+sans       = "Adwaita Sans"                # GTK, Qt, everything with sans-serif
+
+[look]
+radius          = 8      # windows and every box in the shell
+radius_small    = 4      # things inside boxes
+gaps_in         = 10
+gaps_out        = 15
+border          = 2      # window border width
+active_opacity  = 0.95
+inactive_opacity = 0.8
+terminal_alpha  = 0.75   # foot: the wallpaper still shows through
+bar_height      = 32
+bar_gap         = 6      # outer margin of the bar
+pad             = 12
+
+[assets]
+wallpaper    = "~/Pictures/Wallpapers/ascii-creation-of-adam.png"
+gtk_theme    = ""              # empty: built from Adwaita with these colours (theme/generators/gtk.py)
+icon_theme   = "Papirus-Mono"  # ~/.config/scripts/build-papirus-mono.sh
+cursor_theme = "Adwaita"
+cursor_size  = 24
+firefox      = "black21, https://addons.mozilla.org/firefox/addon/black21/"
