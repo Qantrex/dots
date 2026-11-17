@@ -4,8 +4,9 @@
 # lock screen asks for the passphrase inside its eye.
 #
 # Greys are still tone() steps between bg and fg, so here they come out as
-# purple-pink greys. Four templates are this theme's own (templates/): the window
-# border gradient (hypr.lua), the lock screen, and the cava and btop gradients.
+# purple-pink greys. Its own templates (templates/): the window border gradient
+# (hypr.lua), the lock screen, the cava and btop gradients, tmux, the zsh extras,
+# starship, and neko.json, which turns on the shell's Neko extras.
 
 description = "Neon catgirl opsec: purple-black, hot pink, mint, lavender, no blue"
 mode = "dark"

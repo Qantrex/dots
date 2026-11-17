@@ -197,8 +197,22 @@ def get(url, timeout=15):
         return r.read()
 
 
+def clean(text):
+    """An artist name from an image site, safe to show anywhere (shell, Pango, SVG)."""
+    return re.sub(r"[^\w .,'·-]", "", str(text or ""), flags=re.UNICODE)[:40].strip()
+
+
 def parse(src, data, mode):
-    """Entries: dict(url, artist, name, page, safe)."""
+    """Entries: dict(url, artist, name, page, safe, strict). strict: also passes the
+    sfw tag filter, which the lock screen portrait and the greeting require."""
+    out = parse_raw(src, data, mode)
+    for e in out:
+        e["artist"] = clean(e.get("artist"))
+        e["strict"] = e.get("safe", False) and allowed(e.pop("tags", []), "sfw")
+    return out
+
+
+def parse_raw(src, data, mode):
     out = []
     j = json.loads(data)
     if src == "nekosmoe":
@@ -206,13 +220,13 @@ def parse(src, data, mode):
             if allowed(i.get("tags"), mode) and (mode != "sfw" or not i.get("nsfw")):
                 out.append(dict(url=f"https://nekos.moe/image/{i['id']}", artist=i.get("artist") or "",
                                 name=f"nekosmoe-{i['id']}", page=f"https://nekos.moe/post/{i['id']}",
-                                safe=not i.get("nsfw")))
+                                safe=not i.get("nsfw"), tags=i.get("tags")))
     elif src == "nekosapi":
         for i in j if isinstance(j, list) else j.get("items", []):
             rating = i.get("rating", "")
             if allowed(i.get("tags"), mode) and (mode != "sfw" or rating == "safe"):
                 out.append(dict(url=i["url"], artist=i.get("artist_name") or "", name=f"nekosapi-{i['id']}",
-                                page=i.get("source_url") or i["url"], safe=rating == "safe"))
+                                page=i.get("source_url") or i["url"], safe=rating == "safe", tags=i.get("tags")))
     elif src in ("danbooru", "danbooru-boys"):
         for i in j:
             url = i.get("large_file_url")
@@ -223,7 +237,7 @@ def parse(src, data, mode):
                 artist = ((i.get("tag_string_artist") or "").split() or [""])[0].replace("_", " ")
                 out.append(dict(url=url, artist=artist, name=f"danbooru-{i['id']}",
                                 page=f"https://danbooru.donmai.us/posts/{i['id']}", safe=i.get("rating") == "g",
-                                boy=src == "danbooru-boys" or ("cat_boy" in tags and "cat_girl" not in tags)))
+                                boy=src == "danbooru-boys" or ("cat_boy" in tags and "cat_girl" not in tags), tags=tags))
     elif src == "nekosbest":
         for i in j.get("results", []):
             stem = i["url"].rsplit("/", 1)[-1].split(".")[0]
@@ -430,7 +444,7 @@ def compose(src, entry, feed, c, out):
     ImageDraw.Draw(ring).ellipse((2, 2, 125, 125), outline=hexrgb(c["accent"]) + (255,), width=6)
     Image.alpha_composite(av, ring).save(out / "avatar.png")
     files = ["wall.png", "g1.png", "g2.png", "g3.png", "avatar.png"]
-    if entry.get("safe"):
+    if entry.get("safe") and entry.get("strict"):
         sq.resize((560, 560), Image.LANCZOS).save(out / "portrait.png")
         g = face.resize((300, 300), Image.LANCZOS)
         g = Image.blend(g, Image.new("RGB", g.size, hexrgb(c["accent"])), 0.06)
@@ -694,8 +708,10 @@ def main(argv):
         shutil.copy(src, dest)
         return print(f"neko: saved {dest}")
     if cmd == "open":
-        page = load_json(STATE, {}).get("page")
-        return subprocess.Popen(["xdg-open", page]) if page else sys.exit("neko: nothing shown yet")
+        page = str(load_json(STATE, {}).get("page") or "")
+        if not re.match(r"^https?://", page):
+            sys.exit("neko: nothing to open")
+        return subprocess.Popen(["xdg-open", page])
     if cmd == "greet":
         six = CACHE / "greet.six"
         if six.is_file():

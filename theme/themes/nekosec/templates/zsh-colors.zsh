@@ -62,6 +62,11 @@ theme_greet() {
     [[ $(tmux display -p '#{client_termfeatures}' 2>/dev/null) == *sixel* ]] || return
   fi
   print -rn -- "$(<$six)"
+  # The artist comes from an image site: printed raw (print -r), never through prompt
+  # expansion, which would run any $(...) in it.
   local artist=$(jq -r '.artist // empty' ~/.cache/nekosec/portrait.json 2>/dev/null)
-  print -P "%F{{ '{' }}{{ lilac }}{{ '}' }}the stone sees you · sugoi${artist:+ · art: ${artist//\%/%%}}%f"
+  print -rn -- $'\e[38;2;{{ lilac.r }};{{ lilac.g }};{{ lilac.b }}m'"the stone sees you · sugoi"
+  [[ -n $artist ]] && print -rn -- " · art: $artist"
+  print -r -- $'\e[0m'
+
 }

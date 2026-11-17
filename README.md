@@ -420,9 +420,9 @@ There are two themes:
   the Departure Mono pixel font in the bar and on the lock screen, pink Papirus
   folders (`Papirus-Neko`) and the Catppuccin Mocha pink cursor. The wallpaper
   (`themes/nekosec/wallpaper.svg`) is a seeing stone with cat ears; the lock
-  screen takes the passphrase in its eye. Four templates are its own: the window
-  border gradient (`hypr.lua`), `hyprlock.conf`, and the cava and btop
-  gradients. Its wallpaper is rendered once into `~/Pictures/Wallpapers`:
+  screen takes the passphrase in its eye. Its own templates are the window
+  border gradient (`hypr.lua`), `hyprlock.conf`, the cava and btop gradients,
+  `tmux.conf`, `zsh-colors.zsh`, `starship.toml` and `neko.json`. Its wallpaper is rendered once into `~/Pictures/Wallpapers`:
 
   ```bash
   resvg --monospace-family "DepartureMono Nerd Font" -w 2880 -h 1800 \
