@@ -7,6 +7,7 @@
 local apps = require("lua.apps")
 local host = require("lua.host")
 local ws   = require("lua.workspaces")
+local theme = require("lua.theme")
 
 hl.on("hyprland.start", function()
     -- Hand the session environment to systemd and D-Bus first, so services
@@ -57,18 +58,22 @@ hl.on("hyprland.start", function()
     -- See idle.sh for the timings and why it is a script.
     hl.exec_cmd(apps.idle)
 
-    -- Cursor theme for GTK applications. `cursor.sync_gsettings_theme` is on
-    -- by default and usually covers this, but setting it explicitly costs
-    -- nothing and survives other tools overwriting the value.
-    hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-theme 'Adwaita'")
-    hl.exec_cmd("gsettings set org.gnome.desktop.interface cursor-size 24")
-
-    -- Dark everywhere. On Wayland, GTK apps take their theme from gsettings
-    -- rather than settings.ini, and libadwaita apps, Firefox, Chrome and web
-    -- pages' prefers-color-scheme follow color-scheme (via the portal).
-    hl.exec_cmd("gsettings set org.gnome.desktop.interface gtk-theme 'Monochrome'")
-    hl.exec_cmd("gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'")
-    hl.exec_cmd("gsettings set org.gnome.desktop.interface icon-theme 'Papirus-Mono'")
+    -- The theme's cursor, GTK theme, icons and light/dark preference. On Wayland,
+    -- GTK apps take their theme from gsettings rather than settings.ini, and
+    -- libadwaita apps, Firefox, Chrome and web pages' prefers-color-scheme follow
+    -- color-scheme (via the portal). `cursor.sync_gsettings_theme` usually covers
+    -- the cursor, but setting it explicitly survives other tools overwriting it.
+    -- `theme set` changes the same keys while the session runs.
+    local function gset(key, value)
+        if value then
+            hl.exec_cmd(string.format("gsettings set org.gnome.desktop.interface %s '%s'", key, value))
+        end
+    end
+    gset("cursor-theme", theme.cursor_theme)
+    gset("cursor-size", theme.cursor_size)
+    gset("gtk-theme", theme.gtk_theme)
+    gset("color-scheme", theme.color_scheme)
+    gset("icon-theme", theme.icon_theme)
 
     -- Applications, each on its own workspace, without stealing focus.
     hl.exec_cmd(apps.terminal, { workspace = "1 silent" })

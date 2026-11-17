@@ -1,6 +1,6 @@
 {
     "basename": true,
-    "colorscheme": "monochrome",
+    "colorscheme": "theme",
     "fileformat": "unix",
     "hlsearch": true,
     "mkparents": true,

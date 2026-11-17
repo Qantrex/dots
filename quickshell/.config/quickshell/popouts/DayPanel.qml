@@ -99,7 +99,7 @@ Column {
                     Rectangle {
                         anchors.centerIn: parent
                         width: 26; height: 26; radius: 13
-                        color: parent.today ? Theme.fg : "transparent"
+                        color: parent.today ? Theme.accent : "transparent"
                     }
                     Label {
                         anchors.centerIn: parent

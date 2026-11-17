@@ -76,7 +76,7 @@ Column {
                 Rectangle {
                     width: root.p && root.p.length > 0 ? parent.width * Math.min(1, root.p.position / root.p.length) : 0
                     height: parent.height; radius: 2
-                    color: Theme.fg
+                    color: Theme.accent
                 }
             }
             MouseArea {

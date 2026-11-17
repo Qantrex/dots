@@ -92,7 +92,7 @@ PanelWindow {
                 Rectangle {
                     width: parent.width * Math.min(1, win.value)
                     height: parent.height; radius: 3
-                    color: win.off ? Theme.fgDim : Theme.fg
+                    color: win.off ? Theme.fgDim : Theme.accent
                     Behavior on width { NumberAnimation { duration: Theme.animFast } }
                 }
             }

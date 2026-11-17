@@ -38,7 +38,7 @@ Item {
             Rectangle {
                 width: Math.max(height, parent.width * Math.min(1, root.value))
                 height: parent.height; radius: 3
-                color: root.off ? Theme.fgDim : Theme.fg
+                color: root.off ? Theme.fgDim : Theme.accent
                 Behavior on width { enabled: !drag.pressed; NumberAnimation { duration: Theme.animFast } }
             }
         }
@@ -46,7 +46,7 @@ Item {
             x: Math.max(0, Math.min(parent.width - width, parent.width * Math.min(1, root.value) - width / 2))
             anchors.verticalCenter: parent.verticalCenter
             width: 14; height: 14; radius: 7
-            color: root.off ? Theme.fgMuted : Theme.fg
+            color: root.off ? Theme.fgMuted : Theme.accent
             scale: drag.pressed || drag.containsMouse ? 1.15 : 1
             Behavior on scale { NumberAnimation { duration: Theme.animFast } }
         }

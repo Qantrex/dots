@@ -60,8 +60,8 @@ return {
     -- restarts it on purpose. (The process is `qs`, the symlink, not `quickshell`.)
     shell       = "~/.config/scripts/shell.sh",
 
-    -- Default wallpaper; the launcher's picker (SUPER+SHIFT+W) saves its choice
-    -- to ~/.cache/wallpaper/last, which wins at login while the file exists.
-    -- Absolute path: hyprpaper does not expand `~`.
-    wallpaperImage = "/home/kbauer/Pictures/Wallpapers/ascii-creation-of-adam.png",
+    -- Default wallpaper: the theme's. The launcher's picker (SUPER+SHIFT+W) and
+    -- `theme set` save their choice to ~/.cache/wallpaper/last, which wins at login
+    -- while the file exists. Absolute path (the theme expands `~`): hyprpaper doesn't.
+    wallpaperImage = require("lua.theme").wallpaper or "",
 }

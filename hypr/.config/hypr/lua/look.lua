@@ -1,19 +1,24 @@
 -- Look and feel
 -- https://wiki.hypr.land/configuring/core/config-options/
+--
+-- Colours, gaps, rounding and opacity come from the theme (lua/theme.lua,
+-- ~/dotfiles/theme/templates/hypr.lua); the rest is the same for every theme.
+
+local theme = require("lua.theme")
 
 hl.config({
     general = {
-        gaps_in  = 10,
-        gaps_out = 15,
+        gaps_in  = theme.gaps_in,
+        gaps_out = theme.gaps_out,
 
-        border_size = 2,
+        border_size = theme.border_size,
 
+        -- root: a grey-to-white gradient on the focused window; unfocused tiles at
+        -- about #2e2e2e on black keep a visible edge (the old ffffff14 came out near
+        -- #141414, which the eye couldn't find) without competing with it.
         col = {
-            active_border   = { colors = { "rgba(848484aa)", "rgba(f9f9f9aa)" }, angle = 45 },
-            -- About #2e2e2e on black: unfocused tiles keep a visible edge (the old
-            -- ffffff14 came out near #141414, which the eye couldn't find) without
-            -- competing with the focused window's gradient and glow.
-            inactive_border = "rgba(ffffff2e)",
+            active_border   = theme.active_border and { colors = theme.active_border, angle = 45 },
+            inactive_border = theme.inactive_border,
         },
 
         -- Resize windows by dragging borders/gaps.
@@ -33,20 +38,20 @@ hl.config({
     },
 
     decoration = {
-        rounding       = 8,
+        rounding       = theme.rounding,
         rounding_power = 2,
 
-        active_opacity   = 0.95,
-        inactive_opacity = 0.8,
+        active_opacity   = theme.active_opacity,
+        inactive_opacity = theme.inactive_opacity,
 
-        -- New in 0.56: a halo around the focused window. Kept white and faint
+        -- New in 0.56: a halo around the focused window. In root white and faint,
         -- so it reads as depth rather than colour, matching the monochrome bar.
         glow = {
             enabled        = true,
             range          = 12,
             render_power   = 2,
-            color          = "rgba(ffffff28)",
-            color_inactive = "rgba(00000000)",
+            color          = theme.glow,
+            color_inactive = theme.glow_inactive,
         },
 
         -- Off: a black shadow can't be seen on true black, and it costs GPU on
@@ -56,8 +61,8 @@ hl.config({
             enabled        = false,
             range          = 20,
             render_power   = 3,
-            color          = "rgba(000000aa)",
-            color_inactive = "rgba(00000055)",
+            color          = theme.shadow,
+            color_inactive = theme.shadow_inactive,
             offset         = { 0, 4 },
         },
 

@@ -17,9 +17,9 @@ Rectangle {
 
     implicitHeight: 54
     radius: Theme.radiusSmall
-    color: on ? Theme.fg : (main.containsMouse ? Theme.hover : Theme.surface)
+    color: on ? Theme.accent : (main.containsMouse ? Theme.hover : Theme.surface)
     border.width: 1
-    border.color: accent.a > 0 ? accent : (on ? Theme.fg : Theme.border)
+    border.color: accent.a > 0 ? accent : (on ? Theme.accent : Theme.border)
     Behavior on color { ColorAnimation { duration: Theme.animFast } }
 
     MouseArea {

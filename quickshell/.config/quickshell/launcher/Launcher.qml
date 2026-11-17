@@ -287,7 +287,7 @@ PanelWindow {
                         Rectangle {
                             anchors.fill: parent
                             radius: Theme.radiusSmall
-                            color: tab.current ? Theme.fg : (tab.containsMouse ? Theme.hover : "transparent")
+                            color: tab.current ? Theme.accent : (tab.containsMouse ? Theme.hover : "transparent")
                         }
                         Label {
                             id: tl
@@ -333,7 +333,7 @@ PanelWindow {
                         radius: Theme.radiusSmall
                         color: cell.current ? Theme.selected : "transparent"
                         border.width: cell.current && cell.modelData.wallpaper ? 2 : 0
-                        border.color: Theme.fg
+                        border.color: Theme.accent
                     }
 
                     // Wallpaper thumbnail.

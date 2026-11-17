@@ -281,7 +281,7 @@ Column {
                 Rectangle {
                     visible: Notifs.unread > 0
                     width: 7; height: 7; radius: 4
-                    color: Theme.fg
+                    color: Theme.accent
                     anchors { right: parent.right; top: parent.top; margins: 5 }
                 }
             }
