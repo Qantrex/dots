@@ -281,8 +281,8 @@ PanelWindow {
                     Label {
                         visible: !search.text
                         anchors.verticalCenter: parent.verticalCenter
-                        text: ({ apps: "Run an app", clipboard: "Search the clipboard", emoji: "Find an emoji",
-                                 screenshot: "Take a screenshot", wallpaper: "Pick a wallpaper", theme: "Pick a theme", power: "Session" })[win.mode] ?? ""
+                        text: (Neko.enabled ? "(=^･ω･^=) " : "") + (({ apps: "Run an app", clipboard: "Search the clipboard", emoji: "Find an emoji",
+                                 screenshot: "Take a screenshot", wallpaper: "Pick a wallpaper", theme: "Pick a theme", power: "Session" })[win.mode] ?? "") + (Neko.enabled ? ", nya~" : "")
                         dim: true
                         size: Theme.fontLarge
                     }

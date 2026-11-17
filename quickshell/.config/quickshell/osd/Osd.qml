@@ -80,21 +80,41 @@ PanelWindow {
             anchors { fill: parent; leftMargin: 18; rightMargin: 18 }
             spacing: 14
             Glyph {
+                id: osdIcon
                 anchors.verticalCenter: parent.verticalCenter
-                width: 20
+                visible: !Neko.enabled
+                width: visible ? 20 : 0
                 text: win.icon
                 size: 18
                 color: win.off ? Theme.fgDim : Theme.fg
             }
+            // nekosec: a face that follows the level instead of the icon.
+            Label {
+                id: osdFace
+                anchors.verticalCenter: parent.verticalCenter
+                visible: Neko.enabled
+                width: visible ? 96 : 0
+                text: win.off ? "(=×ω×=)" : win.value <= 0.001 ? "(=-ω-=)" : win.value < 0.3 ? "(=･ω･=)"
+                    : win.value < 0.7 ? "(=^･ω･^=)" : win.value < 1 ? "(=ↀωↀ=)!" : "(=ↀДↀ=)!!"
+                color: win.off ? Theme.fgDim : win.value >= 1 ? Theme.love : Theme.accent
+            }
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - 20 - 44 - 2 * parent.spacing
+                width: parent.width - (Neko.enabled ? osdFace.width : osdIcon.width) - 44 - 2 * parent.spacing
                 height: 6; radius: 3
                 color: Theme.track
                 Rectangle {
                     width: parent.width * Math.min(1, win.value)
                     height: parent.height; radius: 3
                     color: win.off ? Theme.fgDim : Theme.accent
+                    gradient: Neko.enabled && !win.off ? nekoFill : null
+                    Gradient {
+                        id: nekoFill
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0; color: Theme.accent }
+                        GradientStop { position: 0.6; color: Neko.lilac }
+                        GradientStop { position: 1; color: Neko.mint }
+                    }
                     Behavior on width { NumberAnimation { duration: Theme.animFast } }
                 }
             }
