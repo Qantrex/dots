@@ -1,0 +1,12 @@
+#!/bin/sh
+# nekosec enter (on `theme set nekosec` and at login): start the picture daemon
+# (`neko`, in ~/.local/bin) as the user unit "nekosec". One fixed unit name, so a
+# second start does nothing; `leave` stops it.
+systemctl --user is-active -q nekosec && exit 0
+systemctl --user reset-failed nekosec 2>/dev/null
+exec systemd-run --user --unit=nekosec --collect --quiet \
+  -p Restart=on-failure -p RestartSec=30 \
+  --setenv=HYPRLAND_INSTANCE_SIGNATURE="$HYPRLAND_INSTANCE_SIGNATURE" \
+  --setenv=WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
+  --setenv=PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin" \
+  "$HOME/.local/bin/neko" daemon

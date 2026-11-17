@@ -1,0 +1,679 @@
+#!/usr/bin/env python3
+"""neko: the picture side of the nekosec theme (theme/themes/nekosec).
+
+A daemon fetches catgirl pictures from the sources the `catgirl` command uses
+(nekos.moe, nekosapi.com, nekos.best, Danbooru), turns each into a "surveillance
+feed" wallpaper in the theme's colours and changes it every few minutes with a
+short glitch. It also writes a round avatar for the bar, a portrait for the lock
+screen and a picture for the terminal greeting. Those last two only ever come
+from pictures rated safe, whatever the mode.
+
+    neko                     what is shown, the mode and the settings
+    neko next                a new picture now (also resumes after a pause)
+    neko pause | resume      stop / restart changing (picking a wallpaper with
+                             SUPER+SHIFT+W pauses on its own)
+    neko mode sfw|mixed|nsfw which pictures: sfw (default) only safe ratings,
+                             mixed all, nsfw only questionable/explicit
+    neko interval MINUTES    how often the picture changes (default 10)
+    neko glitch on|off       the glitch on every change and now and then
+    neko sound NAME|off      the nya on notifications and unlock (`neko sounds` lists them)
+    neko save                copy the current picture to ~/Downloads
+    neko open                open the current picture's page in the browser
+    neko greet               print the terminal greeting (zsh does, in nekosec)
+    neko hud                 the bar's opsec status as JSON
+    neko urls                the request URLs of the current mode (no requests)
+    neko daemon              the loop itself (theme/themes/nekosec/hooks/enter starts it)
+
+Every source's child-character tags are always skipped, in every mode, and so are
+school tags outside sfw. Pictures and state stay in ~/.cache/nekosec, settings in
+~/.config/nekosec/settings.json.
+"""
+
+import json
+import os
+import random
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import tomllib
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+THEME_DIR = Path(__file__).resolve().parents[3] / "theme" / "themes" / "nekosec"
+CURRENT = Path(__file__).resolve().parents[3] / "theme" / "current"
+CACHE = HOME / ".cache" / "nekosec"
+CONFIG = HOME / ".config" / "nekosec" / "settings.json"
+STATE = CACHE / "state.json"
+PIDFILE = CACHE / "daemon.pid"
+WALL_LAST = HOME / ".cache" / "wallpaper" / "last"
+UA = "catgirl-fetcher"
+
+DEFAULTS = {"mode": "sfw", "interval": 10, "glitch": True, "sound": "chirp", "paused": False}
+
+# Never shown, in any mode: child characters (normalised to snake_case).
+BLOCK = re.compile(r"^(loli|lolicon|shota|shotacon|toddler|toddlercon|aged_down|child|children|"
+                   r"kid|kids|young|younger|baby|kindergarten.*|elementary_school.*|"
+                   r"randoseru|child_drawing|age_regression|petite_child)$")
+# Also never shown outside sfw: school settings and uniforms.
+BLOCK_ADULT = re.compile(r"^(school_uniform|serafuku|middle_school.*|high_school.*|"
+                         r"school_swimsuit|gym_uniform|bloomers|sailor_collar)$")
+
+KAOMOJI = ["(=^･ω･^=)", "(=ↀωↀ=)", "ฅ^•ﻌ•^ฅ", "(^・ω・^ )", "(=^‥^=)", "(ﾐΦ ﻌ ΦﾐE)",
+           "ᓚᘏᗢ", "(=①ω①=)", "(^˵◕ω◕˵^)", "(=｀ω´=)", "(=^-ω-^=)", "₍^ >ヮ<^₎"]
+SLOGANS = ["NO GODS · NO MASTERS · NO TELEMETRY", "SEIZE THE MEANS OF COMPILATION",
+           "TRUST NO CLOUD ~NYA", "READ THE SOURCE, COMRADE", "END-TO-END PURRCRYPTED",
+           "THE STONE SEES ALL · THE CAT SEES MORE", "YOUR DATA, YOUR CAT", "AGPL OR BUST",
+           "FREE SOFTWARE FOR FREE CATS", "ROLL YOUR OWN CRYPTO? NYAT."]
+THREATS = ["kawaii", "extremely kawaii", "purring", "feral", "nyaxed out", "plotting", "sleepy",
+           "zoomies", "baka", "uwu-level 9"]
+
+
+# --- small helpers -----------------------------------------------------------------
+
+
+def load_json(path, default):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def settings():
+    return {**DEFAULTS, **load_json(CONFIG, {})}
+
+
+def set_setting(key, value):
+    s = load_json(CONFIG, {})
+    s[key] = value
+    save_json(CONFIG, s)
+
+
+def run(*cmd, timeout=30):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def palette():
+    with (THEME_DIR / "theme.toml").open("rb") as f:
+        c = tomllib.load(f)["colors"]
+    return c
+
+
+def hexrgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def daemon_pid():
+    try:
+        pid = int(PIDFILE.read_text())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError):
+        return None
+
+
+def poke(sig=signal.SIGUSR1):
+    pid = daemon_pid()
+    if pid:
+        os.kill(pid, sig)
+    return pid
+
+
+def nekosec_current():
+    try:
+        return Path(os.readlink(CURRENT)).name.startswith("nekosec-")
+    except OSError:
+        return False
+
+
+# --- sources -----------------------------------------------------------------------
+
+
+def norm(tags):
+    return [str(t).lower().replace(" ", "_") for t in tags or []]
+
+
+def allowed(tags, mode):
+    t = norm(tags)
+    if any(BLOCK.match(x) for x in t):
+        return False
+    if mode != "sfw" and any(BLOCK_ADULT.match(x) for x in t):
+        return False
+    return True
+
+
+def urls(mode):
+    """The request of every source for MODE (sfw, mixed, nsfw)."""
+    u = {}
+    q = {"sfw": "&nsfw=false", "nsfw": "&nsfw=true"}.get(mode, "")
+    u["nekosmoe"] = "https://nekos.moe/api/v1/random/image?count=100" + q
+    r = {"sfw": "&rating=safe", "nsfw": "&rating=borderline&rating=explicit"}.get(mode, "")
+    u["nekosapi"] = "https://api.nekosapi.com/v4/images/random?limit=100&tags=catgirl" + r
+    tags = "cat_girl score:>20 order:random"
+    tags += {"sfw": " rating:g", "nsfw": " rating:q,e"}.get(mode, "")
+    u["danbooru"] = "https://danbooru.donmai.us/posts.json?limit=100&tags=" + urllib.parse.quote(tags, safe=":,")
+    if mode != "nsfw":
+        u["nekosbest"] = "https://nekos.best/api/v2/neko?amount=20"
+    return u
+
+
+def get(url, timeout=15):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def parse(src, data, mode):
+    """Entries: dict(url, artist, name, page, safe)."""
+    out = []
+    j = json.loads(data)
+    if src == "nekosmoe":
+        for i in j.get("images", []):
+            if allowed(i.get("tags"), mode) and (mode != "sfw" or not i.get("nsfw")):
+                out.append(dict(url=f"https://nekos.moe/image/{i['id']}", artist=i.get("artist") or "",
+                                name=f"nekosmoe-{i['id']}", page=f"https://nekos.moe/post/{i['id']}",
+                                safe=not i.get("nsfw")))
+    elif src == "nekosapi":
+        for i in j if isinstance(j, list) else j.get("items", []):
+            rating = i.get("rating", "")
+            if allowed(i.get("tags"), mode) and (mode != "sfw" or rating == "safe"):
+                out.append(dict(url=i["url"], artist=i.get("artist_name") or "", name=f"nekosapi-{i['id']}",
+                                page=i.get("source_url") or i["url"], safe=rating == "safe"))
+    elif src == "danbooru":
+        for i in j:
+            url = i.get("large_file_url")
+            if not url or i.get("file_ext") not in ("jpg", "jpeg", "png", "webp"):
+                continue
+            tags = (i.get("tag_string") or "").split()
+            if allowed(tags, mode) and (mode != "sfw" or i.get("rating") == "g"):
+                artist = ((i.get("tag_string_artist") or "").split() or [""])[0].replace("_", " ")
+                out.append(dict(url=url, artist=artist, name=f"danbooru-{i['id']}",
+                                page=f"https://danbooru.donmai.us/posts/{i['id']}", safe=i.get("rating") == "g"))
+    elif src == "nekosbest":
+        for i in j.get("results", []):
+            stem = i["url"].rsplit("/", 1)[-1].split(".")[0]
+            out.append(dict(url=i["url"], artist=i.get("artist_name") or "", name=f"nekosbest-{stem}",
+                            page=i.get("source_url") or i["url"], safe=True))
+    return out
+
+
+def fetch_batch(mode):
+    found, threads = [], []
+
+    def one(src, url):
+        try:
+            found.extend(parse(src, get(url), mode))
+        except Exception as e:  # noqa: BLE001 -- one dead source never stops the rest
+            print(f"neko: {src}: {type(e).__name__}: {e}", file=sys.stderr)
+
+    for src, url in urls(mode).items():
+        t = threading.Thread(target=one, args=(src, url), daemon=True)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join(25)
+    random.shuffle(found)
+    return found
+
+
+# --- pictures ----------------------------------------------------------------------
+
+
+def screen_size():
+    r = run("hyprctl", "monitors", "-j")
+    try:
+        mons = json.loads(r.stdout)
+        m = max(mons, key=lambda m: m["width"] * m["height"])
+        return m["width"], m["height"]
+    except Exception:  # noqa: BLE001
+        return 2880, 1800
+
+
+def esc(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def hud_svg(W, H, box, info, c):
+    """The overlay: target brackets, side panels, scanlines. Text in Departure Mono."""
+    s = H / 1800
+    x, y, w, h = box
+    pink, mint, lilac, fg, love, gold = c["accent"], c["mint"], c["lilac"], c["fg"], c["love"], c["gold"]
+    L = 40 * s  # bracket arm
+    br = []
+    for cx, cy, dx, dy in ((x, y, 1, 1), (x + w, y, -1, 1), (x, y + h, 1, -1), (x + w, y + h, -1, -1)):
+        cx, cy = cx - dx * 14 * s, cy - dy * 14 * s
+        br.append(f"M {cx + dx * L:.0f} {cy:.0f} L {cx:.0f} {cy:.0f} L {cx:.0f} {cy + dy * L:.0f}")
+    fs = lambda n: f"{n * s:.0f}"  # noqa: E731
+    lx = max(60 * s, x - 640 * s)
+    rx = min(W - 60 * s, x + w + 640 * s)
+    left = [("FEED", f"{info['feed']:03d} · LIVE", love), ("SUBJECT", info["subject"], fg),
+            ("CLASS", f"catgirl ({info['conf']}%)", mint), ("THREAT", info["threat"], gold),
+            ("ARTIST", info["artist"] or "unknown", lilac), ("SOURCE", info["source"], lilac),
+            ("RATING", info["rating"], mint if info["rating"] == "SFW" else love)]
+    lines = []
+    for i, (k, v, col) in enumerate(left):
+        yy = 330 * s + i * 54 * s
+        lines.append(f'<text x="{lx:.0f}" y="{yy:.0f}" font-size="{fs(22)}" fill="{lilac}" opacity="0.7">{esc(k)}</text>')
+        lines.append(f'<text x="{lx + 150 * s:.0f}" y="{yy:.0f}" font-size="{fs(26)}" fill="{col}">{esc(str(v)[:24])}</text>')
+    cipher = "".join(random.choice("0123456789abcdef") for _ in range(32))
+    cy0 = 330 * s
+    right = [f"<text x=\"{rx:.0f}\" y=\"{cy0 + i * 40 * s:.0f}\" font-size=\"{fs(20)}\" fill=\"{mint}\" "
+             f"opacity=\"0.45\" text-anchor=\"end\">{cipher[i * 4:(i + 1) * 4 + 12]}</text>" for i in range(8)]
+    eye_x, eye_y, er = rx - 90 * s, H - 330 * s, 70 * s
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+  <defs>
+    <pattern id="scan" width="{max(3, round(6 * s))}" height="{max(3, round(6 * s))}" patternUnits="userSpaceOnUse">
+      <rect width="{max(3, round(6 * s))}" height="{max(1, round(2 * s))}" fill="#000" opacity="0.16"/>
+    </pattern>
+    <radialGradient id="eye" cx="50%" cy="42%" r="60%">
+      <stop offset="0" stop-color="{pink}"/><stop offset="0.6" stop-color="#8a3fd1"/><stop offset="1" stop-color="{c['bg']}"/>
+    </radialGradient>
+  </defs>
+  <rect width="{W}" height="{H}" fill="url(#scan)"/>
+  <g font-family="DepartureMono Nerd Font, monospace">
+    <path d="{' '.join(br)}" stroke="{pink}" stroke-width="{fs(5)}" fill="none" stroke-linecap="square"/>
+    <rect x="{x:.0f}" y="{y - 58 * s:.0f}" width="{min(w, 560 * s):.0f}" height="{36 * s:.0f}" fill="{pink}"/>
+    <text x="{x + 12 * s:.0f}" y="{y - 31 * s:.0f}" font-size="{fs(22)}" fill="{c['bg']}">TARGET ACQUIRED {esc(info['kaomoji'])}</text>
+    <text x="{x + w:.0f}" y="{y + h + 52 * s:.0f}" font-size="{fs(20)}" fill="{lilac}" text-anchor="end" opacity="0.8">{esc(info['stamp'])} · {esc(info['name'])}</text>
+    {''.join(lines)}
+    <text x="{lx:.0f}" y="{330 * s + 7 * 54 * s + 90 * s:.0f}" font-size="{fs(64)}" fill="{pink}">{esc(info['kaomoji'])}</text>
+    <text x="{lx:.0f}" y="{H - 140 * s:.0f}" font-size="{fs(30)}" fill="{pink}">{esc(info['slogan'])}</text>
+    <text x="{lx:.0f}" y="{H - 100 * s:.0f}" font-size="{fs(18)}" fill="{lilac}" opacity="0.7">nekosec · the stone sees you · {esc(info['user'])}@localhost</text>
+    {''.join(right)}
+    <circle cx="{eye_x:.0f}" cy="{eye_y:.0f}" r="{er + 24 * s:.0f}" fill="{pink}" opacity="0.18"/>
+    <circle cx="{eye_x:.0f}" cy="{eye_y:.0f}" r="{er:.0f}" fill="url(#eye)" stroke="{pink}" stroke-width="{fs(3)}"/>
+    <ellipse cx="{eye_x:.0f}" cy="{eye_y:.0f}" rx="{7 * s:.0f}" ry="{er * 0.78:.0f}" fill="{c['bg']}"/>
+    <text x="{rx:.0f}" y="{eye_y + er + 70 * s:.0f}" font-size="{fs(20)}" fill="{mint}" text-anchor="end" opacity="0.8">THE STONE IS WATCHING</text>
+  </g>
+</svg>'''
+
+
+def compose(src, entry, feed, c, out):
+    """src picture -> out/{wall,g1,g2,g3,avatar,portrait?}.png. Returns the file names."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
+
+    W, H = screen_size()
+    s = H / 1800
+    img = Image.open(src)
+    img.seek(0)
+    img = ImageOps.exif_transpose(img.convert("RGB"))
+
+    # Backdrop: the picture filling the screen, blurred, mapped onto the palette, dark.
+    stops = [hexrgb(c["bg"]), (0x1d, 0x0b, 0x2b), (0x4a, 0x1d, 0x6e), (0xa0, 0x3a, 0x9e), hexrgb(c["accent"])]
+    lut = []
+    for ch in range(3):
+        for v in range(256):
+            t = v / 255 * (len(stops) - 1)
+            i = min(int(t), len(stops) - 2)
+            f = t - i
+            lut.append(round(stops[i][ch] + (stops[i + 1][ch] - stops[i][ch]) * f))
+    small = ImageOps.fit(img, (W // 6, H // 6), Image.BILINEAR)
+    bg = ImageOps.grayscale(small.filter(ImageFilter.GaussianBlur(6))).convert("RGB").point(lut)
+    bg = bg.resize((W, H), Image.BILINEAR)
+    bg = Image.blend(Image.new("RGB", (W, H), hexrgb(c["bg"])), bg, 0.34)
+    # Vignette: the edges fall back to the theme's black.
+    vig = Image.new("L", (64, 40), 0)
+    ImageDraw.Draw(vig).ellipse((2, 0, 62, 40), fill=255)
+    vig = vig.filter(ImageFilter.GaussianBlur(7)).resize((W, H), Image.BILINEAR)
+    bg = Image.composite(bg, Image.new("RGB", (W, H), hexrgb(c["bg"])), vig)
+
+    # The picture: fitted into a box, faint chromatic edges, a touch of pink.
+    mh, mw = H - 2 * int(170 * s), int(W * 0.5)
+    k = min(mw / img.width, mh / img.height)
+    w, h = max(1, int(img.width * k)), max(1, int(img.height * k))
+    main = img.resize((w, h), Image.LANCZOS)
+    r, g, b = main.split()
+    off = max(2, int(4 * s))
+    main = Image.merge("RGB", (ImageChops.offset(r, off, 0), g, ImageChops.offset(b, -off, 0)))
+    main = Image.blend(main, Image.new("RGB", (w, h), hexrgb(c["accent"])), 0.05)
+    x, y = (W - w) // 2, (H - h) // 2 + int(20 * s)
+    canvas = bg.copy()
+    # A soft pink glow behind the picture.
+    glow = Image.new("RGB", (W, H), (0, 0, 0))
+    glow.paste(Image.new("RGB", (w + int(60 * s), h + int(60 * s)), hexrgb(c["accent"])),
+               (x - int(30 * s), y - int(30 * s)))
+    glow = glow.resize((W // 8, H // 8)).filter(ImageFilter.GaussianBlur(6)).resize((W, H), Image.BILINEAR)
+    canvas = ImageChops.add(canvas, Image.blend(Image.new("RGB", (W, H)), glow, 0.35))
+    canvas.paste(main, (x, y))
+
+    info = dict(feed=feed, subject=f"NEKO-{random.randint(1000, 9999)}", conf=f"{random.uniform(97, 99.9):.1f}",
+                threat=random.choice(THREATS), artist=entry.get("artist", ""),
+                source=entry["name"].split("-", 1)[0], rating="SFW" if entry.get("safe") else "NSFW",
+                kaomoji=random.choice(KAOMOJI), slogan=random.choice(SLOGANS),
+                stamp=time.strftime("%Y-%m-%d %H:%M:%S"), name=entry["name"], user=os.environ.get("USER", "neko"))
+    svg = out / "hud.svg"
+    svg.write_text(hud_svg(W, H, (x, y, w, h), info, c))
+    r = run("resvg", "--monospace-family", "DepartureMono Nerd Font", str(svg), str(out / "hud.png"), timeout=60)
+    if r and r.returncode == 0:
+        canvas = Image.alpha_composite(canvas.convert("RGBA"), Image.open(out / "hud.png").convert("RGBA")).convert("RGB")
+    canvas.save(out / "wall.png", compress_level=2)
+
+    # Glitch frames.
+    def slices(im, n, amp):
+        im = im.copy()
+        for _ in range(n):
+            y0 = random.randint(0, H - 10)
+            hh = random.randint(int(8 * s), int(90 * s))
+            band = im.crop((0, y0, W, min(H, y0 + hh)))
+            im.paste(ImageChops.offset(band, random.randint(-amp, amp), 0), (0, y0))
+        return im
+
+    r, g, b = canvas.split()
+    split = Image.merge("RGB", (ImageChops.offset(r, int(34 * s), 0), g, ImageChops.offset(b, -int(34 * s), 0)))
+    slices(split, 14, int(120 * s)).save(out / "g1.png", compress_level=1)
+    g2 = slices(canvas, 22, int(220 * s))
+    g2 = Image.blend(g2, ImageOps.invert(g2), 0.18)
+    g2.save(out / "g2.png", compress_level=1)
+    duo = ImageOps.grayscale(canvas).convert("RGB").point(lut)
+    slices(Image.blend(canvas, duo, 0.75), 6, int(60 * s)).save(out / "g3.png", compress_level=1)
+
+    # Square crops from the top centre (where the face usually is).
+    def crop(frac):
+        side = int(min(img.width, img.height) * frac)
+        top = int(img.height * 0.04) if img.height > img.width else (img.height - side) // 4
+        left = (img.width - side) // 2
+        return img.crop((left, top, left + side, top + side))
+
+    sq = crop(0.9)      # the lock screen portrait: head and shoulders or more
+    face = crop(0.55)   # the bar avatar and the greeting: about the head
+    av = face.resize((128, 128), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (512, 512), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, 511, 511), fill=255)
+    av.putalpha(mask.resize((128, 128), Image.LANCZOS))
+    ring = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    ImageDraw.Draw(ring).ellipse((2, 2, 125, 125), outline=hexrgb(c["accent"]) + (255,), width=6)
+    Image.alpha_composite(av, ring).save(out / "avatar.png")
+    files = ["wall.png", "g1.png", "g2.png", "g3.png", "avatar.png"]
+    if entry.get("safe"):
+        sq.resize((560, 560), Image.LANCZOS).save(out / "portrait.png")
+        g = face.resize((300, 300), Image.LANCZOS)
+        g = Image.blend(g, Image.new("RGB", g.size, hexrgb(c["accent"])), 0.06)
+        g.save(out / "greet.png")
+        r = run("magick", str(out / "greet.png"), "sixel:" + str(out / "greet.six"))
+        files += ["portrait.png", "greet.png"] + (["greet.six"] if r and r.returncode == 0 else [])
+    return files, info
+
+
+# --- the daemon --------------------------------------------------------------------
+
+
+def set_wall(path):
+    r = run("hyprctl", "-q", "hyprpaper", "wallpaper", f",{path}")
+    return bool(r and r.returncode == 0)
+
+
+def notify_shell():
+    run("qs", "ipc", "call", "neko", "refresh", timeout=5)
+
+
+def play(kind):
+    st = settings()
+    name = st.get("sound") or "off"
+    if name == "off" or not nekosec_current():
+        return
+    f = THEME_DIR / "sounds" / f"{name}-{kind}.ogg"
+    if not f.is_file():
+        f = THEME_DIR / "sounds" / f"{name}.ogg"
+    if f.is_file():
+        subprocess.Popen(["pw-play", "--volume", "0.6", str(f)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+class Daemon:
+    def __init__(self):
+        self.queue = []
+        self.wake = threading.Event()
+        self.state = load_json(STATE, {})
+        self.seen = set(self.state.get("seen", []))
+        self.slot = self.state.get("slot", 0)
+        self.wall_mtime = self.mtime(WALL_LAST)
+        self.locked = False
+        self.c = palette()
+
+    @staticmethod
+    def mtime(p):
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0
+
+    def burst(self, d, final):
+        if not settings()["glitch"]:
+            return set_wall(final)
+        for g, pause in (("g1.png", 0.07), ("g2.png", 0.09), ("g3.png", 0.06)):
+            if (d / g).is_file():
+                set_wall(d / g)
+                time.sleep(pause)
+        return set_wall(final)
+
+    def next(self):
+        st = settings()
+        mode = st["mode"]
+        if not self.queue or self.queue[0].get("mode") != mode:
+            self.queue = [dict(e, mode=mode) for e in fetch_batch(mode) if e["name"] not in self.seen]
+        while self.queue:
+            e = self.queue.pop(0)
+            self.seen.add(e["name"])
+            raw = CACHE / "src.img"
+            try:
+                data = get(e["url"], timeout=25)
+                if len(data) < 2000 or len(data) > 25_000_000:
+                    continue
+                raw.write_bytes(data)
+            except Exception as err:  # noqa: BLE001
+                print(f"neko: {e['name']}: {err}", file=sys.stderr)
+                continue
+            self.slot = (self.slot + 1) % 2
+            d = CACHE / f"slot{self.slot}"
+            shutil.rmtree(d, ignore_errors=True)
+            d.mkdir(parents=True)
+            try:
+                files, info = compose(raw, e, self.state.get("feed", 0) + 1, self.c, d)
+            except Exception as err:  # noqa: BLE001 -- an undecodable picture: the next one
+                print(f"neko: {e['name']}: {type(err).__name__}: {err}", file=sys.stderr)
+                continue
+            shutil.copy(raw, d / "src.img")
+            if self.wall_mtime != self.mtime(WALL_LAST) or st.get("paused"):
+                return False  # paused meanwhile: keep the picture for later
+            self.burst(d, d / "wall.png")
+            # Safe pictures also feed the lock screen and the terminal greeting.
+            for f in ("portrait.png", "greet.png", "greet.six"):
+                if (d / f).exists():
+                    shutil.copy(d / f, CACHE / f)
+            shutil.copy(d / "avatar.png", CACHE / f"avatar{self.slot}.png")
+            self.state.update(slot=self.slot, feed=info["feed"], shown=e["name"], artist=e.get("artist", ""),
+                              page=e.get("page", ""), safe=bool(e.get("safe")), mode=mode,
+                              kaomoji=info["kaomoji"], threat=info["threat"], subject=info["subject"],
+                              avatar=str(CACHE / f"avatar{self.slot}.png"), wall=str(d / "wall.png"),
+                              since=time.time(), seen=sorted(self.seen)[-3000:])
+            save_json(STATE, self.state)
+            run("hyprctl", "-q", "hyprpaper", "unload", "unused", timeout=5)
+            notify_shell()
+            return True
+        return False
+
+    def restore(self):
+        w = self.state.get("wall")
+        if w and Path(w).is_file():
+            set_wall(w)
+            notify_shell()
+            return True
+        return False
+
+    def loop(self):
+        CACHE.mkdir(parents=True, exist_ok=True)
+        PIDFILE.write_text(str(os.getpid()))
+        signal.signal(signal.SIGUSR1, lambda *_: self.wake.set())
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        for _ in range(50):  # hyprpaper may still be starting at login
+            r = run("hyprctl", "hyprpaper", "listactive", timeout=5)
+            if r and r.returncode == 0:
+                break
+            time.sleep(0.3)
+        restored = self.restore()
+        last_change = self.state.get("since", 0) if restored else 0
+        next_glitch = time.time() + random.uniform(180, 480)
+        fails = 0
+        play("startup")
+        while True:
+            st = settings()
+            now = time.time()
+            if self.mtime(WALL_LAST) != self.wall_mtime and not st.get("paused"):
+                set_setting("paused", True)  # a wallpaper was picked by hand
+                notify_shell()
+                st = settings()
+            forced = self.wake.is_set()
+            self.wake.clear()
+            if forced and st.get("paused"):
+                set_setting("paused", False)
+                self.wall_mtime = self.mtime(WALL_LAST)
+                st = settings()
+            due = now - last_change >= st["interval"] * 60 and now >= fails
+            if not st.get("paused") and (forced or due):
+                ok = self.next()
+                last_change = time.time() if ok else last_change
+                fails = 0 if ok else time.time() + 60
+            elif not st.get("paused") and st["glitch"] and now >= next_glitch and not self.locked:
+                d = CACHE / f"slot{self.slot}"
+                if (d / "wall.png").is_file():
+                    self.burst(d, d / "wall.png")
+                next_glitch = now + random.uniform(180, 480)
+            # Unlock: hyprlock went away.
+            locked = bool(run("pidof", "hyprlock", timeout=5) and run("pidof", "hyprlock").returncode == 0)
+            if self.locked and not locked:
+                play("unlock")
+            self.locked = locked
+            self.wake.wait(2)
+
+
+# --- commands ----------------------------------------------------------------------
+
+
+def opsec_hud():
+    """The bar's opsec line: a VPN or Tor, the firewall, who is watching."""
+    vpn = []
+    for dev in sorted(os.listdir("/sys/class/net")):
+        if re.match(r"^(wg|tun|tap|tailscale|proton|mullvad|nordlynx)", dev):
+            try:
+                up = Path(f"/sys/class/net/{dev}/operstate").read_text().strip() in ("up", "unknown")
+            except OSError:
+                up = False
+            if up:
+                vpn.append(dev)
+    tor = run("pgrep", "-x", "tor", timeout=3)
+    fw = run("systemctl", "is-active", "nftables", timeout=3)
+    cams = set()
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            for fd in (proc / "fd").iterdir():
+                if os.readlink(fd).startswith("/dev/video"):
+                    cams.add(proc.name)
+                    break
+        except OSError:
+            continue
+    mics = 0
+    r = run("pactl", "-f", "json", "list", "source-outputs", timeout=3)
+    try:
+        mics = sum(1 for o in json.loads(r.stdout)
+                   if not str(o.get("properties", {}).get("application.name", "")).lower().startswith(("cava", "pavucontrol")))
+    except Exception:  # noqa: BLE001
+        pass
+    return dict(vpn=vpn, tor=bool(tor and tor.returncode == 0),
+                firewall=bool(fw and fw.stdout.strip() == "active"), cams=len(cams), mics=mics)
+
+
+def cmd_status():
+    st, state = settings(), load_json(STATE, {})
+    print(f"nekosec current: {'yes' if nekosec_current() else 'no (theme set nekosec)'}")
+    print(f"daemon: {'running, pid ' + str(daemon_pid()) if daemon_pid() else 'not running'}")
+    print(f"mode {st['mode']} · every {st['interval']} min · glitch {'on' if st['glitch'] else 'off'} · "
+          f"sound {st['sound']}{' · PAUSED' if st.get('paused') else ''}")
+    if state.get("shown"):
+        print(f"showing {state['shown']} ({'safe' if state.get('safe') else 'not safe'})"
+              f"{' by ' + state['artist'] if state.get('artist') else ''} · {state.get('page', '')}")
+
+
+def main(argv):
+    cmd, args = (argv[0], argv[1:]) if argv else ("status", [])
+    if cmd in ("status", ""):
+        return cmd_status()
+    if cmd == "daemon":
+        if daemon_pid():
+            sys.exit("neko: the daemon already runs")
+        return Daemon().loop()
+    if cmd in ("next", "resume"):
+        set_setting("paused", False)
+        if not poke():
+            sys.exit("neko: the daemon isn't running (theme set nekosec starts it)")
+        return
+    if cmd == "pause":
+        set_setting("paused", True)
+        run("qs", "ipc", "call", "neko", "refresh", timeout=5)
+        return print("neko: paused (neko next or neko resume to go on)")
+    if cmd == "mode" and args and args[0] in ("sfw", "mixed", "nsfw"):
+        set_setting("mode", args[0])
+        poke()
+        return print(f"neko: mode {args[0]}" + ("" if args[0] == "sfw" else
+                     " (the lock screen and terminal greeting stay safe-only)"))
+    if cmd == "interval" and args and args[0].isdigit() and int(args[0]) > 0:
+        return set_setting("interval", int(args[0]))
+    if cmd == "glitch" and args and args[0] in ("on", "off"):
+        return set_setting("glitch", args[0] == "on")
+    if cmd == "sounds":
+        names = sorted({p.stem.split("-")[0] for p in (THEME_DIR / "sounds").glob("*.ogg")})
+        return print("sounds: " + ", ".join(names + ["off"]) + f"  (now: {settings()['sound']})")
+    if cmd == "sound" and args:
+        if args[0] not in ("notify", "unlock", "startup"):
+            set_setting("sound", args[0])
+            return play("notify")
+        return play(args[0])
+    if cmd == "save":
+        state = load_json(STATE, {})
+        src = CACHE / f"slot{state.get('slot', 0)}" / "src.img"
+        if not src.is_file():
+            sys.exit("neko: nothing shown yet")
+        head = src.read_bytes()[:12]
+        ext = "png" if head.startswith(b"\x89PNG") else "webp" if head[8:12] == b"WEBP" else "jpg"
+        dest = HOME / "Downloads" / f"catgirl-{state['shown']}.{ext}"
+        shutil.copy(src, dest)
+        return print(f"neko: saved {dest}")
+    if cmd == "open":
+        page = load_json(STATE, {}).get("page")
+        return subprocess.Popen(["xdg-open", page]) if page else sys.exit("neko: nothing shown yet")
+    if cmd == "greet":
+        six = CACHE / "greet.six"
+        if six.is_file():
+            sys.stdout.write(six.read_text())
+        return
+    if cmd == "hud":
+        return print(json.dumps(opsec_hud()))
+    if cmd == "urls":
+        for m in ("sfw", "mixed", "nsfw") if not args else args:
+            print(f"[{m}]")
+            for src, u in urls(m).items():
+                print(f"  {src:9} {u}")
+        return
+    print(__doc__.strip())
+    sys.exit(0 if cmd in ("-h", "--help", "help") else 2)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

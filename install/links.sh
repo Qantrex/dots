@@ -28,6 +28,7 @@ LINKS=(
   ".local/bin/decide|bin"
   ".local/bin/away|bin"
   ".local/bin/theme|bin"
+  ".local/bin/neko|bin"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"

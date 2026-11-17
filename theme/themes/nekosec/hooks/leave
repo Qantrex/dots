@@ -1,0 +1,4 @@
+#!/bin/sh
+# nekosec leave (on switching to another theme): stop the picture daemon.
+systemctl --user stop nekosec 2>/dev/null
+exit 0
