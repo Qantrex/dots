@@ -72,13 +72,18 @@ BLOCK_ADULT = re.compile(r"^(school_uniform|serafuku|middle_school.*|high_school
                          r"school_swimsuit|gym_uniform|bloomers|sailor_collar)$")
 
 KAOMOJI = ["(=^･ω･^=)", "(=ↀωↀ=)", "ฅ^•ﻌ•^ฅ", "(^・ω・^ )", "(=^‥^=)", "(ﾐΦ ﻌ Φﾐ)",
-           "ᓚᘏᗢ", "(=①ω①=)", "(^˵◕ω◕˵^)", "(=｀ω´=)", "(=^-ω-^=)", "₍^ >ヮ<^₎"]
+           "ᓚᘏᗢ", "(=①ω①=)", "(^˵◕ω◕˵^)", "(=｀ω´=)", "(=^-ω-^=)", "₍^ >ヮ<^₎",
+           "(=♡ω♡=)", "(◕‿◕)♡", "(≧◡≦) ♡", "(´｡• ω •｡`) ♡", "(✿◠‿◠)", "ヽ(♡‿♡)ノ"]
 SLOGANS = ["NO GODS · NO MASTERS · NO TELEMETRY", "SEIZE THE MEANS OF COMPILATION",
            "TRUST NO CLOUD ~NYA", "READ THE SOURCE, COMRADE", "END-TO-END PURRCRYPTED",
            "THE STONE SEES ALL · THE CAT SEES MORE", "YOUR DATA, YOUR CAT", "AGPL OR BUST",
-           "FREE SOFTWARE FOR FREE CATS", "ROLL YOUR OWN CRYPTO? NYAT."]
+           "FREE SOFTWARE FOR FREE CATS", "ROLL YOUR OWN CRYPTO? NYAT.", "SUGOI DESU NE ♡",
+           "ANIME IS LOVE ♡", "KAWAII IS RESISTANCE", "E-GIRLS & E-BOYS OF THE WORLD, UNITE",
+           "THIS MESSAGE WILL SELF-PURR IN 5 SECONDS", "LICENSED TO NYA"]
 THREATS = ["kawaii", "extremely kawaii", "purring", "feral", "nyaxed out", "plotting", "sleepy",
-           "zoomies", "baka", "uwu-level 9"]
+           "zoomies", "baka", "uwu-level 9", "sugoi", "e-girl energy", "e-boy energy", "maximum love ♡",
+           "kawaii overload", "senpai noticed", "deep cover"]
+CLEARANCE = ["TOP SECRET ♡", "EYES ONLY", "NEED-TO-NYA", "COSMIC KAWAII", "BURN AFTER PETTING"]
 
 
 # --- small helpers -----------------------------------------------------------------
@@ -178,6 +183,9 @@ def urls(mode):
     tags = "cat_girl score:>20 order:random"
     tags += {"sfw": " rating:g", "nsfw": " rating:q,e"}.get(mode, "")
     u["danbooru"] = "https://danbooru.donmai.us/posts.json?limit=100&tags=" + urllib.parse.quote(tags, safe=":,")
+    # E-boys welcome: catboys from Danbooru, under the same rating as the rest.
+    boys = "cat_boy score:>10 order:random" + {"sfw": " rating:g", "nsfw": " rating:q,e"}.get(mode, "")
+    u["danbooru-boys"] = "https://danbooru.donmai.us/posts.json?limit=40&tags=" + urllib.parse.quote(boys, safe=":,")
     if mode != "nsfw":
         u["nekosbest"] = "https://nekos.best/api/v2/neko?amount=20"
     return u
@@ -205,7 +213,7 @@ def parse(src, data, mode):
             if allowed(i.get("tags"), mode) and (mode != "sfw" or rating == "safe"):
                 out.append(dict(url=i["url"], artist=i.get("artist_name") or "", name=f"nekosapi-{i['id']}",
                                 page=i.get("source_url") or i["url"], safe=rating == "safe"))
-    elif src == "danbooru":
+    elif src in ("danbooru", "danbooru-boys"):
         for i in j:
             url = i.get("large_file_url")
             if not url or i.get("file_ext") not in ("jpg", "jpeg", "png", "webp"):
@@ -214,7 +222,8 @@ def parse(src, data, mode):
             if allowed(tags, mode) and (mode != "sfw" or i.get("rating") == "g"):
                 artist = ((i.get("tag_string_artist") or "").split() or [""])[0].replace("_", " ")
                 out.append(dict(url=url, artist=artist, name=f"danbooru-{i['id']}",
-                                page=f"https://danbooru.donmai.us/posts/{i['id']}", safe=i.get("rating") == "g"))
+                                page=f"https://danbooru.donmai.us/posts/{i['id']}", safe=i.get("rating") == "g",
+                                boy=src == "danbooru-boys" or ("cat_boy" in tags and "cat_girl" not in tags)))
     elif src == "nekosbest":
         for i in j.get("results", []):
             stem = i["url"].rsplit("/", 1)[-1].split(".")[0]
@@ -272,15 +281,25 @@ def hud_svg(W, H, box, info, c):
     fs = lambda n: f"{n * s:.0f}"  # noqa: E731
     lx = max(60 * s, x - 640 * s)
     rx = min(W - 60 * s, x + w + 640 * s)
-    left = [("FEED", f"{info['feed']:03d} · LIVE", love), ("SUBJECT", info["subject"], fg),
-            ("CLASS", f"catgirl ({info['conf']}%)", mint), ("THREAT", info["threat"], gold),
+    left = [("FEED", f"{info['feed']:03d} · LIVE", love), ("AGENT", info["subject"], fg),
+            ("CLASS", f"{info['cls']} ({info['conf']}%)", mint), ("THREAT", info["threat"], gold),
+            ("CLEARANCE", info["clearance"], pink),
             ("ARTIST", info["artist"] or "unknown", lilac), ("SOURCE", info["source"], lilac),
             ("RATING", info["rating"], mint if info["rating"] == "SFW" else love)]
     lines = []
     for i, (k, v, col) in enumerate(left):
         yy = 330 * s + i * 54 * s
         lines.append(f'<text x="{lx:.0f}" y="{yy:.0f}" font-size="{fs(22)}" fill="{lilac}" opacity="0.7">{esc(k)}</text>')
-        lines.append(f'<text x="{lx + 150 * s:.0f}" y="{yy:.0f}" font-size="{fs(26)}" fill="{col}">{esc(str(v)[:24])}</text>')
+        lines.append(f'<text x="{lx + 170 * s:.0f}" y="{yy:.0f}" font-size="{fs(26)}" fill="{col}">{esc(str(v)[:24])}</text>')
+    # The slogan: one or two lines, small enough to stay left of the picture.
+    avail = max(200 * s, x - lx - 40 * s)
+    words, sl = info["slogan"].split(), [info["slogan"]]
+    if len(info["slogan"]) * 0.62 * 30 * s > avail and len(words) > 1:
+        cut = min(range(1, len(words)), key=lambda i: abs(len(" ".join(words[:i])) - len(" ".join(words[i:]))))
+        sl = [" ".join(words[:cut]), " ".join(words[cut:])]
+    sfs = min(30 * s, avail / (0.62 * max(len(l) for l in sl)))
+    slogan = "".join(f'<text x="{lx:.0f}" y="{H - 140 * s - (len(sl) - 1 - i) * sfs * 1.25:.0f}" font-size="{sfs:.0f}" '
+                     f'fill="{pink}">{esc(l)}</text>' for i, l in enumerate(sl))
     cipher = "".join(random.choice("0123456789abcdef") for _ in range(32))
     cy0 = 330 * s
     right = [f"<text x=\"{rx:.0f}\" y=\"{cy0 + i * 40 * s:.0f}\" font-size=\"{fs(20)}\" fill=\"{mint}\" "
@@ -302,9 +321,9 @@ def hud_svg(W, H, box, info, c):
     <text x="{x + 12 * s:.0f}" y="{y - 31 * s:.0f}" font-size="{fs(22)}" fill="{c['bg']}">TARGET ACQUIRED {esc(info['kaomoji'])}</text>
     <text x="{x + w:.0f}" y="{y + h + 52 * s:.0f}" font-size="{fs(20)}" fill="{lilac}" text-anchor="end" opacity="0.8">{esc(info['stamp'])} · {esc(info['name'])}</text>
     {''.join(lines)}
-    <text x="{lx:.0f}" y="{330 * s + 7 * 54 * s + 90 * s:.0f}" font-size="{fs(64)}" fill="{pink}">{esc(info['kaomoji'])}</text>
-    <text x="{lx:.0f}" y="{H - 140 * s:.0f}" font-size="{fs(30)}" fill="{pink}">{esc(info['slogan'])}</text>
-    <text x="{lx:.0f}" y="{H - 100 * s:.0f}" font-size="{fs(18)}" fill="{lilac}" opacity="0.7">nekosec · the stone sees you · {esc(info['user'])}@localhost</text>
+    <text x="{lx:.0f}" y="{330 * s + 8 * 54 * s + 90 * s:.0f}" font-size="{fs(64)}" fill="{pink}">{esc(info['kaomoji'])}</text>
+    {slogan}
+    <text x="{lx:.0f}" y="{H - 100 * s:.0f}" font-size="{fs(18)}" fill="{lilac}" opacity="0.7">nekosec · the stone sees you · (=^･ω･^=)@localhost</text>
     {''.join(right)}
     <circle cx="{eye_x:.0f}" cy="{eye_y:.0f}" r="{er + 24 * s:.0f}" fill="{pink}" opacity="0.18"/>
     <circle cx="{eye_x:.0f}" cy="{eye_y:.0f}" r="{er:.0f}" fill="url(#eye)" stroke="{pink}" stroke-width="{fs(3)}"/>
@@ -362,11 +381,12 @@ def compose(src, entry, feed, c, out):
     canvas = ImageChops.add(canvas, Image.blend(Image.new("RGB", (W, H)), glow, 0.35))
     canvas.paste(main, (x, y))
 
-    info = dict(feed=feed, subject=f"NEKO-{random.randint(1000, 9999)}", conf=f"{random.uniform(97, 99.9):.1f}",
-                threat=random.choice(THREATS), artist=entry.get("artist", ""),
+    info = dict(feed=feed, subject=f"NEKO-{random.randint(0, 999):03d}", conf=f"{random.uniform(97, 99.9):.1f}",
+                cls="catboy · e-boy" if entry.get("boy") else "catgirl · e-girl",
+                clearance=random.choice(CLEARANCE), threat=random.choice(THREATS), artist=entry.get("artist", ""),
                 source=entry["name"].split("-", 1)[0], rating="SFW" if entry.get("safe") else "NSFW",
                 kaomoji=random.choice(KAOMOJI), slogan=random.choice(SLOGANS),
-                stamp=time.strftime("%Y-%m-%d %H:%M:%S"), name=entry["name"], user=os.environ.get("USER", "neko"))
+                stamp=time.strftime("%Y-%m-%d %H:%M:%S"), name=entry["name"])
     svg = out / "hud.svg"
     svg.write_text(hud_svg(W, H, (x, y, w, h), info, c))
     r = run("resvg", "--monospace-family", "DepartureMono Nerd Font", str(svg), str(out / "hud.png"), timeout=60)
