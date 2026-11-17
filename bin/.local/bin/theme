@@ -6,6 +6,9 @@
     theme apply              render the current theme again (after editing a palette
                              or a template), keeps the wallpaper you picked
     theme render NAME DIR    only render NAME into DIR, change nothing (to diff or check)
+    theme preview NAME OUT.png   draw a mock desktop in NAME's real colours, fonts and
+                             wallpaper (what the launcher's Theme mode shows); previews
+                             are cached in ~/.cache/theme-previews by 
     theme hook enter|leave   run the current theme's hook (Hyprland runs `enter` at login)
 
 How it fits together (details in the README, "Themes"):
@@ -369,6 +372,269 @@ def cmd_set(name, changed=True):
         hook(name, "enter")
 
 
+# --- Previews -----------------------------------------------------------------
+# `theme preview NAME OUT.png` composes a mock desktop from a theme's real, rendered
+# values (quickshell.json, hypr.lua, foot.ini and its wallpaper) as SVG and turns it
+# into a PNG with resvg. Nothing on the real screen is ever captured.
+
+PREVIEW_DIR = HOME / ".cache" / "theme-previews"
+PREVIEW_W, PREVIEW_H = 1440, 900   # the logical screen the mock desktop is drawn on
+PREVIEW_PX = 960                   # width of the PNG
+
+
+def esc(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def rgba(text):
+    """'rgba(rrggbbaa)' or 'rrggbb' -> ('#rrggbb', opacity)."""
+    h = re.sub(r"^rgba\(|\)$", "", text.strip().lstrip("#"))
+    return "#" + h[:6], (int(h[6:8], 16) / 255 if len(h) >= 8 else 1.0)
+
+
+def preview_values(d):
+    """Read what the preview needs out of a rendered theme directory."""
+    d = Path(d)
+    q = __import__("json").loads((d / "quickshell.json").read_text())
+    lua = (d / "hypr.lua").read_text()
+    foot = (d / "foot.ini").read_text()
+
+    def lua_num(key):
+        return float(re.search(rf"^\s*{key}\s*=\s*([\d.]+)", lua, re.M).group(1))
+
+    def lua_cols(key):
+        m = re.search(rf"^\s*{key}\s*=\s*(\{{[^}}]*\}}|\"[^\"]*\")", lua, re.M)
+        return re.findall(r"rgba\([0-9a-fA-F]+\)", m.group(1)) if m else []
+
+    def ini(key):
+        m = re.search(rf"^{key}=(.*)$", foot, re.M)
+        return m.group(1).strip() if m else ""
+
+    font = re.match(r"(.*?):size=([\d.]+)", ini("font"))
+    wp = re.search(r'^\s*wallpaper\s*=\s*"([^"]*)"', lua, re.M)
+    return {
+        "q": q,
+        "active": lua_cols("active_border"), "inactive": lua_cols("inactive_border"),
+        "glow": lua_cols("glow"), "shadow": lua_cols("shadow"),
+        "rounding": lua_num("rounding"), "gaps_in": lua_num("gaps_in"), "gaps_out": lua_num("gaps_out"),
+        "border": lua_num("border_size"), "active_opacity": lua_num("active_opacity"),
+        "inactive_opacity": lua_num("inactive_opacity"),
+        "wallpaper": wp.group(1) if wp else "",
+        "mono": font.group(1) if font else "monospace", "mono_size": float(font.group(2)) if font else 12,
+        "alpha": float(ini("alpha") or 1), "tbg": "#" + ini("background"), "tfg": "#" + ini("foreground"),
+        "pal": ["#" + ini(f"regular{i}") for i in range(8)] + ["#" + ini(f"bright{i}") for i in range(8)],
+    }
+
+
+def preview_svg(name, desc, v):
+    q = v["q"]
+    W, H = PREVIEW_W, PREVIEW_H
+    out = []
+    add = out.append
+    defs = []
+    bar_h, gap, side = q["barHeight"], q["gap"], 15
+    r, rs = q["radius"], q["radiusSmall"]
+    bg, fg, accent, inverse = q["bg"], q["fg"], q["accent"], q["inverse"]
+    font = esc(q["font"])
+
+    add(f'<rect width="{W}" height="{H}" fill="{bg}"/>')
+    if v["wallpaper"] and Path(v["wallpaper"]).is_file():
+        add(f'<image href="{esc(v["wallpaper"])}" x="0" y="0" width="{W}" height="{H}" preserveAspectRatio="xMidYMid slice"/>')
+
+    # Bar: three islands (workspaces, clock, status), translucent bg, fg-tinted border.
+    def island(x, w, content):
+        add(f'<rect x="{x}" y="{gap}" width="{w}" height="{bar_h}" rx="{r}" fill="{bg}" fill-opacity="0.85" '
+            f'stroke="{fg}" stroke-opacity="0.18"/>')
+        add(content)
+
+    cy = gap + bar_h / 2
+    chip = bar_h - 14
+    ws = []
+    for i in range(5):
+        x = side + 8 + i * (chip + 6)
+        if i == 1:
+            ws.append(f'<rect x="{x}" y="{cy - chip / 2}" width="{chip}" height="{chip}" rx="{rs}" fill="{accent}"/>'
+                      f'<rect x="{x + chip * .28}" y="{cy - chip * .22}" width="{chip * .44}" height="{chip * .44}" rx="2" fill="{inverse}"/>')
+        elif i < 4:
+            ws.append(f'<rect x="{x + chip * .28}" y="{cy - chip * .22}" width="{chip * .44}" height="{chip * .44}" rx="2" fill="{fg}" fill-opacity="0.45"/>')
+        else:
+            ws.append(f'<circle cx="{x + chip / 2}" cy="{cy}" r="2.5" fill="{fg}" fill-opacity="0.3"/>')
+    island(side, 5 * (chip + 6) + 10, "".join(ws))
+
+    fs = q["fontSize"]
+    cw = 190
+    island((W - cw) / 2, cw,
+           f'<text x="{W / 2}" y="{cy}" dominant-baseline="central" text-anchor="middle" font-family="{font}" font-size="{fs * 1.25}" fill="{fg}">'
+           f'12:34<tspan dx="14" fill="{fg}" fill-opacity="0.55" font-size="{fs}">Wed 18</tspan></text>')
+
+    tray_w = 120
+    status_w = 250
+    x_tray = W - side - tray_w
+    x_status = x_tray - 8 - status_w
+    st = [f'<text x="{x_status + 16}" y="{cy}" dominant-baseline="central" font-family="{font}" font-size="{fs}" fill="{fg}">87%</text>',
+          f'<text x="{x_status + 62}" y="{cy}" dominant-baseline="central" font-family="{font}" font-size="{fs}" fill="{fg}" fill-opacity="0.55">vol 60</text>']
+    bx = x_status + 140
+    st.append(f'<rect x="{bx}" y="{cy - 3}" width="90" height="6" rx="3" fill="{fg}" fill-opacity="0.16"/>'
+              f'<rect x="{bx}" y="{cy - 3}" width="52" height="6" rx="3" fill="{accent}"/>')
+    island(x_status, status_w, "".join(st))
+    tr = "".join(f'<circle cx="{x_tray + 24 + i * 24}" cy="{cy}" r="7" fill="{fg}" fill-opacity="{0.55 - i * 0.1}"/>' for i in range(4))
+    island(x_tray, tray_w, tr)
+
+    # Windows: tiled under the bar with gaps_out at the edges and 2 * gaps_in between.
+    go, gi, bw = v["gaps_out"], v["gaps_in"], v["border"]
+    top = gap + bar_h + go
+    x0, x1, y1 = go, W - go, H - go
+    split = x0 + (x1 - x0 - 2 * gi) * 0.56
+    tiles = [(x0, top, split - x0, y1 - top, True), (split + 2 * gi, top, x1 - split - 2 * gi, y1 - top, False)]
+
+    fpx = v["mono_size"] * 1.33
+    lh = fpx * 1.3
+    pal, tfg = v["pal"], v["tfg"]
+
+    def colour_stops(cols):
+        return "".join(f'<stop offset="{i / max(1, len(cols) - 1)}" stop-color="{rgba(c)[0]}" stop-opacity="{rgba(c)[1]}"/>'
+                       for i, c in enumerate(cols))
+
+    if v["active"]:
+        defs.append(f'<linearGradient id="act" gradientUnits="objectBoundingBox" x1="0" y1="0" x2="1" y2="1">{colour_stops(v["active"])}</linearGradient>')
+    defs.append('<filter id="blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>')
+
+    def term(x, y, w, h, active, lines):
+        n = f"w{int(x)}"
+        defs.append(f'<clipPath id="{n}"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{v["rounding"]}"/></clipPath>')
+        if active and v["glow"]:
+            c, o = rgba(v["glow"][0])
+            if o > 0:
+                add(f'<rect x="{x - 4}" y="{y - 4}" width="{w + 8}" height="{h + 8}" rx="{v["rounding"] + 4}" fill="{c}" fill-opacity="{min(1, o * 2)}" filter="url(#blur)"/>')
+        if v["shadow"]:
+            c, o = rgba(v["shadow"][0])
+            add(f'<rect x="{x}" y="{y + 6}" width="{w}" height="{h}" rx="{v["rounding"]}" fill="{c}" fill-opacity="{o * 0.8}" filter="url(#blur)"/>')
+        op = v["active_opacity"] if active else v["inactive_opacity"]
+        add(f'<g opacity="{op}"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{v["rounding"]}" fill="{v["tbg"]}" fill-opacity="{v["alpha"]}"/>'
+            f'<g clip-path="url(#{n})">')
+        ty = y + 22 + fpx
+        for line in lines:
+            add(f'<text x="{x + 20}" y="{ty}" xml:space="preserve" font-family="{esc(v["mono"])}" font-size="{fpx}" fill="{tfg}">{line}</text>')
+            ty += lh
+        add('</g></g>')
+        if active and v["active"]:
+            stroke = 'url(#act)'
+            add(f'<rect x="{x - bw / 2}" y="{y - bw / 2}" width="{w + bw}" height="{h + bw}" rx="{v["rounding"] + bw / 2}" '
+                f'fill="none" stroke="{stroke}" stroke-width="{bw}"/>')
+        elif v["inactive"]:
+            c, o = rgba(v["inactive"][0])
+            add(f'<rect x="{x - bw / 2}" y="{y - bw / 2}" width="{w + bw}" height="{h + bw}" rx="{v["rounding"] + bw / 2}" '
+                f'fill="none" stroke="{c}" stroke-opacity="{o}" stroke-width="{bw}"/>')
+
+    def c(i, text):
+        return f'<tspan fill="{pal[i]}">{esc(text)}</tspan>'
+
+    def prompt(cmd):
+        return c(2, "user@host") + c(4, " ~") + c(5, " $ ") + esc(cmd)
+
+    term(*tiles[0][:4], True, [
+        prompt("ls"),
+        c(4, "Documents  Projects  ") + c(12, "notes.md  ") + c(2, "run.sh"),
+        "",
+        prompt("git status -s"),
+        c(1, " M ") + "src/main.rs",
+        c(2, "A  ") + "README.md",
+        c(3, "?? ") + "todo.txt",
+        "",
+        prompt("make test"),
+        c(8, "running 12 tests"),
+        c(2, "ok") + " parse, render, save",
+        c(3, "warn") + " slow test: sync",
+        c(1, "error") + " 1 failed: login",
+        "",
+        prompt("") + f'<tspan fill="{pal[5]}">█</tspan>',
+    ])
+    t2 = tiles[1]
+    sw = 26
+    px, py = t2[0] + 20, t2[1] + t2[3] - 22 - 2 * sw
+    term(*t2[:4], False, [
+        c(5, "user") + "@" + c(5, "host"),
+        "-" * 14,
+        c(5, "OS    ") + "Arch Linux",
+        c(5, "WM    ") + "Hyprland",
+        c(5, "Shell ") + "zsh",
+        c(5, "Theme ") + esc(name),
+    ])
+    for row in range(2):
+        for i in range(8):
+            add(f'<rect x="{px + i * sw}" y="{py + row * sw}" width="{sw}" height="{sw}" fill="{pal[row * 8 + i]}" '
+                f'opacity="{v["inactive_opacity"]}"/>')
+
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">'
+           f'<defs>{"".join(defs)}</defs>{"".join(out)}</svg>')
+    return svg
+
+
+def preview_key(name):
+    """Changes whenever the theme, a template, its wallpaper or the preview code changes."""
+    import hashlib
+    h = hashlib.sha256()
+    h.update((THEMES / name / "theme.toml").read_bytes())
+    for rel, src in sorted(templates(name).items()):
+        h.update(str(rel).encode())
+        h.update(src.read_bytes())
+    try:
+        wp = Path(load(name)["asset"].wallpaper)
+        st = wp.stat()
+        h.update(f"{wp}{st.st_size}{st.st_mtime_ns}".encode())
+    except (OSError, AttributeError):
+        h.update(b"no wallpaper")
+    import inspect
+    for fn in (preview_svg, preview_values, esc, rgba):
+        h.update(inspect.getsource(fn).encode())
+    h.update(f"{PREVIEW_W}{PREVIEW_H}{PREVIEW_PX}".encode())
+    return h.hexdigest()[:12]
+
+
+def preview_path(name):
+    return PREVIEW_DIR / f"{name}-{preview_key(name)}.png"
+
+
+def make_preview(name, out):
+    """Render NAME into a temp dir, compose the mock desktop and write it to OUT (a PNG)."""
+    import tempfile
+    if not have("resvg"):
+        sys.exit("theme: preview needs resvg (pacman: resvg)")
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="theme-preview-") as tmp:
+        ctx = render(name, Path(tmp) / "r")
+        svg = Path(tmp) / "preview.svg"
+        svg.write_text(preview_svg(name, ctx["description"], preview_values(Path(tmp) / "r")))
+        part = out.with_name(out.name + ".part")
+        r = subprocess.run(["resvg", "--resources-dir", "/", "-w", str(PREVIEW_PX), str(svg), str(part)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            part.unlink(missing_ok=True)
+            sys.exit(f"theme: resvg failed: {r.stderr.strip()[-300:]}")
+        part.replace(out)
+
+
+def cmd_previews(info):
+    """`theme previews`: make every missing cached preview. `theme previews --info`: JSON
+    for the launcher (name, description, current, preview path, whether it exists)."""
+    import json
+    cur = current_name()
+    items = []
+    for n in theme_names():
+        with (THEMES / n / "theme.toml").open("rb") as f:
+            desc = tomllib.load(f).get("description", "")
+        p = preview_path(n)
+        if not info and not p.is_file():
+            make_preview(n, p)
+            for old in PREVIEW_DIR.glob(f"{n}-*.png"):
+                if old != p:
+                    old.unlink(missing_ok=True)
+        items.append({"name": n, "description": desc, "current": n == cur, "preview": str(p), "ready": p.is_file()})
+    if info:
+        print(json.dumps(items))
+
+
 def main(argv):
     global QUIET
     if "--quiet" in argv or "-q" in argv:
@@ -389,6 +655,11 @@ def main(argv):
             sys.exit(f"theme: {out} is not empty")
         render(args[0], out)
         return say(f"theme: {args[0]} rendered into {out}")
+    if cmd == "preview" and len(args) == 2:
+        make_preview(args[0], args[1])
+        return say(f"theme: preview of {args[0]} written to {args[1]}")
+    if cmd == "previews" and args in ([], ["--info"]):
+        return cmd_previews(bool(args))
     if cmd in ("-h", "--help", "help"):
         return print(__doc__.strip())
     sys.exit(__doc__.strip())

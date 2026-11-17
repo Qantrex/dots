@@ -404,6 +404,7 @@ theme                 # the current theme and the ones there are
 theme set root        # render a theme and switch everything to it
 theme apply           # render the current theme again (after editing a palette or template)
 theme render NAME DIR # only render into DIR, change nothing (to diff or check a theme)
+theme preview NAME OUT.png # draw a mock desktop of a theme into a PNG
 ```
 
 There are two themes:
@@ -429,6 +430,17 @@ There are two themes:
   ```
 
   (`resvg`, not `rsvg-convert`: librsvg leaves out the text set on the arcs.)
+
+The launcher has a Theme mode (Tab to it, or `qs ipc call launcher open theme`).
+It lists every theme with its description and a preview of the desktop in that
+theme, marks the current one, and Enter runs `theme set` for the highlighted one.
+`theme preview` draws these previews: a mock desktop built as SVG from the theme's
+own rendered values (its wallpaper, the three bar islands with the theme's colours,
+font and radius, two tiled terminal windows with its border colours, gaps, rounding
+and terminal palette) and turned into a PNG by `resvg`. Nothing is ever captured
+from the real screen. The launcher asks `theme previews` for the missing ones and
+keeps them in `~/.cache/theme-previews/`; the file name carries a hash of the theme,
+its templates and its wallpaper, so a changed theme draws a fresh preview.
 
 ### How it works
 

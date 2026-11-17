@@ -6,7 +6,7 @@ import qs.services
 import qs.components
 
 // The launcher (replaces wofi): apps, clipboard history, emoji, screenshot,
-// wallpaper and power, one search field for all. Tab / Shift+Tab switch modes,
+// wallpaper, theme and power, one search field for all. Tab / Shift+Tab switch modes,
 // arrows or Ctrl+J/K move, Enter runs, Esc closes. Apps are ranked by how
 // often they were started (~/.local/state/quickshell/.../launcher.json).
 PanelWindow {
@@ -20,6 +20,7 @@ PanelWindow {
         { id: "emoji", icon: "󰞅", label: "Emoji" },
         { id: "screenshot", icon: "󰄀", label: "Screenshot" },
         { id: "wallpaper", icon: "󰸉", label: "Wallpaper" },
+        { id: "theme", icon: "󰏘", label: "Theme" },
         { id: "power", icon: "󰐥", label: "Power" }
     ]
     property int selected: 0
@@ -50,6 +51,7 @@ PanelWindow {
     function reload() {
         if (mode === "clipboard") clipProc.running = true;
         if (mode === "wallpaper") wallProc.running = true;
+        if (mode === "theme") { themeGenerated = false; themeProc.running = true; }
     }
 
     // --- Data ------------------------------------------------------------
@@ -82,6 +84,30 @@ PanelWindow {
         id: wallProc
         command: ["find", Host.home + "/Pictures/Wallpapers", "-type", "f", "-iregex", ".*\\.\\(jpe?g\\|png\\|webp\\|bmp\\)$"]
         stdout: StdioCollector { onStreamFinished: win.wallpapers = text.split("\n").filter(l => l).sort() }
+    }
+
+    // Themes with a preview of the desktop in each (`theme previews`, cached in
+    // ~/.cache/theme-previews). Missing previews are drawn once, then the list reloads.
+    property var themes: []
+    property bool themeGenerated: false
+    readonly property string themeBin: Host.home + "/.local/bin/theme"
+    Process {
+        id: themeProc
+        command: [win.themeBin, "previews", "--info"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { win.themes = JSON.parse(text); } catch (e) { win.themes = []; }
+                if (!win.themeGenerated && win.themes.some(t => !t.ready)) {
+                    win.themeGenerated = true;
+                    themeGenProc.running = true;
+                }
+            }
+        }
+    }
+    Process {
+        id: themeGenProc
+        command: [win.themeBin, "previews"]
+        onExited: themeProc.running = true
     }
 
     property var emoji: []
@@ -160,6 +186,13 @@ PanelWindow {
                     'hyprctl -q hyprpaper wallpaper ",$1" && mkdir -p ~/.cache/wallpaper && echo "$1" > ~/.cache/wallpaper/last', "wp", w])
             }));
         }
+        if (mode === "theme") {
+            return themes.filter(t => !q || t.name.includes(q) || t.description.toLowerCase().includes(q)).map(t => ({
+                themePreview: t.ready ? t.preview : "", themeName: t.name, current: t.current,
+                title: t.name, subtitle: t.description,
+                run: () => { if (!t.current) Quickshell.execDetached([win.themeBin, "set", t.name]); }
+            }));
+        }
         if (mode === "power") {
             return [
                 { icon: "󰌾", title: "Lock", subtitle: "hyprlock", run: () => Quickshell.execDetached(["hyprlock"]) },
@@ -180,8 +213,9 @@ PanelWindow {
         it.run();
     }
 
-    readonly property bool grid: mode === "wallpaper" || mode === "emoji"
-    readonly property int columns: mode === "wallpaper" ? 3 : (mode === "emoji" ? 8 : 1)
+    readonly property bool grid: mode === "wallpaper" || mode === "emoji" || mode === "theme"
+    readonly property int columns: mode === "wallpaper" ? 3 : (mode === "emoji" ? 8 : (mode === "theme" ? 2 : 1))
+    readonly property bool wide: mode === "wallpaper" || mode === "theme"
 
     // --- UI --------------------------------------------------------------
     MouseArea {
@@ -197,7 +231,7 @@ PanelWindow {
 
     Rectangle {
         id: box
-        width: win.mode === "wallpaper" ? 760 : 600
+        width: win.wide ? 760 : 600
         height: Math.min(content.implicitHeight + 2 * Theme.pad, win.height * 0.7)
         x: (parent.width - width) / 2
         y: parent.height * 0.18
@@ -246,7 +280,7 @@ PanelWindow {
                         visible: !search.text
                         anchors.verticalCenter: parent.verticalCenter
                         text: ({ apps: "Run an app", clipboard: "Search the clipboard", emoji: "Find an emoji",
-                                 screenshot: "Take a screenshot", wallpaper: "Pick a wallpaper", power: "Session" })[win.mode] ?? ""
+                                 screenshot: "Take a screenshot", wallpaper: "Pick a wallpaper", theme: "Pick a theme", power: "Session" })[win.mode] ?? ""
                         dim: true
                         size: Theme.fontLarge
                     }
@@ -307,7 +341,8 @@ PanelWindow {
                 width: parent.width
                 height: Math.min(contentHeight, box.parent.height * 0.7 - 120)
                 cellWidth: width / win.columns
-                cellHeight: win.mode === "wallpaper" ? cellWidth * 0.6 : (win.mode === "emoji" ? cellWidth : 46)
+                cellHeight: win.mode === "wallpaper" ? cellWidth * 0.6
+                          : (win.mode === "theme" ? cellWidth * 0.625 + 50 : (win.mode === "emoji" ? cellWidth : 46))
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 model: win.items
@@ -332,7 +367,7 @@ PanelWindow {
                         anchors { fill: parent; margins: 2 }
                         radius: Theme.radiusSmall
                         color: cell.current ? Theme.selected : "transparent"
-                        border.width: cell.current && cell.modelData.wallpaper ? 2 : 0
+                        border.width: cell.current && (cell.modelData.wallpaper || cell.modelData.themeName) ? 2 : 0
                         border.color: Theme.accent
                     }
 
@@ -347,6 +382,48 @@ PanelWindow {
                         cache: true
                     }
 
+                    // Theme preview: a mock desktop drawn from the theme's own values,
+                    // with its name, description and a mark on the current one.
+                    Column {
+                        visible: !!cell.modelData.themeName
+                        anchors { fill: parent; margins: 8 }
+                        spacing: 6
+                        Rectangle {
+                            width: parent.width
+                            height: width * 0.625
+                            radius: Theme.radiusSmall
+                            color: Theme.surface
+                            clip: true
+                            Image {
+                                anchors.fill: parent
+                                source: cell.modelData.themePreview ? "file://" + cell.modelData.themePreview : ""
+                                sourceSize { width: 720; height: 450 }
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                cache: false
+                            }
+                            Label {
+                                visible: !cell.modelData.themePreview
+                                anchors.centerIn: parent
+                                text: "Drawing the preview..."
+                                dim: true
+                            }
+                        }
+                        Row {
+                            width: parent.width
+                            spacing: 8
+                            Label { id: tname; text: cell.modelData.title || ""; bold: true }
+                            Label {
+                                visible: !!cell.modelData.current
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "current"
+                                size: Theme.fontSmall
+                                color: Theme.accent
+                            }
+                        }
+                        Label { width: parent.width; text: cell.modelData.subtitle || ""; size: Theme.fontSmall; dim: true; elide: Text.ElideRight }
+                    }
+
                     // Emoji.
                     Text {
                         visible: !!cell.modelData.glyphText
@@ -358,7 +435,7 @@ PanelWindow {
 
                     // List row.
                     Row {
-                        visible: !cell.modelData.wallpaper && !cell.modelData.glyphText
+                        visible: !cell.modelData.wallpaper && !cell.modelData.glyphText && !cell.modelData.themeName
                         anchors { left: parent.left; leftMargin: 12; right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
                         spacing: 12
                         Item {
@@ -394,7 +471,7 @@ PanelWindow {
                 width: parent.width
                 height: 40
                 horizontalAlignment: Text.AlignHCenter
-                text: win.mode === "clipboard" ? "Clipboard history is empty" : "No match"
+                text: win.mode === "clipboard" ? "Clipboard history is empty" : (win.mode === "theme" ? "No themes found" : "No match")
                 dim: true
             }
 
@@ -403,7 +480,8 @@ PanelWindow {
                 width: parent.width
                 leftPadding: 4
                 text: win.mode === "emoji" ? (win.items[win.selected]?.title ?? "") + "  ·  Enter copies"
-                    : (win.mode === "clipboard" ? "Enter copies  ·  Shift+Del removes" : "Tab switches mode  ·  Esc closes")
+                    : (win.mode === "clipboard" ? "Enter copies  ·  Shift+Del removes"
+                    : (win.mode === "theme" ? "Enter switches the desktop to this theme  ·  Tab switches mode" : "Tab switches mode  ·  Esc closes"))
                 size: 10
                 dim: true
             }
