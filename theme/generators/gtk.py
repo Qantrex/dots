@@ -122,6 +122,10 @@ def build(ctx, out):
                              check=True, capture_output=True, text=True).stdout
         css = re.sub(r"#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b", hex_sub, css)
         css = re.sub(r"\b(rgba?)\(([^()]*)\)", rgb_sub, css)
+        # Adwaita also writes text and shadows as the names white and black. Left alone
+        # they only match root; on a light theme the text would vanish on the background.
+        css = re.sub(r"(?<=[\s:(,])(white|black)(?=[\s;,)])",
+                     lambda m: str(remap(*((255,) * 3 if m.group(1) == "white" else (0,) * 3))), css)
         # Adwaita's embossed text shadows look muddy on a flat background.
         css = re.sub(r"text-shadow: 0 -1px rgba\(0, 0, 0, [0-9.]+\);", "text-shadow: none;", css)
         css = re.sub(r"-gtk-icon-shadow: 0 -1px rgba\(0, 0, 0, [0-9.]+\);", "-gtk-icon-shadow: none;", css)
