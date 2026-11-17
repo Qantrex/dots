@@ -74,10 +74,15 @@ bindkey '^[[1;5D' backward-word
 bindkey '^[[1;5C' forward-word
 bindkey '^H' backward-delete-word
 
+# The theme's colours (and any shell extras of the theme), before the greeting so
+# a theme can change it: THEME_GREET_NAME replaces "you@host", and a theme_greet
+# function adds to it.
+source ~/.config/zsh/colors.zsh
+
 # Greeting - Runs only in interactive shells
 if [[ $- == *i* ]]; then
   autoload -U colors && colors
-  echo -n "${fg[white]}$USER${reset_color}@bauarch on "
+  echo -n "${fg[white]}${THEME_GREET_NAME:-$USER${reset_color}@bauarch}${reset_color} on "
   echo -n "$(grep '^PRETTY_NAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
   echo -n " - uptime: "
   echo "$(uptime -p | sed 's/up //')"
@@ -85,15 +90,13 @@ if [[ $- == *i* ]]; then
   open_claude=$(cr --count 2>/dev/null)
   (( open_claude > 0 )) && print -P "%F{244}${open_claude} Claude session(s) left open · cr reopens them%f"
   unset open_claude
+  (( $+functions[theme_greet] )) && theme_greet
 fi
 
 #
 # -----------------------------------------------------------------------------
 # PROMPT (Must be loaded at the end)
 # -----------------------------------------------------------------------------
-# Monochrome colours for ls, completion, highlighting, fzf, bat, less.
-source ~/.config/zsh/colors.zsh
-
 eval "$(starship init zsh)"
 export PATH="$HOME/.local/bin:$PATH"
 export EDITOR=micro VISUAL=micro
