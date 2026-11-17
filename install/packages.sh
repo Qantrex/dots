@@ -31,11 +31,14 @@ PKG_LOGIN=(greetd greetd-tuigreet terminus-font)
 PKG_SHELL=(zsh fish starship tmux micro fzf zoxide eza bat ripgrep fd btop)
 
 PKG_FONTS=(ttf-iosevkaterm-nerd ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols noto-fonts noto-fonts-emoji noto-fonts-cjk)
+# nekosec theme: Maple Mono (terminals) and Departure Mono (bar, lock screen).
+PKG_FONTS+=(maplemono-nf otf-departure-mono-nerd)
 
 # Themes referenced by name from gtk/qt/hypr configs.
 PKG_THEME=(
   qt5ct qt6ct papirus-icon-theme breeze-icons
   adwaita-cursors
+  catppuccin-cursors-mocha   # nekosec: catppuccin-mocha-pink-cursors
 )
 
 PKG_APPS=(foot firefox nautilus yazi imv zathura zathura-pdf-mupdf ffmpegthumbnailer resvg mpv fastfetch vesktop spotify spotify-adblock spicetify-cli)

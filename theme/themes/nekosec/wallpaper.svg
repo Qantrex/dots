@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- nekosec wallpaper: a seeing stone with cat ears that watches back.
+     Render (2880x1800, the laptop panel; 16:9 screens crop the sides):
+       rsvg-convert -w 2880 -h 1800 wallpaper.svg -o ~/Pictures/Wallpapers/nekosec-seeing-stone.png
+     The eye sits at the exact centre: the lock screen types the passphrase into it
+     (templates/hyprlock.conf). The band above the ears stays empty for the clock. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2880" height="1800" viewBox="0 0 2880 1800">
+  <defs>
+    <radialGradient id="sky" cx="50%" cy="50%" r="75%">
+      <stop offset="0" stop-color="#22102e"/>
+      <stop offset="0.45" stop-color="#120a1a"/>
+      <stop offset="1" stop-color="#0b0710"/>
+    </radialGradient>
+    <radialGradient id="stone" cx="50%" cy="42%" r="60%">
+      <stop offset="0" stop-color="#ff7be3"/>
+      <stop offset="0.28" stop-color="#ff4fd8"/>
+      <stop offset="0.55" stop-color="#8a3fd1"/>
+      <stop offset="0.85" stop-color="#2a0f3d"/>
+      <stop offset="1" stop-color="#14081d"/>
+    </radialGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#0b0710"/>
+      <stop offset="0.75" stop-color="#140a1d"/>
+      <stop offset="1" stop-color="#3a1550" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ear" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff4fd8" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#b98cff" stop-opacity="0.35"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4fd8"/>
+      <stop offset="0.5" stop-color="#b98cff"/>
+      <stop offset="1" stop-color="#5cffb0"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="38"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <pattern id="scan" width="6" height="6" patternUnits="userSpaceOnUse">
+      <rect width="6" height="2" fill="#000000" opacity="0.35"/>
+    </pattern>
+    <!-- lower arcs, left to right under the stone, so the text reads upright -->
+    <path id="ring1" d="M 1110.9 1090 A 380 380 0 0 0 1769.1 1090"/>
+    <path id="ring2" d="M 1050.3 1125 A 450 450 0 0 0 1829.7 1125"/>
+  </defs>
+
+  <rect width="2880" height="1800" fill="url(#sky)"/>
+
+  <!-- ciphertext rain at the edges -->
+  <g font-family="DepartureMono Nerd Font, Departure Mono, monospace" font-size="22" fill="#5cffb0">
+    <g opacity="0.16">
+      <text x="70"  y="120">4E 59 41 4E 2D 53 45 43</text>
+      <text x="70"  y="160">d3:4d:be:ef:ca:7f:00:0d</text>
+      <text x="70"  y="200">-----BEGIN PGP MESSAGE-----</text>
+      <text x="70"  y="240">hQIMA8nY4n/mEoW+ARAAkx7</text>
+      <text x="70"  y="280">t0rProj3ct++ onion://nya</text>
+      <text x="70"  y="320">ﾈｺ ｾｷｭﾘﾃｨ ｦ ﾏﾓﾚ</text>
+      <text x="70"  y="360">sha256: 7f3a…c0de…b00b…1e55</text>
+      <text x="70"  y="400">-----END PGP MESSAGE-----</text>
+    </g>
+    <g opacity="0.12" text-anchor="end">
+      <text x="2810" y="1340">0x6e656b6f736563 :: verified</text>
+      <text x="2810" y="1380">ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 neko@localhost</text>
+      <text x="2810" y="1420">gpg: Good signature from "the cat"</text>
+      <text x="2810" y="1460">ｱｲ ﾊ ﾐﾃｲﾙ  // the model is watching</text>
+      <text x="2810" y="1500">git log --show-signature | nya</text>
+    </g>
+  </g>
+
+  <!-- whiskers -->
+  <g stroke="#5cffb0" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.55">
+    <path d="M 1110 930 Q 860 890 610 905"/>
+    <path d="M 1110 965 Q 850 975 600 1030"/>
+    <path d="M 1115 1000 Q 880 1060 660 1150"/>
+    <path d="M 1770 930 Q 2020 890 2270 905"/>
+    <path d="M 1770 965 Q 2030 975 2280 1030"/>
+    <path d="M 1765 1000 Q 2000 1060 2220 1150"/>
+  </g>
+
+  <!-- glow behind the stone -->
+  <circle cx="1440" cy="900" r="330" fill="#ff4fd8" opacity="0.45" filter="url(#glow)"/>
+
+  <!-- ears -->
+  <g stroke="url(#rim)" stroke-width="6" stroke-linejoin="round">
+    <path d="M 1215 720 L 1175 455 Q 1172 435 1192 444 L 1400 590 Z" fill="#14081d"/>
+    <path d="M 1665 720 L 1705 455 Q 1708 435 1688 444 L 1480 590 Z" fill="#14081d"/>
+  </g>
+  <path d="M 1222 700 L 1196 482 L 1372 606 Z" fill="url(#ear)" opacity="0.85"/>
+  <path d="M 1658 700 L 1684 482 L 1508 606 Z" fill="url(#ear)" opacity="0.85"/>
+
+  <!-- the seeing stone -->
+  <circle cx="1440" cy="900" r="320" fill="url(#stone)"/>
+  <circle cx="1440" cy="900" r="320" fill="none" stroke="url(#rim)" stroke-width="6"/>
+  <!-- iris rings -->
+  <g fill="none" stroke="#fff0fa" opacity="0.25">
+    <circle cx="1440" cy="900" r="270" stroke-width="2" stroke-dasharray="4 14"/>
+    <circle cx="1440" cy="900" r="235" stroke-width="1"/>
+  </g>
+  <!-- the eye: a dark lens, a slit pupil, the passphrase goes across it -->
+  <circle cx="1440" cy="900" r="205" fill="url(#core)"/>
+  <ellipse cx="1440" cy="900" rx="34" ry="175" fill="#ff4fd8" opacity="0.35" filter="url(#soft)"/>
+  <ellipse cx="1440" cy="900" rx="20" ry="160" fill="#05030a"/>
+  <!-- highlight -->
+  <ellipse cx="1350" cy="760" rx="70" ry="34" fill="#fff0fa" opacity="0.28" transform="rotate(-28 1350 760)"/>
+
+  <!-- arcs of text under the stone -->
+  <g font-family="DepartureMono Nerd Font, Departure Mono, monospace" letter-spacing="3">
+    <text font-size="26" fill="#b98cff" opacity="0.85">
+      <textPath xlink:href="#ring1" startOffset="50%" text-anchor="middle">NO GODS · NO MASTERS · NO TELEMETRY</textPath>
+    </text>
+    <text font-size="18" fill="#5cffb0" opacity="0.55">
+      <textPath xlink:href="#ring2" startOffset="50%" text-anchor="middle">AGPL-3.0 · TOR ONLY · GPG 0x6E79616E · THE CAT SEES ALL</textPath>
+    </text>
+  </g>
+
+  <!-- corners: kaomoji, katakana, slogans -->
+  <g font-family="DepartureMono Nerd Font, Departure Mono, monospace">
+    <text x="110" y="1570" font-size="66" fill="#ff4fd8">SEIZE THE MEANS</text>
+    <text x="110" y="1650" font-size="66" fill="#ff4fd8">OF COMPILATION</text>
+    <text x="114" y="1710" font-size="24" fill="#b98cff" opacity="0.8">free software for free cats · since forever</text>
+    <text x="2770" y="170" font-size="44" fill="#fff0fa" text-anchor="end" opacity="0.9">(=^･ω･^=)</text>
+    <text x="2770" y="225" font-size="26" fill="#5cffb0" text-anchor="end" opacity="0.75">trust no cloud ~nya</text>
+    <text x="2770" y="1710" font-size="24" fill="#b98cff" text-anchor="end" opacity="0.7">ﾈｺ ﾊ ｽﾍﾞﾃｦ ﾐﾃｲﾙ</text>
+  </g>
+  <g font-family="Noto Sans CJK JP" font-weight="900">
+    <text x="2770" y="1640" font-size="120" fill="#ff4fd8" text-anchor="end" opacity="0.18">猫監視</text>
+  </g>
+
+  <rect width="2880" height="1800" fill="url(#scan)"/>
+</svg>

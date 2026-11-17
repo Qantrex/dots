@@ -406,11 +406,29 @@ theme apply           # render the current theme again (after editing a palette 
 theme render NAME DIR # only render into DIR, change nothing (to diff or check a theme)
 ```
 
-There is one theme so far, **root**: true-black monochrome (`#000000`, white and
-greys) for the OLED panel. Selections, buttons and active states are greys or
-white. Rosé Pine Moon colour appears only where it helps reading: love / gold
-for errors and warnings, and rose / iris for Discord mentions and links and for
-syntax highlighting. It is never used as a full-app theme.
+There are two themes:
+
+- **root**: true-black monochrome (`#000000`, white and greys) for the OLED
+  panel. Selections, buttons and active states are greys or white. Rosé Pine Moon
+  colour appears only where it helps reading: love / gold for errors and
+  warnings, and rose / iris for Discord mentions and links and for syntax
+  highlighting. It is never used as a full-app theme.
+- **nekosec**: neon catgirl opsec. Purple-black (`#0b0710`), hot pink for
+  everything that marks "this one", mint and lavender for the rest, and no blue
+  (lavender takes the terminal's blue slot). Maple Mono NF in the terminals,
+  the Departure Mono pixel font in the bar and on the lock screen, pink Papirus
+  folders (`Papirus-Neko`) and the Catppuccin Mocha pink cursor. The wallpaper
+  (`themes/nekosec/wallpaper.svg`) is a seeing stone with cat ears; the lock
+  screen takes the passphrase in its eye. Four templates are its own: the window
+  border gradient (`hypr.lua`), `hyprlock.conf`, and the cava and btop
+  gradients. Its wallpaper is rendered once into `~/Pictures/Wallpapers`:
+
+  ```bash
+  resvg --monospace-family "DepartureMono Nerd Font" -w 2880 -h 1800 \
+    ~/dotfiles/theme/themes/nekosec/wallpaper.svg ~/Pictures/Wallpapers/nekosec-seeing-stone.png
+  ```
+
+  (`resvg`, not `rsvg-convert`: librsvg leaves out the text set on the arcs.)
 
 ### How it works
 
@@ -484,8 +502,9 @@ light icon theme. Adwaita's dim greys (disabled text, column headers) come out
 softer when `bg` and `fg` are closer together than black and white.
 
 `assets.gtk_theme` can name an installed GTK theme instead of the generated one,
-and `assets.icon_theme` any installed icon theme (`build-papirus-mono.sh <colour>`
-makes Papirus variants).
+and `assets.icon_theme` any installed icon theme (`build-papirus-mono.sh <colour> <name>`
+builds a Papirus variant under its own name, e.g. `pink Papirus-Neko`; the
+installer builds Papirus-Mono and Papirus-Neko).
 
 ### Not themed
 

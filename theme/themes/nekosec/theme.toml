@@ -1,0 +1,75 @@
+# nekosec: neon catgirl opsec. A purple-black night, hot pink for "this one",
+# mint for the crypto-green, lavender where other themes would use blue (there is
+# no blue). The wallpaper is a seeing stone with cat ears that watches back; the
+# lock screen asks for the passphrase inside its eye.
+#
+# Greys are still tone() steps between bg and fg, so here they come out as
+# purple-pink greys. Four templates are this theme's own (templates/): the window
+# border gradient (hypr.lua), the lock screen, and the cava and btop gradients.
+
+description = "Neon catgirl opsec: purple-black, hot pink, mint, lavender, no blue"
+mode = "dark"
+
+[colors]
+bg        = "#0b0710"  # purple-black, still dark enough for the OLED
+fg        = "#fff0fa"  # pink-white; the far end of tone()
+text      = "#f3dcec"  # body text in terminals and editors
+accent    = "#ff4fd8"  # hot pink: selection, active workspace, focused tile
+on_accent = "#0b0710"
+love      = "#ff3860"  # errors
+gold      = "#ffd166"  # warnings, search hits
+iris      = "#c79bff"  # links, keywords
+visited   = "#9d7cd8"
+rose      = "#ff9ad5"  # mentions in Discord
+# Only this theme's own templates use these.
+mint      = "#5cffb0"  # crypto green
+lilac     = "#b98cff"  # lavender
+
+[terminal]
+black          = "#2b1d38"
+red            = "#ff3860"
+green          = "#5cffb0"
+yellow         = "#ffd166"
+blue           = "#b98cff"  # lavender in the blue slot
+magenta        = "#ff4fd8"
+cyan           = "#8affd6"  # mint-aqua
+white          = "#e9d8ec"
+bright_black   = "#8a74a0"
+bright_red     = "#ff6f8e"
+bright_green   = "#9dffd0"
+bright_yellow  = "#ffe29a"
+bright_blue    = "#d4b8ff"
+bright_magenta = "#ff8ae6"
+bright_cyan    = "#b5ffe6"
+bright_white   = "#fff0fa"
+
+[fonts]
+mono        = "Maple Mono NF"             # terminals, editors, viewers (AUR maplemono-nf)
+mono_size   = 12
+shell       = "DepartureMono Nerd Font"   # pixel font: bar, popouts, clock (AUR otf-departure-mono-nerd)
+shell_size  = 11                          # Departure is drawn on an 11 px grid; stay on it
+shell_small = 11
+shell_large = 22
+shell_icon  = 15
+sans        = "Adwaita Sans"
+
+[look]
+radius           = 14
+radius_small     = 7
+gaps_in          = 8
+gaps_out         = 16
+border           = 3
+active_opacity   = 0.95
+inactive_opacity = 0.85
+terminal_alpha   = 0.82
+bar_height       = 34
+bar_gap          = 8
+pad              = 12
+
+[assets]
+wallpaper    = "~/Pictures/Wallpapers/nekosec-seeing-stone.png"  # rendered from wallpaper.svg here
+gtk_theme    = ""
+icon_theme   = "Papirus-Neko"   # build-papirus-mono.sh pink Papirus-Neko
+cursor_theme = "catppuccin-mocha-pink-cursors"  # pacman/AUR catppuccin-cursors-mocha
+cursor_size  = 24
+firefox      = "a dark pink theme from addons.mozilla.org (none picked yet)"
