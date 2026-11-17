@@ -431,6 +431,41 @@ There are two themes:
 
   (`resvg`, not `rsvg-convert`: librsvg leaves out the text set on the arcs.)
 
+  nekosec goes much further than colours:
+
+  - **Pictures.** `neko` (`bin/.local/bin/neko`), a daemon its `enter` hook starts as
+    the user unit `nekosec` and its `leave` hook stops, fetches catgirls and
+    catboys from the sources of the `catgirl` command. Every 10 minutes one becomes a
+    "surveillance feed" wallpaper (a neon backdrop, target brackets, an agent panel
+    with class, threat level, clearance and the artist) and arrives with a short
+    glitch; now and then the screen glitches on its own. Picking a wallpaper with
+    SUPER+SHIFT+W pauses it. `neko` shows the state; `neko next`, `pause`, `resume`,
+    `save`, `open`, `interval MIN`, `glitch on|off` and `sound NAME|off` do what they
+    say. `neko mode sfw|mixed|nsfw` switches the pictures; sfw is the default and
+    follows Danbooru's "general" rating on every source. Child characters are
+    skipped in every mode, school tags outside sfw. The lock screen portrait and
+    the terminal greeting only ever use pictures rated safe.
+  - **Shell.** Cat ears on every bar island, on every pill (workspaces, hovered bar
+    items, launcher tabs, active tiles), on the launcher and on every window (a
+    click-through layer, `quickshell/.../neko/WindowEars.qml`, fed by `hyprctl`);
+    they twitch now and then, and a window's ears twitch when it gets focus.
+    Pink, lavender and mint gradient frames on islands, popouts, tooltips,
+    notifications, the OSD and the launcher. A bar island with the current
+    catgirl (left click next, middle save, right open the page, scroll pause), her
+    mood and an opsec line: firewall, VPN or Tor, and how many cameras and
+    microphones are in use. Notifications get a kaomoji by urgency, the catgirl
+    when an app sends no icon, and a sound; the volume and brightness OSD shows a
+    face that follows the level. All of it hangs on `services/Neko.qml`, which only
+    turns on when the current theme renders `neko.json`, so other themes look
+    exactly as before.
+  - **Terminal.** A kaomoji instead of your name in the greeting, the prompt
+    (starship with the theme's own `starship.toml`; the face reacts to the last
+    command) and tmux, and the catgirl in the greeting (sixel, also through tmux).
+  - **Lock screen.** The last safe catgirl as a framed portrait with her artist,
+    next to the stone's eye.
+  - **Sounds.** Three sets, `chirp`, `robo` and `blip` (`sounds/make.sh` builds
+    them): on notifications, on unlock and when the daemon starts.
+
 The launcher has a Theme mode (Tab to it, or `qs ipc call launcher open theme`).
 It lists every theme with its description and a preview of the desktop in that
 theme, marks the current one, and Enter runs `theme set` for the highlighted one.
@@ -506,6 +541,10 @@ active tab or tile, today in the calendar, slider levels) use `accent` and
    `theme/themes/<name>/templates/` and change it there. The lock screen's layout
    belongs to root's wallpaper (the password sits between the fingers), so a theme
    with another wallpaper wants its own `hyprlock.conf`.
+4. A theme may bring hooks: `theme/themes/<name>/hooks/enter` and `leave`, run by
+   `theme set` on a real switch (never by `apply` or `render`), and `enter` again at
+   login (`theme hook enter` in Hyprland's autostart). nekosec starts its picture
+   daemon there.
 
 A light theme (`mode = "light"`) works the same way: `tone()` runs from the light
 `bg` to the dark `fg`, so the generated GTK theme and every template invert with it.
