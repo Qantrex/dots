@@ -75,6 +75,10 @@ hl.on("hyprland.start", function()
     gset("color-scheme", theme.color_scheme)
     gset("icon-theme", theme.icon_theme)
 
+    -- The theme's own login step (themes/<name>/hooks/enter; root has none),
+    -- e.g. nekosec's picture daemon. `theme set` runs it on a switch.
+    hl.exec_cmd(os.getenv("HOME") .. "/.local/bin/theme hook enter")
+
     -- Applications, each on its own workspace, without stealing focus.
     hl.exec_cmd(apps.terminal, { workspace = "1 silent" })
     hl.exec_cmd(apps.browser,  { workspace = "2 silent" })

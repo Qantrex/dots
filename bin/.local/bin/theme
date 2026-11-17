@@ -6,12 +6,15 @@
     theme apply              render the current theme again (after editing a palette
                              or a template), keeps the wallpaper you picked
     theme render NAME DIR    only render NAME into DIR, change nothing (to diff or check)
+    theme hook enter|leave   run the current theme's hook (Hyprland runs `enter` at login)
 
 How it fits together (details in the README, "Themes"):
 
   theme/themes/<name>/theme.toml   one palette, fonts, shape and assets per theme
   theme/templates/                 one file per app, with {{ ... }} where colours go
   theme/themes/<name>/templates/   optional: a theme's own version of a template
+  theme/themes/<name>/hooks/       optional: `enter` and `leave`, run on a real switch
+                                   (never on apply or render) and `enter` at login
   theme/generators/                files built in code (the GTK theme from Adwaita)
   theme/current -> build/<name>-…  what the apps read (git-ignored, rendered here)
 
@@ -326,6 +329,22 @@ def reload(ctx, changed):
 # --- Commands -----------------------------------------------------------------
 
 
+def hook(name, which):
+    """Run themes/NAME/hooks/WHICH if it exists. A failing hook never stops a switch."""
+    path = THEMES / name / "hooks" / which
+    if not (name and os.access(path, os.X_OK)):
+        return
+    env = {**os.environ, "THEME": name, "THEME_DIR": str(THEMES / name), "THEME_CURRENT": str(CURRENT)}
+    try:
+        r = subprocess.run([str(path)], env=env, capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            say(f"  {name} {which} hook failed ({r.returncode}): {(r.stderr or r.stdout).strip()[-300:]}")
+        else:
+            say(f"  {name} {which} hook ran")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        say(f"  {name} {which} hook failed: {e}")
+
+
 def cmd_list():
     cur = current_name()
     print(f"current: {cur or 'none rendered yet (run: theme set root)'}")
@@ -336,6 +355,9 @@ def cmd_list():
 
 
 def cmd_set(name, changed=True):
+    old = current_name()
+    if changed and old and old != name and (THEMES / name / "theme.toml").is_file():
+        hook(old, "leave")
     ctx = switch(name)
     say(f"theme: {name} rendered into {os.readlink(CURRENT)}")
     done, later = reload(ctx, changed)
@@ -343,6 +365,8 @@ def cmd_set(name, changed=True):
         say("  reloaded: " + ", ".join(done))
     if later:
         say("  next start: " + ", ".join(later))
+    if changed:
+        hook(name, "enter")
 
 
 def main(argv):
@@ -357,6 +381,8 @@ def main(argv):
         return cmd_set(args[0], changed=args[0] != current_name())
     if cmd == "apply" and not args:
         return cmd_set(current_name() or "root", changed=current_name() is None)
+    if cmd == "hook" and len(args) == 1 and args[0] in ("enter", "leave"):
+        return hook(current_name(), args[0])
     if cmd == "render" and len(args) == 2:
         out = Path(args[1])
         if out.exists() and any(out.iterdir()):
