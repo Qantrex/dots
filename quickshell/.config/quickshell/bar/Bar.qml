@@ -5,7 +5,7 @@ import qs.services
 import qs.components
 
 // One bar per screen: three floating islands.
-//   left    workspaces (app icons)
+//   left    workspaces (app icons); in nekosec the catgirl island before them
 //   centre  clock (+ an urgent deadline), media while playing
 //   right   exceptions (only what needs attention) | status cluster | tray
 PanelWindow {
@@ -37,9 +37,11 @@ PanelWindow {
     }
     function isOpen(kind) { return Shell.popout === kind && Shell.popoutScreen === bar.screen.name; }
 
-    Workspaces {
-        bar: bar
+    Row {
         anchors { left: parent.left; leftMargin: bar.side; top: parent.top; topMargin: Theme.gap }
+        spacing: 8
+        NekoIsland { bar: bar }   // nekosec only; invisible (and takes no room) otherwise
+        Workspaces { bar: bar }
     }
 
     Center {

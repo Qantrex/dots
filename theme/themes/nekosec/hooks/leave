@@ -1,4 +1,5 @@
 #!/bin/sh
 # nekosec leave (on switching to another theme): stop the picture daemon.
 systemctl --user stop nekosec 2>/dev/null
+qs ipc call neko refresh >/dev/null 2>&1   # the bar drops its catgirl island
 exit 0

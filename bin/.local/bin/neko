@@ -580,7 +580,13 @@ def opsec_hud():
             if up:
                 vpn.append(dev)
     tor = run("pgrep", "-x", "tor", timeout=3)
-    fw = run("systemctl", "is-active", "nftables", timeout=3)
+    # nftables loads its rules once at boot and may not stay "active" afterwards:
+    # count it as on when it ran this boot and succeeded (or is still active).
+    fw = run("systemctl", "show", "nftables", "-p", "ActiveState,Result,ExecMainStatus,ExecMainStartTimestampMonotonic",
+             timeout=3)
+    f = dict(l.split("=", 1) for l in (fw.stdout.splitlines() if fw else []) if "=" in l)
+    fw_on = f.get("ActiveState") == "active" or (f.get("Result") == "success" and f.get("ExecMainStatus") == "0"
+                                                 and f.get("ExecMainStartTimestampMonotonic", "0") != "0")
     cams = set()
     for proc in Path("/proc").iterdir():
         if not proc.name.isdigit():
@@ -600,7 +606,7 @@ def opsec_hud():
     except Exception:  # noqa: BLE001
         pass
     return dict(vpn=vpn, tor=bool(tor and tor.returncode == 0),
-                firewall=bool(fw and fw.stdout.strip() == "active"), cams=len(cams), mics=mics)
+                firewall=fw_on, cams=len(cams), mics=mics)
 
 
 def cmd_status():

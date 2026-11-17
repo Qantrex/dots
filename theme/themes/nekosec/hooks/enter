@@ -2,6 +2,7 @@
 # nekosec enter (on `theme set nekosec` and at login): start the picture daemon
 # (`neko`, in ~/.local/bin) as the user unit "nekosec". One fixed unit name, so a
 # second start does nothing; `leave` stops it.
+qs ipc call neko refresh >/dev/null 2>&1
 systemctl --user is-active -q nekosec && exit 0
 systemctl --user reset-failed nekosec 2>/dev/null
 exec systemd-run --user --unit=nekosec --collect --quiet \
