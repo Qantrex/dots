@@ -25,17 +25,17 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | `foot` | Terminal emulator |
 | `micro` | Terminal editor |
 | `gtk` | GTK 3/4 theming |
-| `qt5ct` / `qt6ct` | Qt5 / Qt6 theming (monochrome palette in `colors/`) |
+| `qt5ct` / `qt6ct` | Qt5 / Qt6 theming (`colors/theme.conf` links to the theme) |
 | `kde` | `kdeglobals` colours for KDE apps (kid3, ghostwriter, …) |
 | `tmux` | `~/.tmux.conf` |
 | `vesktop` | Discord theme (`themes/` only) |
-| `spicetify` | Spotify theme (Ziro + `monochrome` scheme) |
+| `spicetify` | Spotify theme (Ziro with the `theme` scheme from the current theme) |
 | `spotify-adblock` | Ad/tracking filter + `spotify.desktop` that loads it |
 | `homerow` | Launcher entry and icon for the homerow typing test, a Rust TUI in its own foot window (`scripts/homerow.sh`). The binary is built from `~/Projects/homerow` with `npm run deploy` |
 | `yazi` | yazi file manager: Enter steps into folders and opens files in their desktop app (Shift+Enter for every choice, e.g. edit in place), keys `gn` Nautilus here, `gT` terminal, `gv` vault, colours from the theme (`theme/templates/yazi.toml`) |
 | `nautilus` | Nautilus right-click scripts: Open in yazi, Open terminal here |
 | `desktop-entries` | `yazi.desktop` and `micro-foot.desktop`: open in a foot window, so folders / text files can default to them |
-| `btop` / `cava` | btop `monochrome` theme + settings, cava grey gradient |
+| `btop` / `cava` | btop settings and `theme.theme`, cava config, both from the theme |
 | `mpv` / `imv` / `zathura` | Video, image and PDF viewers, black with Iosevka text |
 | `fastfetch` | White logo, grey keys |
 | `scripts` | Helper scripts (`set-default-apps.sh` sets what opens folders, images, PDFs, audio, text) |
@@ -476,6 +476,12 @@ active tab or tile, today in the calendar, slider levels) use `accent` and
    `theme/themes/<name>/templates/` and change it there. The lock screen's layout
    belongs to root's wallpaper (the password sits between the fingers), so a theme
    with another wallpaper wants its own `hyprlock.conf`.
+
+A light theme (`mode = "light"`) works the same way: `tone()` runs from the light
+`bg` to the dark `fg`, so the generated GTK theme and every template invert with it.
+It also wants its own terminal colours (root's are greys made for black) and a
+light icon theme. Adwaita's dim greys (disabled text, column headers) come out
+softer when `bg` and `fg` are closer together than black and white.
 
 `assets.gtk_theme` can name an installed GTK theme instead of the generated one,
 and `assets.icon_theme` any installed icon theme (`build-papirus-mono.sh <colour>`
