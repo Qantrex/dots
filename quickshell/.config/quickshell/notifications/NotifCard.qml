@@ -16,7 +16,8 @@ Rectangle {
     readonly property bool critical: notif && notif.urgency === NotificationUrgency.Critical
     readonly property var defaultAction: notif ? notif.actions.find(a => a.identifier === "default") : null
     readonly property var buttons: notif ? notif.actions.filter(a => a.identifier !== "default") : []
-    readonly property string icon: notif ? Notifs.icon(notif) : ""
+    // nekosec: an app without an icon gets the current catgirl instead.
+    readonly property string icon: notif ? (Notifs.icon(notif) || (Neko.enabled && Neko.avatar ? "file://" + Neko.avatar : "")) : ""
 
     implicitWidth: 440
     implicitHeight: col.implicitHeight + 32
@@ -24,6 +25,13 @@ Rectangle {
     color: popup ? Theme.bg : Theme.surface
     border.width: 1
     border.color: critical ? Theme.love : (popup ? Theme.borderStrong : Theme.border)
+
+    NekoFrame {
+        anchors.fill: parent
+        radius: parent.radius
+        c1: root.critical ? Theme.love : Theme.accent
+        c3: root.critical ? Theme.love : Neko.mint
+    }
 
     MouseArea {
         id: area
@@ -86,7 +94,7 @@ Rectangle {
             }
             Label {
                 width: parent.width
-                text: root.notif ? root.notif.summary : ""
+                text: root.notif ? (Neko.enabled ? Neko.notifFace(root.notif.urgency) + " " : "") + root.notif.summary : ""
                 bold: true
                 size: Theme.fontLarge - 1
                 wrapMode: Text.WordWrap

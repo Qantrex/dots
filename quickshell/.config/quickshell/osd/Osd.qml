@@ -70,6 +70,8 @@ PanelWindow {
         border.width: 1
         border.color: Theme.border
         opacity: win.shown ? 1 : 0
+
+        NekoFrame { anchors.fill: parent; radius: parent.radius }
         scale: win.shown ? 1 : 0.94
         Behavior on opacity { NumberAnimation { duration: Theme.anim } }
         Behavior on scale { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutCubic } }

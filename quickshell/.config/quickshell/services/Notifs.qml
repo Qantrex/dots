@@ -55,8 +55,10 @@ Singleton {
             n.tracked = true;
             if (n.transient && root.dnd) return;
             root.unread += 1;
-            if (!root.dnd || n.urgency === NotificationUrgency.Critical)
+            if (!root.dnd || n.urgency === NotificationUrgency.Critical) {
                 root.popups = [n].concat(root.popups.filter(p => p.id !== n.id)).slice(0, 5);
+                Neko.sound("notify");   // nekosec only, and only for popups (so never in DND)
+            }
             n.closed.connect(() => root.dismissPopup(n));
         }
     }

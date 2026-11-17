@@ -60,11 +60,18 @@ DEFAULTS = {"mode": "sfw", "interval": 10, "glitch": True, "sound": "chirp", "pa
 BLOCK = re.compile(r"^(loli|lolicon|shota|shotacon|toddler|toddlercon|aged_down|child|children|"
                    r"kid|kids|young|younger|baby|kindergarten.*|elementary_school.*|"
                    r"randoseru|child_drawing|age_regression|petite_child)$")
+# Not in sfw, which follows Danbooru's "general" rating on every source (nekos.moe
+# and nekosapi call far more "safe"): fan service, swimwear, underwear.
+BLOCK_SFW = re.compile(r"^(bikini.*|swimsuit.*|one-piece_swimsuit|micro_bikini|underwear.*|panties.*|"
+                       r"bra|lingerie|cleavage|sideboob|underboob|nude|naked.*|topless|bottomless|"
+                       r"see-through.*|pantyshot|upskirt|ass|ass_focus|breasts_out|nipples|cameltoe|"
+                       r"bdsm|bondage|lewd|ecchi|fanservice|lying_on_bed|bed_sheet|towel|bath.*|"
+                       r"onsen|wet_clothes|garter.*|thighhighs_pull|skirt_lift|shirt_lift)$")
 # Also never shown outside sfw: school settings and uniforms.
 BLOCK_ADULT = re.compile(r"^(school_uniform|serafuku|middle_school.*|high_school.*|"
                          r"school_swimsuit|gym_uniform|bloomers|sailor_collar)$")
 
-KAOMOJI = ["(=^･ω･^=)", "(=ↀωↀ=)", "ฅ^•ﻌ•^ฅ", "(^・ω・^ )", "(=^‥^=)", "(ﾐΦ ﻌ ΦﾐE)",
+KAOMOJI = ["(=^･ω･^=)", "(=ↀωↀ=)", "ฅ^•ﻌ•^ฅ", "(^・ω・^ )", "(=^‥^=)", "(ﾐΦ ﻌ Φﾐ)",
            "ᓚᘏᗢ", "(=①ω①=)", "(^˵◕ω◕˵^)", "(=｀ω´=)", "(=^-ω-^=)", "₍^ >ヮ<^₎"]
 SLOGANS = ["NO GODS · NO MASTERS · NO TELEMETRY", "SEIZE THE MEANS OF COMPILATION",
            "TRUST NO CLOUD ~NYA", "READ THE SOURCE, COMRADE", "END-TO-END PURRCRYPTED",
@@ -155,6 +162,8 @@ def allowed(tags, mode):
     if any(BLOCK.match(x) for x in t):
         return False
     if mode != "sfw" and any(BLOCK_ADULT.match(x) for x in t):
+        return False
+    if mode == "sfw" and any(BLOCK_SFW.match(x) for x in t):
         return False
     return True
 

@@ -16,6 +16,8 @@ Singleton {
 
     readonly property bool enabled: conf.loaded && cfg.enabled === true
     readonly property string bin: cfg.bin || "neko"
+    readonly property color lilac: cfg.lilac || Theme.fgMuted
+    readonly property color mint: cfg.mint || Theme.fgMuted
 
     // From the daemon's state.
     property string avatar: ""
@@ -61,6 +63,8 @@ Singleton {
             id: cfg
             property bool enabled: false
             property string bin: ""
+            property string lilac: ""
+            property string mint: ""
         }
     }
 

@@ -240,6 +240,8 @@ PanelWindow {
         border.width: 1
         border.color: Theme.borderStrong
         opacity: win.open ? 1 : 0
+
+        NekoFrame { anchors.fill: parent; radius: parent.radius; ears: true; earWidth: 30; earHeight: 18 }
         scale: win.open ? 1 : 0.97
         Behavior on opacity { NumberAnimation { duration: Theme.anim } }
         Behavior on scale { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutCubic } }

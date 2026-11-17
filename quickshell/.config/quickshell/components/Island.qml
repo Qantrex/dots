@@ -17,6 +17,8 @@ Rectangle {
 
     Behavior on implicitWidth { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutCubic } }
 
+    NekoFrame { anchors.fill: parent; radius: parent.radius; ears: true }
+
     Row {
         id: row
         anchors.verticalCenter: parent.verticalCenter

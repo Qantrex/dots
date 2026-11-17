@@ -39,6 +39,8 @@ Item {
                 border.width: 1
                 border.color: Theme.borderStrong
 
+                NekoFrame { anchors.fill: parent; radius: parent.radius; lineWidth: 1.2 }
+
                 Text {
                     id: label
                     x: 10

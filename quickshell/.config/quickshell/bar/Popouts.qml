@@ -50,6 +50,8 @@ PanelWindow {
         border.color: Theme.border
         clip: true
 
+        NekoFrame { anchors.fill: parent; radius: parent.radius }
+
         opacity: win.open ? 1 : 0
         transform: Translate { y: win.open ? 0 : -8; Behavior on y { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutCubic } } }
         Behavior on opacity { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutCubic } }
