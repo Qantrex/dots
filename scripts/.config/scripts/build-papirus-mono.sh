@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Build "Papirus-Mono": Papirus-Dark with grey instead of blue folders.
+# build-papirus-mono.sh COLOUR NAME builds another variant under its own name
+# (nekosec: build-papirus-mono.sh pink Papirus-Neko), leaving Papirus-Mono alone.
 #
 # papirus-folders does the same by rewriting /usr/share/icons (needs root and
 # is undone by every papirus update). This builds a small user theme in
@@ -8,8 +10,9 @@
 set -euo pipefail
 
 COLOR=${1:-grey}
+NAME=${2:-Papirus-Mono}
 SRC=/usr/share/icons/Papirus-Dark
-DEST=$HOME/.local/share/icons/Papirus-Mono
+DEST=$HOME/.local/share/icons/$NAME
 
 rm -rf "$DEST"
 mkdir -p "$DEST"
@@ -32,7 +35,7 @@ done
 
 {
   echo "[Icon Theme]"
-  echo "Name=Papirus-Mono"
+  echo "Name=$NAME"
   echo "Comment=Papirus-Dark with $COLOR folders"
   echo "Inherits=Papirus-Dark,breeze-dark,hicolor"
   echo "Directories=$(IFS=,; echo "${dirs[*]}")"

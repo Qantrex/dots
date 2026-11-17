@@ -370,10 +370,12 @@ setup_default_apps() {
 }
 
 setup_icon_theme() {
-  step "Icon theme (Papirus-Mono: Papirus-Dark with grey folders)"
+  step "Icon themes (Papirus-Dark with grey folders for root, pink for nekosec)"
   run "$DOTFILES/scripts/.config/scripts/build-papirus-mono.sh" \
     || { FAILED+=("Papirus-Mono icons"); return; }
-  ok "Papirus-Mono built in ~/.local/share/icons"
+  run "$DOTFILES/scripts/.config/scripts/build-papirus-mono.sh" pink Papirus-Neko \
+    || { FAILED+=("Papirus-Neko icons"); return; }
+  ok "Papirus-Mono and Papirus-Neko built in ~/.local/share/icons"
 }
 
 setup_vesktop() {
