@@ -496,6 +496,9 @@ class Daemon:
             for f in ("portrait.png", "greet.png", "greet.six"):
                 if (d / f).exists():
                     shutil.copy(d / f, CACHE / f)
+            if (d / "portrait.png").exists():
+                save_json(CACHE / "portrait.json", {"name": e["name"], "artist": e.get("artist", ""),
+                                                    "subject": info["subject"]})
             shutil.copy(d / "avatar.png", CACHE / f"avatar{self.slot}.png")
             self.state.update(slot=self.slot, feed=info["feed"], shown=e["name"], artist=e.get("artist", ""),
                               page=e.get("page", ""), safe=bool(e.get("safe")), mode=mode,
