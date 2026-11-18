@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# What "this" means right now, for a Claude session: the window you used last (not the Claude panel or quick
+# ask), what it shows if it's a terminal, the selected text, the clipboard and the newest screenshot.
+#   context            print it (about 1-3k tokens)
+# Selected text and clipboard are left out when they look like a password (one long word with mixed
+# characters), because password managers copy through the clipboard.
+
+set -u
+max=1500
+skip='^(agentic-panel|claude-ask)$'
+
+looks_secret() {   # one token, no spaces, 12-128 chars, at least three character classes
+    local s=$1 classes=0
+    [[ $s =~ [[:space:]] || ${#s} -lt 12 || ${#s} -gt 128 ]] && return 1
+    [[ $s =~ [a-z] ]] && ((classes++)); [[ $s =~ [A-Z] ]] && ((classes++))
+    [[ $s =~ [0-9] ]] && ((classes++)); [[ $s =~ [^a-zA-Z0-9] ]] && ((classes++))
+    ((classes >= 3))
+}
+
+foot_tmux_pane() {   # the tmux pane a foot window shows, from its client process
+    local foot=$1 cpid
+    while IFS=' ' read -r cpid pane; do
+        local p=$cpid
+        while [[ -n $p && $p != 1 ]]; do
+            [[ $p == "$foot" ]] && { echo "$pane"; return; }
+            p=$(awk '/^PPid:/{print $2}' /proc/"$p"/status 2>/dev/null)
+        done
+    done < <(tmux list-clients -F '#{client_pid} #{pane_id}' 2>/dev/null)
+}
+
+echo "# Context ($(date '+%a %H:%M'))"
+w=$(hyprctl clients -j | jq -c --arg skip "$skip" \
+    '[.[] | select(.focusHistoryID >= 0 and (.class | test($skip) | not))] | sort_by(.focusHistoryID) | .[0] // empty')
+if [[ -n $w ]]; then
+    class=$(jq -r .class <<<"$w"); title=$(jq -r .title <<<"$w"); ws=$(jq -r .workspace.name <<<"$w"); pid=$(jq -r .pid <<<"$w")
+    echo
+    echo "## Window used last"
+    echo "$class, workspace $ws: \"$title\""
+    if [[ $class == foot* ]]; then
+        pane=$(foot_tmux_pane "$pid")
+        if [[ -n $pane ]]; then
+            echo "Terminal in tmux: $(tmux display -p -t "$pane" '#{pane_current_command} in #{pane_current_path}, window #{window_index} "#{window_name}"')"
+            echo
+            echo '```'
+            tmux capture-pane -p -J -t "$pane" -S -40 | sed 's/[[:space:]]*$//' | cat -s | tail -40
+            echo '```'
+        fi
+    fi
+fi
+
+sel=$(timeout 1 wl-paste -p -n 2>/dev/null | head -c $max)
+if [[ -n $sel ]]; then
+    echo; echo "## Selected text"
+    if looks_secret "$sel"; then echo "(looks like a password; left out)"; else echo '```'; echo "$sel"; echo '```'; fi
+fi
+
+types=$(timeout 1 wl-paste --list-types 2>/dev/null)
+if grep -q '^image/png' <<<"$types"; then
+    f="${XDG_RUNTIME_DIR:-/tmp}/context-clipboard.png"
+    timeout 2 wl-paste --type image/png > "$f" 2>/dev/null && { echo; echo "## Clipboard"; echo "An image, saved at $f"; }
+elif grep -qE '^text/|UTF8_STRING' <<<"$types"; then
+    clip=$(timeout 1 wl-paste -n 2>/dev/null | head -c $max)
+    if [[ -n $clip && $clip != "$sel" ]]; then
+        echo; echo "## Clipboard"
+        if looks_secret "$clip"; then echo "(looks like a password; left out)"; else echo '```'; echo "$clip"; echo '```'; fi
+    fi
+fi
+
+shot=$(ls -t "$HOME/Pictures/Screenshots"/* 2>/dev/null | head -1)
+if [[ -n $shot ]]; then
+    age=$(( ($(date +%s) - $(stat -c %Y "$shot")) / 60 ))
+    echo; echo "## Newest screenshot"; echo "$shot ($age min ago)"
+fi

@@ -37,6 +37,8 @@ LINKS=(
   ".local/bin/run-logged|bin"
   ".local/bin/ssh-unlock|bin"
   ".local/bin/inbox|bin"
+  ".local/bin/context|bin"
+  ".local/bin/desk|bin"
   ".config/systemd/user/service.d/10-agentic-inbox.conf|agentic"
   ".config/systemd/user/agentic-inbox@.service|agentic"
   ".config/systemd/user/agentic-inbox@.service.d/10-no-onfailure.conf|agentic"

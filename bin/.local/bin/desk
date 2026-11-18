@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Desktop actions from a fixed list, for Claude sessions and for you. Windows are matched by class or title
+# (case-insensitive regex), e.g. `desk focus firefox`.
+#   desk windows                         every window: class, workspace, title
+#   desk focus <match>                   focus that window
+#   desk move <match> <workspace>        move that window to a workspace (number or special:name)
+#   desk ws <n>                          go to workspace n
+#   desk open <file|url> [ws <n>]        open with the default app, optionally on workspace n first
+#   desk media play-pause|next|previous|status
+#   desk volume <+5|-5|40|mute>          default output, in percent
+#   desk brightness <+10|-10|60>         screen brightness, in percent
+#   desk shot <match> [file]             screenshot of one window (prints the file)
+#   desk theme [name]                    list themes or switch (the `theme` command)
+#   desk notify <text>                   a desktop notification
+
+set -u
+dsp() { hyprctl dispatch "$1" >/dev/null; }
+
+find_window() {   # address of the first window whose class or title matches
+    hyprctl clients -j | jq -r --arg m "$1" \
+        'first(.[] | select((.class | test($m; "i")) or (.title | test($m; "i")))) | .address // empty'
+}
+need() { local a; a=$(find_window "$1"); [[ -n $a ]] || { echo "no window matches '$1'" >&2; exit 1; }; echo "$a"; }
+
+case ${1:-} in
+windows)
+    hyprctl clients -j | jq -r '.[] | "\(.class)\tws \(.workspace.name)\t\(.title)"' | column -t -s $'\t' ;;
+focus)
+    a=$(need "${2:?desk focus <match>}"); dsp "hl.dsp.focus({ window = \"address:$a\" })" ;;
+move)
+    a=$(need "${2:?desk move <match> <workspace>}"); w=${3:?workspace}
+    [[ $w =~ ^[0-9]+$ ]] || w="\"$w\""
+    dsp "hl.dsp.focus({ window = \"address:$a\" })"
+    dsp "hl.dsp.window.move({ workspace = $w })" ;;
+ws)
+    n=${2:?desk ws <n>}; [[ $n =~ ^[0-9]+$ ]] || { echo "workspace number" >&2; exit 1; }
+    dsp "hl.dsp.focus({ workspace = $n })" ;;
+open)
+    t=${2:?desk open <file|url> [ws n]}
+    if [[ ${3:-} == ws && -n ${4:-} ]]; then dsp "hl.dsp.focus({ workspace = $4 })"; fi
+    setsid -f xdg-open "$t" >/dev/null 2>&1 ;;
+media)
+    case ${2:-status} in
+        play-pause|next|previous) playerctl "$2" ;;
+        status) playerctl metadata --format '{{status}}: {{artist}} - {{title}} ({{playerName}})' 2>/dev/null || echo "nothing playing" ;;
+        *) echo "desk media play-pause|next|previous|status" >&2; exit 1 ;;
+    esac ;;
+volume)
+    v=${2:?desk volume <+5|-5|40|mute>}
+    case $v in
+        mute) wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle ;;
+        +*) wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "${v#+}%+" ;;
+        -*) wpctl set-volume @DEFAULT_AUDIO_SINK@ "${v#-}%-" ;;
+        *) wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "$v%" ;;
+    esac
+    wpctl get-volume @DEFAULT_AUDIO_SINK@ ;;
+brightness)
+    b=${2:?desk brightness <+10|-10|60>}
+    case $b in +*) brightnessctl -q set "${b#+}%+" ;; -*) brightnessctl -q set "${b#-}%-" ;; *) brightnessctl -q set "$b%" ;; esac
+    echo "brightness $(( $(brightnessctl get) * 100 / $(brightnessctl max) )) %" ;;
+shot)
+    a=$(need "${2:?desk shot <match> [file]}")
+    geo=$(hyprctl clients -j | jq -r --arg a "$a" '.[] | select(.address == $a) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
+    out=${3:-${XDG_RUNTIME_DIR:-/tmp}/desk-shot-$(date +%H%M%S).png}
+    grim -g "$geo" "$out" && echo "$out" ;;
+theme)
+    if [[ -n ${2:-} ]]; then theme "$2"; else theme list 2>/dev/null || theme; fi ;;
+notify)
+    shift; notify-send -a Claude "Claude" "$*" ;;
+*)
+    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
