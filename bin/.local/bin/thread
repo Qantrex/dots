@@ -205,8 +205,9 @@ def cmd_start(args):
         prompt = [brief + "\n\n"
                   f"(You are thread '{name}', started by the main chat. Your state file is {path(name)}: keep its "
                   "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. When you "
-                  "finish, or need the owner, send the main chat a message with SendMessage to \"main-chat\", first line "
-                  "a short summary.)"]
+                  "stop, the main chat hears it by itself and reads the first line of your answer, so start every "
+                  "final answer with a one-line summary. To pass something longer to the main chat, use SendMessage "
+                  "to \"main-chat\".)"]
     launch(name, folder, prompt + ["-n", name, "--session-id", sid, "--model", model, "--autocompact", "150000"])
     print(f"Thread '{name}' started ({model}) in {folder}: tmux window {SESSION}:{name}, `dock show {name}`.")
 

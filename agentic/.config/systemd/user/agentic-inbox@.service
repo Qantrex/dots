@@ -1,0 +1,6 @@
+[Unit]
+Description=Tell the main Claude chat that %i failed
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/inbox add --wake broke systemd "user unit %i failed"

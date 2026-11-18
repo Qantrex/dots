@@ -22,6 +22,15 @@ Singleton {
     property int fan: -1          // RPM
     property var gpu: null        // { util, memUsed, memTotal, temp } on the PC
 
+    // Disks under 10 % free go to the main Claude chat's inbox once per mount and session (`inbox`).
+    property var diskReported: ({})
+    function checkDisk(mount, availKb, totalKb) {
+        if (totalKb <= 0 || availKb / totalKb >= 0.10 || diskReported[mount]) return;
+        diskReported[mount] = true;
+        Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/inbox", "add", "--wake", "broke", "disk",
+            mount + " has only " + Math.round(availKb / 1048576) + " GB (" + Math.round(100 * availKb / totalKb) + " %) free"]);
+    }
+
     property var lastIdle: 0
     property var lastTotal: 0
 
@@ -31,6 +40,7 @@ Singleton {
     readonly property string script: `
         head -3 /proc/meminfo
         head -1 /proc/stat
+        df -P / /home 2>/dev/null | awk 'NR > 1 {print "disk", $6, $4, $2}'
         for h in /sys/class/hwmon/hwmon*; do
             case "$(cat $h/name)" in
                 k10temp|coretemp|zenpower) echo "temp $(cat $h/temp1_input 2>/dev/null)";;
@@ -71,6 +81,7 @@ Singleton {
                 lastIdle = idle; lastTotal = sum;
             } else if (f[0] === "temp" && f[1]) temp = Math.round(Number(f[1]) / 1000);
             else if (f[0] === "fan" && f[1]) fan = Number(f[1]);
+            else if (f[0] === "disk" && f.length >= 4) checkDisk(f[1], Number(f[2]), Number(f[3]));
             else if (f[0] === "gpu" && f.length >= 5)
                 gpu = { util: Number(f[1]) / 100, memUsed: Number(f[2]) / 1024, memTotal: Number(f[3]) / 1024, temp: Number(f[4]) };
         }
