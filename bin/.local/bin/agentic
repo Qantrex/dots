@@ -7,6 +7,7 @@
 #   agentic status         what runs right now
 #   agentic restart        fresh main chat (same as /exit inside it)
 #   agentic brief [--print] what needs me (deadlines, left-open threads, failures, inbox, usage); at login
+#   agentic doctor         check the setup; prints one line per problem, nothing when all is well
 # The chat runs in ~/.local/share/agentic/main; its rules are that folder's CLAUDE.md. Threads: `thread`.
 # Panel: `dock`. Map: `atlas`. Undo everything: `agentic off`, then revert the commits.
 
@@ -35,9 +36,10 @@ start_main() {
     [[ -e $dir/README.md ]] || printf '# Main chat\n\nWorking folder of the always-running main Claude chat (`agentic`). Its rules: CLAUDE.md here.\n' > "$dir/README.md"
     # The chat restarts by itself after /exit or a crash; everything that matters is in files.
     # ~ comes in through settings, not --add-dir: --add-dir asks for trust in every new session.
+    # --remote-control: the same conversation continues in the Claude app on the phone.
     local loop='while :; do
         env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-            AGENTIC_ROLE=main "'"$claude"'" -n main-chat --autocompact 100000 \
+            AGENTIC_ROLE=main "'"$claude"'" -n main-chat --autocompact 100000 --remote-control main-chat \
             --settings "{\"permissions\":{\"additionalDirectories\":[\"$HOME\"]}}"
         sleep 2
     done'
@@ -92,6 +94,38 @@ brief)
         msg=$(printf '%s\n' "${lines[@]}")
         [[ ${2:-} == --print ]] && echo "$msg" || notify-send -a Claude "Good to know" "$msg"
     fi
+    ;;
+doctor)
+    # Checks the whole setup with code and prints one line per problem; nothing printed means all good.
+    # The main chat sees this at start and proposes fixes.
+    bin="$HOME/.local/bin"
+    for c in agentic dock thread atlas inbox context desk journal run-logged ssh-unlock claude-usage; do
+        [[ -x $bin/$c ]] || echo "missing command: $c (link it from ~/dotfiles/bin/.local/bin, see install/links.sh)"
+    done
+    [[ -e ${XDG_CONFIG_HOME:-$HOME/.config}/agentic/atlas.conf ]] || echo "no ~/.config/agentic/atlas.conf (link from claude-config/agentic)"
+    [[ -e $dir/CLAUDE.md ]] || echo "the main chat has no rules: $dir/CLAUDE.md (link from claude-config/agentic/main-CLAUDE.md)"
+    for h in main-start.sh main-prompt.sh session-track.sh; do
+        grep -q "$h" "$HOME/.claude/settings.json" 2>/dev/null || echo "hook not registered in ~/.claude/settings.json: $h"
+    done
+    if [[ ! -e $off_flag ]]; then
+        has_main_window || echo "the main chat isn't running (agentic on)"
+        "$HOME/.local/bin/dock" status 2>/dev/null | grep -q closed && echo "the side panel isn't open (dock ensure)"
+        pgrep -f 'journal record' >/dev/null || echo "the focus recorder for journal isn't running (journal record, started at login)"
+    fi
+    idx="${XDG_DATA_HOME:-$HOME/.local/share}/agentic/atlas/index.md"
+    if [[ ! -e $idx ]]; then echo "no atlas yet (atlas refresh)"
+    else
+        (( $(date +%s) - $(stat -c %Y "$idx") > 86400 )) && echo "the atlas is older than a day (atlas refresh)"
+        grep -m1 '^\*\*Stale' "$idx"
+    fi
+    log="$state/usage.log"
+    [[ -e $log ]] && (( $(date +%s) - $(stat -c %Y "$log") > 3 * 86400 )) && echo "no usage readings for 3 days (status line script in claude-config)"
+    "$HOME/.local/bin/ssh-unlock" --check >/dev/null 2>&1 || echo "ssh keys not loaded (ssh-unlock opens the passphrase window)"
+    for f in "${XDG_DATA_HOME:-$HOME/.local/share}"/agentic/threads/*.md; do
+        [[ -e $f ]] || continue
+        sid=$(awk -F': ' '/^session:/{print $2; exit}' "$f")
+        ls "$HOME"/.claude/projects/*/"$sid".jsonl >/dev/null 2>&1 || echo "thread $(basename "$f" .md) has no transcript any more (thread rm)"
+    done
     ;;
 restart)
     has_main_window && tmux send-keys -t "$session:main" C-u '/exit' Enter
