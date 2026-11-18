@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# The side panel for the main Claude chat and its threads (`agentic`, `thread`).
+#   dock toggle          SUPER+SHIFT+A: show the panel, or hide it when it's in front
+#   dock show [name]     show the panel with the main chat or a thread ("main" by default)
+#   dock hide            hide it
+#   dock ensure          start the panel window hidden, so it opens instantly later
+#   dock close           close the panel window (agentic off)
+#   dock status          one line: shown, hidden or closed, and what it shows
+# The panel is a terminal on the special workspace "agentic" (right edge, full height, about 40 % wide;
+# window rule "agentic-panel" in rules.lua). It shows tmux session "panel", grouped with session "main":
+# the same windows, but its own current window, so the terminals on your workspaces keep what they show.
+# tmux sizes a window to the client used last, and Claude Code redraws cleanly at the new width.
+
+set -u
+session=main
+panel=panel
+
+window_open() { hyprctl clients -j | jq -e 'any(.[]; .class == "agentic-panel")' >/dev/null; }
+shown() { hyprctl monitors -j | jq -e 'any(.[]; .specialWorkspace.name == "special:agentic")' >/dev/null; }
+toggle() { hyprctl dispatch 'hl.dsp.workspace.toggle_special("agentic")' >/dev/null; }
+focus() { hyprctl dispatch 'hl.dsp.focus({ window = "class:^(agentic-panel)$" })' >/dev/null; }
+
+ensure() {
+    tmux has-session -t "=$session" 2>/dev/null || { echo "No tmux session '$session' (agentic on)." >&2; return 1; }
+    if window_open && tmux has-session -t "=$panel" 2>/dev/null; then return 0; fi
+    hyprctl clients -j | jq -r '.[] | select(.class == "agentic-panel") | .pid' | xargs -r kill
+    tmux kill-session -t "=$panel" 2>/dev/null
+    # destroy-unattached: the grouped session goes away with the window, and new terminals attach to
+    # "main" by name (.zshrc), never to this one.
+    setsid -f foot --app-id=agentic-panel --title="claude main" \
+        tmux new-session -s "$panel" -t "$session" \; set-option destroy-unattached on \; \
+        select-window -t "$panel:main" >/dev/null 2>&1
+    for _ in $(seq 1 50); do window_open && tmux has-session -t "=$panel" 2>/dev/null && return 0; sleep 0.1; done
+    return 1
+}
+
+select_target() {
+    local name=${1:-main}
+    tmux select-window -t "$panel:$name" 2>/dev/null || {
+        notify-send -a Claude "Claude" "No thread called '$name' is running."; return 1; }
+}
+
+case ${1:-toggle} in
+toggle)
+    if shown; then toggle; exit 0; fi
+    ensure || exit 1
+    toggle; focus ;;
+show)
+    ensure || exit 1
+    select_target "${2:-main}" || exit 1
+    shown || toggle
+    focus ;;
+hide)
+    shown && toggle ;;
+ensure)
+    ensure ;;
+close)
+    shown && toggle
+    hyprctl clients -j | jq -r '.[] | select(.class == "agentic-panel") | .pid' | xargs -r kill
+    tmux kill-session -t "=$panel" 2>/dev/null ;;
+status)
+    if ! window_open; then echo "panel: closed"; exit 0; fi
+    w=$(tmux display -p -t "$panel:" '#{window_name}' 2>/dev/null)
+    echo "panel: $(shown && echo shown || echo hidden), showing ${w:-?}" ;;
+*)
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1 ;;
+esac

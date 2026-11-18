@@ -31,6 +31,8 @@ LINKS=(
   ".local/bin/neko|bin"
   ".local/bin/claude-usage|bin"
   ".local/bin/atlas|bin"
+  ".local/bin/agentic|bin"
+  ".local/bin/dock|bin"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"
