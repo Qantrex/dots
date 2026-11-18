@@ -6,6 +6,7 @@
 #                          Stays off across logins until `agentic on`.
 #   agentic status         what runs right now
 #   agentic restart        fresh main chat (same as /exit inside it)
+#   agentic brief [--print] what needs me (deadlines, left-open threads, failures, inbox, usage); at login
 # The chat runs in ~/.local/share/agentic/main; its rules are that folder's CLAUDE.md. Threads: `thread`.
 # Panel: `dock`. Map: `atlas`. Undo everything: `agentic off`, then revert the commits.
 
@@ -55,7 +56,11 @@ on)
     ensure_session
     has_main_window || start_main
     "$HOME/.local/bin/dock" ensure >/dev/null 2>&1 &
-    (command -v atlas >/dev/null && atlas refresh >/dev/null 2>&1 &)
+    if [[ ${2:-} == --login ]]; then
+        (atlas refresh >/dev/null 2>&1; inbox collect >/dev/null 2>&1; "$0" brief) &
+    else
+        (atlas refresh >/dev/null 2>&1 &)
+    fi
     echo "Main chat is on (tmux window $session:main; SUPER+SHIFT+A shows the panel)."
     ;;
 off)
@@ -68,6 +73,25 @@ off)
         tmux kill-window -t "$session:main" 2>/dev/null
     fi
     echo "Main chat, panel and threads are off; data kept. 'agentic on' brings them back."
+    ;;
+brief)
+    # One notification with what needs me, from data (no AI): deadlines in 3 days, threads left open,
+    # failed units, new inbox events, weekly Claude usage. Shown at login.
+    lines=()
+    dl=$(atlas deadlines 2>/dev/null | awk -F'|' 'NR > 3 && $2 ~ /(overdue|in [0-3] d)/ {gsub(/^ +| +$/, "", $3); gsub(/^ +| +$/, "", $4); gsub(/^ +| +$/, "", $2); print $3 " " $4 " (" $2 ")"}' | head -4)
+    [[ -n $dl ]] && lines+=("Due: ${dl//$'\n'/, }")
+    left=$(thread list --json 2>/dev/null | jq '[.[] | select(.state == "left open")] | length')
+    (( ${left:-0} > 0 )) && lines+=("$left thread(s) left open (cr)")
+    failed=$( (systemctl --failed --no-legend --plain; systemctl --user --failed --no-legend --plain) 2>/dev/null | awk '{print $1}' | paste -sd, -)
+    [[ -n $failed ]] && lines+=("Failed: $failed")
+    new=$(inbox list 200 2>/dev/null | grep -c '(new)')
+    (( new > 0 )) && lines+=("$new new inbox event(s)")
+    week=$(jq -r '.seven_day.used // empty' "${XDG_CACHE_HOME:-$HOME/.cache}/claude-usage.json" 2>/dev/null)
+    [[ -n $week ]] && lines+=("Claude this week: ${week%.*} %")
+    if (( ${#lines[@]} )); then
+        msg=$(printf '%s\n' "${lines[@]}")
+        [[ ${2:-} == --print ]] && echo "$msg" || notify-send -a Claude "Good to know" "$msg"
+    fi
     ;;
 restart)
     has_main_window && tmux send-keys -t "$session:main" C-u '/exit' Enter

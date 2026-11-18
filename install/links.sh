@@ -39,6 +39,7 @@ LINKS=(
   ".local/bin/inbox|bin"
   ".local/bin/context|bin"
   ".local/bin/desk|bin"
+  ".local/bin/journal|bin"
   ".config/systemd/user/service.d/10-agentic-inbox.conf|agentic"
   ".config/systemd/user/agentic-inbox@.service|agentic"
   ".config/systemd/user/agentic-inbox@.service.d/10-no-onfailure.conf|agentic"

@@ -38,6 +38,9 @@ hl.on("hyprland.start", function()
     -- and Claude sessions (no terminal to ask in) can ssh. Cancel it and run `ssh-unlock` later instead.
     hl.exec_cmd("~/.local/bin/ssh-unlock --login")
 
+    -- Which window has focus when, for `journal` (local only; listens to Hyprland's events, no polling).
+    hl.exec_cmd("~/.local/bin/journal record")
+
     -- Wallpaper: start hyprpaper without a config file, wait for its socket, then
     -- set the last picked wallpaper over IPC. hyprpaper.conf only turns off the
     -- splash text (on by default since hyprpaper 0.8); the old preload/wallpaper

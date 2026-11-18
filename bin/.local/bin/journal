@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""What I did, from data that already exists, put together by code (no AI). Local only.
+
+  journal [day]                 one day: apps in focus, commits, files changed, shell commands, Claude sessions
+                                (day: today, yesterday, a weekday name, or YYYY-MM-DD; default today)
+  journal search <text> [--days N]
+                                find <text> in commits, shell history, window titles, changed file names and
+                                Claude prompts of the last N days (default 30)
+  journal record                log which window has focus (started at login; listens to Hyprland's events)
+
+Sources: git logs of the atlas repo roots, ~/.zsh_history, ~/.claude/history.jsonl, file times under the
+atlas roots, and the focus log in ~/.local/share/agentic/journal/ (written by `journal record`).
+"""
+import configparser
+import glob
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+
+HOME = os.path.expanduser("~")
+DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share"), "agentic", "journal")
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "agentic", "atlas.conf")
+SKIP_CMDS = re.compile(r"^(ls|ll|la|l|cd|clear|pwd|exit|z|y|c|history)(\s|$)")
+
+
+def roots():
+    c = configparser.ConfigParser(interpolation=None, delimiters=("=",))
+    c.read(CONF)
+    return [os.path.expanduser(p) for p in c.get("repos", "roots", fallback="~/Projects ~/dotfiles").split()]
+
+
+def repos():
+    out = []
+    for r in roots():
+        for g in glob.glob(os.path.join(r, "**", ".git"), recursive=True):
+            if "node_modules" not in g and g.count(os.sep) - r.count(os.sep) <= 5:
+                out.append(os.path.dirname(g))
+    return out
+
+
+def short(p):
+    return p.replace(HOME, "~", 1)
+
+
+def parse_day(s):
+    s = (s or "today").lower()
+    t = date.today()
+    if s == "today":
+        return t
+    if s == "yesterday":
+        return t - timedelta(days=1)
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    for i, d in enumerate(days):
+        if d.startswith(s[:3]):
+            back = (t.weekday() - i) % 7 or 7
+            return t - timedelta(days=back)
+    return date.fromisoformat(s)
+
+
+def span(d):
+    a = datetime.combine(d, datetime.min.time()).timestamp()
+    return a, a + 86400
+
+
+def git(r, *args):
+    try:
+        return subprocess.run(["git", "-C", r, *args], capture_output=True, text=True, timeout=10).stdout
+    except subprocess.SubprocessError:
+        return ""
+
+
+def shell_history():
+    out = []
+    try:
+        raw = open(os.path.join(HOME, ".zsh_history"), "rb").read().decode("utf-8", "ignore")
+    except OSError:
+        return out
+    for m in re.finditer(r"^: (\d+):\d+;(.*)$", raw, re.M):
+        out.append((int(m.group(1)), m.group(2)))
+    return out
+
+
+def claude_prompts():
+    out = []
+    try:
+        for line in open(os.path.join(HOME, ".claude/history.jsonl"), encoding="utf-8", errors="ignore"):
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            d = str(e.get("display", ""))
+            if d and not d.startswith("/"):
+                out.append((e.get("timestamp", 0) / 1000, short(e.get("project", "")), d))
+    except OSError:
+        pass
+    return out
+
+
+def focus_log(a, b):
+    rows = []
+    for f in sorted(glob.glob(os.path.join(DATA, "focus-*.tsv"))):
+        try:
+            for line in open(f, encoding="utf-8", errors="ignore"):
+                p = line.rstrip("\n").split("\t")
+                if len(p) == 3 and a - 86400 <= float(p[0]) < b:
+                    rows.append((float(p[0]), p[1], p[2]))
+        except OSError:
+            pass
+    return rows
+
+
+def day(d):
+    a, b = span(d)
+    print(f"# {d:%A %Y-%m-%d}")
+    # Apps in focus: time until the next focus change, gaps over 15 min count as away.
+    fl = focus_log(a, b)
+    if fl:
+        per = defaultdict(float)
+        titles = defaultdict(set)
+        for (t, cls, title), nxt in zip(fl, fl[1:] + [(min(time.time(), b), "", "")]):
+            if t < a:
+                continue
+            dur = min(nxt[0] - t, 900)
+            per[cls] += dur
+            if dur > 120 and title:
+                titles[cls].add(title[:70])
+        print("\n## Apps in focus")
+        for cls, sec in sorted(per.items(), key=lambda x: -x[1])[:10]:
+            if sec >= 120:
+                ex = "; ".join(sorted(titles[cls])[:3])
+                print(f"- {cls}: {sec / 3600:.1f} h" + (f" ({ex})" if ex else ""))
+    else:
+        print("\n(No focus log for this day; `journal record` runs from the next login.)")
+    # Commits
+    lines = []
+    for r in repos():
+        log = git(r, "log", "--all", f"--since={int(a)}", f"--until={int(b)}", "--format=%cd %s", "--date=format:%H:%M")
+        for l in log.splitlines():
+            lines.append(f"- {short(r)}: {l}")
+    if lines:
+        print(f"\n## Commits ({len(lines)})")
+        print("\n".join(sorted(lines, key=lambda x: x.split(": ", 1)[1])[:40]))
+    # Files changed
+    changed = []
+    for r in roots():
+        for dirpath, dirs, files in os.walk(r):
+            dirs[:] = [x for x in dirs if not x.startswith(".") and x not in ("node_modules", "target", "build", "dist", "__pycache__", "venv")]
+            for f in files:
+                p = os.path.join(dirpath, f)
+                try:
+                    mt = os.path.getmtime(p)
+                except OSError:
+                    continue
+                if a <= mt < b:
+                    changed.append((mt, p))
+    if changed:
+        print(f"\n## Files changed ({len(changed)})")
+        for mt, p in sorted(changed, reverse=True)[:25]:
+            print(f"- {time.strftime('%H:%M', time.localtime(mt))} {short(p)}")
+    # Shell
+    cmds = [(t, c) for t, c in shell_history() if a <= t < b and not SKIP_CMDS.match(c)]
+    if cmds:
+        print(f"\n## Shell ({len(cmds)} commands)")
+        for t, c in cmds[-25:]:
+            print(f"- {time.strftime('%H:%M', time.localtime(t))} {c[:120]}")
+    # Claude
+    ps = [(t, p, d) for t, p, d in claude_prompts() if a <= t < b]
+    if ps:
+        per = defaultdict(list)
+        for t, p, d in ps:
+            per[p].append(d)
+        print(f"\n## Claude ({len(ps)} prompts)")
+        for p, ds in sorted(per.items(), key=lambda x: -len(x[1])):
+            print(f"- {p or '?'}: {len(ds)} prompts, first: \"{ds[0][:90]}\"")
+
+
+def search(text, days):
+    since = time.time() - days * 86400
+    rx = re.compile(re.escape(text), re.I)
+    hits = []
+    for r in repos():
+        for l in git(r, "log", "--all", f"--since={int(since)}", "-i", f"--grep={text}", "--format=%ct\t%s").splitlines():
+            t, s = l.split("\t", 1)
+            hits.append((int(t), "commit", f"{short(r)}: {s}"))
+    for t, c in shell_history():
+        if t >= since and rx.search(c):
+            hits.append((t, "shell", c[:140]))
+    for t, p, d in claude_prompts():
+        if t >= since and rx.search(d):
+            hits.append((t, "claude", f"{p}: {d[:140]}"))
+    seen = set()
+    for t, cls, title in focus_log(since, time.time()):
+        if rx.search(title) and (cls, title) not in seen:
+            seen.add((cls, title))
+            hits.append((t, "window", f"{cls}: {title[:120]}"))
+    for r in roots():
+        for p in glob.glob(os.path.join(r, "**", f"*{text}*"), recursive=True):
+            if "/." in p or "node_modules" in p:
+                continue
+            try:
+                mt = os.path.getmtime(p)
+            except OSError:
+                continue
+            if mt >= since:
+                hits.append((mt, "file", short(p)))
+    for t, kind, s in sorted(hits)[-60:]:
+        print(f"{time.strftime('%a %m-%d %H:%M', time.localtime(t))}  {kind:7} {s}")
+    if not hits:
+        print(f"Nothing with '{text}' in the last {days} days.")
+
+
+def record():
+    """Append 'time<TAB>class<TAB>title' on every focus change, from Hyprland's event socket."""
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    run = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    if not sig:
+        sys.exit("Not inside Hyprland (no HYPRLAND_INSTANCE_SIGNATURE).")
+    os.makedirs(DATA, exist_ok=True)
+    pidfile = os.path.join(run, "agentic-journal-record.pid")
+    try:
+        old = int(open(pidfile).read())
+        if os.path.exists(f"/proc/{old}") and "journal" in open(f"/proc/{old}/cmdline").read():
+            sys.exit(0)   # already recording
+    except (OSError, ValueError):
+        pass
+    open(pidfile, "w").write(str(os.getpid()))
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(os.path.join(run, "hypr", sig, ".socket2.sock"))
+    buf = b""
+    last = None
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            ev = line.decode("utf-8", "ignore")
+            if not ev.startswith("activewindow>>"):
+                continue
+            cls, _, title = ev[len("activewindow>>"):].partition(",")
+            cur = (cls, title)
+            if cur == last:
+                continue
+            last = cur
+            # Keep 60 days of focus logs.
+            f = os.path.join(DATA, f"focus-{date.today():%Y-%m-%d}.tsv")
+            with open(f, "a", encoding="utf-8") as fh:
+                fh.write(f"{time.time():.0f}\t{cls.replace(chr(9), ' ')}\t{title.replace(chr(9), ' ')}\n")
+    for old in glob.glob(os.path.join(DATA, "focus-*.tsv")):
+        if os.path.getmtime(old) < time.time() - 60 * 86400:
+            os.remove(old)
+
+
+def main():
+    a = sys.argv[1:]
+    if a and a[0] in ("-h", "--help", "help"):
+        print(__doc__)
+    elif a and a[0] == "record":
+        record()
+    elif a and a[0] == "search":
+        if len(a) < 2:
+            sys.exit("journal search <text> [--days N]")
+        days = int(a[a.index("--days") + 1]) if "--days" in a else 30
+        search(a[1], days)
+    else:
+        day(parse_day(a[0] if a else None))
+
+
+if __name__ == "__main__":
+    main()
