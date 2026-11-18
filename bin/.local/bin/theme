@@ -333,7 +333,7 @@ def reload(ctx, changed):
                         ("zathura", "zathura"), ("yazi", "yazi"), ("nvim", "nvim")):
         if running(proc):
             later.append(label)
-    later.append("Firefox (its own theme, see the README)")
+    later.append("Firefox (its chrome, userChrome.css)")
     return done, later
 
 

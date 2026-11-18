@@ -436,6 +436,27 @@ setup_spicetify() {
   ok "applied"
 }
 
+# The theme's Firefox chrome: chrome/userChrome.css of the default profile links to
+# theme/current/firefox-userChrome.css (empty in root; nekosec draws pink tabs with
+# cat ears). Never replaces a userChrome.css that is not ours.
+setup_firefox_chrome() {
+  step "Firefox chrome (userChrome.css from the theme)"
+  local ini=$HOME/.mozilla/firefox/installs.ini dir
+  dir=$(grep -m1 '^Default=' "$ini" 2>/dev/null | cut -d= -f2)
+  if [[ -z $dir || ! -d $HOME/.mozilla/firefox/$dir ]]; then
+    TODO+=("Firefox chrome: start Firefox once, then run the installer again"); return
+  fi
+  local p=$HOME/.mozilla/firefox/$dir css=$HOME/.mozilla/firefox/$dir/chrome/userChrome.css
+  if [[ -e $css && ! -L $css ]]; then
+    warn "$css is your own; left alone"; return
+  fi
+  run mkdir -p "$p/chrome"
+  run ln -sfn "$DOTFILES/theme/current/firefox-userChrome.css" "$css"
+  local pref='user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);'
+  grep -qF "$pref" "$p/user.js" 2>/dev/null || { ((DRY_RUN)) || echo "$pref" >> "$p/user.js"; }
+  ok "linked; Firefox shows it after a restart"
+}
+
 setup_firefox_theme() {
   step "Firefox theme"
   local id='{9b84b6b4-07c4-4b4b-ba21-394d86f6e9ee}' url='https://addons.mozilla.org/firefox/addon/black21/'

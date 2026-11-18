@@ -81,6 +81,7 @@ setup_default_apps
 setup_vesktop
 setup_spicetify
 setup_firefox_theme
+setup_firefox_chrome
 run_root_scripts
 check_home_paths
 verify
