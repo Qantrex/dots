@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+"""Threads: named Claude sessions for one work stream each, in tmux windows of session "main".
+
+  thread list [--json]                       every thread with its live state
+  thread start <name> <folder> [model] [-- brief...]
+                                             new session in <folder> (its CLAUDE.md loads), tmux window <name>
+  thread show <name>                         the state file (goal, now, next, decisions, where, open)
+  thread stop <name> | --all                 end the session (/exit); state and transcript stay
+  thread resume <name> | --open              reopen a thread where it was (claude --resume); --open: all
+                                             that a shutdown or crash left open (what `cr` did)
+  thread model <name> <model>                switch the model (only while it's idle)
+  thread adopt                               turn sessions from before (cr records, open sessions) into threads
+  thread rm <name>                           forget a thread (the transcript stays)
+
+The main chat (`agentic`) uses these; they work just as well by hand. At most MAX_RUNNING threads run;
+starting another stops the oldest idle one, which `thread resume` brings back. State files:
+~/.local/share/agentic/threads/<name>.md (facts only).
+"""
+import glob
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+import uuid
+from datetime import datetime
+
+HOME = os.path.expanduser("~")
+DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share"), "agentic")
+DIR = os.path.join(DATA, "threads")
+RUN = os.path.join(DIR, ".run")
+RECORDS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "claude-sessions")
+SESSION = "main"
+MAX_RUNNING = 5
+CLAUDE = os.path.join(HOME, ".local/bin/claude")
+MODELS = {"fable", "opus", "sonnet", "haiku"}
+CLEAN_ENV = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID",
+             "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID", "AGENTIC_ROLE"]
+
+
+def sh(args, check=False):
+    r = subprocess.run(args, capture_output=True, text=True)
+    if check and r.returncode:
+        sys.exit(r.stderr.strip() or f"{args[0]} failed")
+    return r.stdout
+
+
+def slug(s):
+    s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    return s[:32] or "thread"
+
+
+def path(name):
+    return os.path.join(DIR, name + ".md")
+
+
+def read(name):
+    try:
+        text = open(path(name), encoding="utf-8").read()
+    except OSError:
+        return None, ""
+    m = re.match(r"---\n(.*?)\n---\n?(.*)", text, re.S)
+    fm = {}
+    if m:
+        for line in m.group(1).splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                fm[k.strip()] = v.strip()
+    return fm, (m.group(2) if m else text)
+
+
+def write(name, fm, body):
+    os.makedirs(DIR, exist_ok=True)
+    fm["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    keys = ["name", "folder", "model", "status", "session", "started", "updated"]
+    head = "\n".join(f"{k}: {fm[k]}" for k in keys if k in fm)
+    with open(path(name) + ".tmp", "w", encoding="utf-8") as f:
+        f.write(f"---\n{head}\n---\n{body}")
+    os.replace(path(name) + ".tmp", path(name))
+
+
+def body_template(goal, folder):
+    return (f"\n## Goal\n{goal or '(not written yet)'}\n\n## Now\n\n## Next\n\n## Decisions\n\n"
+            f"## Where things are\n- Folder: `{folder}`\n\n## Open for the owner\n")
+
+
+def all_threads():
+    out = []
+    for f in sorted(glob.glob(os.path.join(DIR, "*.md"))):
+        fm, _ = read(os.path.basename(f)[:-3])
+        if fm:
+            out.append(fm)
+    return out
+
+
+def agents():
+    """Live Claude sessions by id: {id: {state, name, cwd}}."""
+    try:
+        j = json.loads(sh([CLAUDE, "agents", "--json"]) or "[]")
+    except ValueError:
+        j = []
+    return {(a.get("sessionId") or a.get("id") or ""): a for a in j}
+
+
+def windows():
+    """tmux windows of the main session: {name: (index, pane pid)}."""
+    out = {}
+    for line in sh(["tmux", "list-windows", "-t", "=" + SESSION, "-F", "#{window_name}\t#{window_index}\t#{pane_pid}"]).splitlines():
+        n, i, p = line.split("\t")
+        out[n] = (int(i), int(p))
+    return out
+
+
+def live_state(fm, ag, wins):
+    a = ag.get(fm.get("session", ""))
+    if a:
+        st = a.get("state") or a.get("status") or "running"
+        return {"busy": "working", "idle": "idle"}.get(st, st)
+    if fm.get("name") in wins:
+        return "starting"
+    return "left open" if fm.get("status") == "running" else "stopped"
+
+
+def running(ag, wins):
+    return [t for t in all_threads() if live_state(t, ag, wins) not in ("stopped", "left open")]
+
+
+def launch(name, folder, cmd_args):
+    """Open a tmux window <name> in <folder> running claude with the given arguments."""
+    os.makedirs(RUN, exist_ok=True)
+    script = os.path.join(RUN, name + ".sh")
+    unset = " ".join(f"-u {v}" for v in CLEAN_ENV)
+    with open(script, "w") as f:
+        f.write("#!/bin/sh\n# Written by `thread`; runs one Claude session for thread " + name + ".\n"
+                f"exec env {unset} AGENTIC_ROLE=thread AGENTIC_THREAD={shlex.quote(name)} "
+                f"{shlex.quote(CLAUDE)} {' '.join(shlex.quote(a) for a in cmd_args)}\n")
+    os.chmod(script, 0o755)
+    if subprocess.run(["tmux", "has-session", "-t", "=" + SESSION], capture_output=True).returncode:
+        sys.exit("No tmux session 'main' (run `agentic on`).")
+    sh(["tmux", "new-window", "-d", "-t", SESSION + ":", "-n", name, "-c", folder, script], check=True)
+    sh(["tmux", "set-option", "-w", "-t", f"{SESSION}:{name}", "automatic-rename", "off"])
+    sh(["tmux", "set-option", "-w", "-t", f"{SESSION}:{name}", "allow-rename", "off"])
+
+
+def make_room(ag, wins):
+    live = running(ag, wins)
+    while len(live) >= MAX_RUNNING:
+        idle = [t for t in live if live_state(t, ag, wins) == "idle"]
+        if not idle:
+            sys.exit(f"{len(live)} threads are working; none is idle to stop. Stop one first (thread stop <name>).")
+        oldest = min(idle, key=lambda t: t.get("updated", ""))
+        print(f"Stopping the oldest idle thread '{oldest['name']}' to stay at {MAX_RUNNING} (thread resume brings it back).")
+        stop(oldest["name"])
+        live = [t for t in live if t["name"] != oldest["name"]]
+
+
+def stop(name):
+    fm, body = read(name)
+    if fm is None:
+        sys.exit(f"No thread '{name}'.")
+    wins = windows()
+    if name in wins:
+        sh(["tmux", "send-keys", "-t", f"{SESSION}:{name}", "C-u", "/exit", "Enter"])
+        for _ in range(30):
+            time.sleep(0.2)
+            if name not in windows():
+                break
+        sh(["tmux", "kill-window", "-t", f"{SESSION}:{name}"])
+    elif fm.get("session") in agents():
+        print(f"'{name}' runs outside tmux; close it there.")
+        return
+    fm["status"] = "stopped"
+    write(name, fm, body)
+
+
+def cmd_start(args):
+    brief = ""
+    if "--" in args:
+        i = args.index("--")
+        brief, args = " ".join(args[i + 1:]), args[:i]
+    if len(args) < 2:
+        sys.exit("thread start <name> <folder> [model] [-- brief]")
+    name, folder = slug(args[0]), os.path.abspath(os.path.expanduser(args[1]))
+    model = args[2] if len(args) > 2 else "opus"
+    if model not in MODELS:
+        sys.exit(f"model: one of {', '.join(sorted(MODELS))}")
+    if not os.path.isdir(folder):
+        sys.exit(f"No folder {folder}")
+    ag, wins = agents(), windows()
+    old, _ = read(name)
+    if old and live_state(old, ag, wins) not in ("stopped", "left open"):
+        sys.exit(f"Thread '{name}' already runs (dock show {name}).")
+    if name in wins or name == "main":
+        sys.exit(f"A tmux window called '{name}' already exists; pick another name.")
+    make_room(ag, wins)
+    sid = str(uuid.uuid4())
+    fm = {"name": name, "folder": folder, "model": model, "status": "running", "session": sid,
+          "started": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    write(name, fm, body_template(brief.split("\n")[0][:300], folder))
+    prompt = []
+    if brief:
+        prompt = [brief + "\n\n"
+                  f"(You are thread '{name}', started by the main chat. Your state file is {path(name)}: keep its "
+                  "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. When you "
+                  "finish, or need the owner, send the main chat a message with SendMessage to \"main-chat\", first line "
+                  "a short summary.)"]
+    launch(name, folder, prompt + ["-n", name, "--session-id", sid, "--model", model, "--autocompact", "150000"])
+    print(f"Thread '{name}' started ({model}) in {folder}: tmux window {SESSION}:{name}, `dock show {name}`.")
+
+
+def cmd_resume(args):
+    if args and args[0] == "--open":
+        ag, wins = agents(), windows()
+        left = [t["name"] for t in all_threads() if live_state(t, ag, wins) == "left open"]
+        if not left:
+            print("No threads were left open.")
+        for n in left:
+            cmd_resume([n])
+        return
+    if not args:
+        sys.exit("thread resume <name> | --open")
+    name = slug(args[0])
+    fm, body = read(name)
+    if fm is None:
+        sys.exit(f"No thread '{name}' (thread list).")
+    ag, wins = agents(), windows()
+    if live_state(fm, ag, wins) not in ("stopped", "left open"):
+        print(f"'{name}' is running: dock show {name}")
+        return
+    make_room(ag, wins)
+    folder = fm.get("folder") or HOME
+    if not os.path.isdir(folder):
+        folder = os.path.join(DATA, "..", "claude-hub")
+    if not glob.glob(os.path.join(HOME, ".claude/projects/*", fm.get("session", "x") + ".jsonl")):
+        sys.exit(f"No transcript for '{name}' any more; start it fresh with thread start.")
+    # Hub sessions had all of ~; through settings, because --add-dir asks for trust in every session.
+    extra = ["--settings", json.dumps({"permissions": {"additionalDirectories": [HOME]}})] \
+        if folder.rstrip("/").endswith("/claude-hub") else []
+    launch(name, folder, ["--resume", fm["session"], "-n", name, "--model", fm.get("model", "opus"),
+                          "--autocompact", "150000"] + extra)
+    fm["status"] = "running"
+    write(name, fm, body)
+    print(f"Thread '{name}' resumed in {folder}: `dock show {name}`.")
+
+
+def cmd_list(args):
+    ag, wins = agents(), windows()
+    ts = all_threads()
+    if "--json" in args:
+        print(json.dumps([dict(t, state=live_state(t, ag, wins)) for t in ts]))
+        return
+    if not ts:
+        print("No threads. Start one: thread start <name> <folder> [model] -- <brief>")
+        return
+    for t in ts:
+        st = live_state(t, ag, wins)
+        where = t.get("folder", "").replace(HOME, "~", 1)
+        print(f"{t['name']:33} {st:10} {t.get('model', ''):7} {where:40} {t.get('updated', '')}")
+
+
+def cmd_model(args):
+    if len(args) < 2 or args[1] not in MODELS:
+        sys.exit(f"thread model <name> <{'|'.join(sorted(MODELS))}>")
+    name, model = slug(args[0]), args[1]
+    fm, body = read(name)
+    if fm is None:
+        sys.exit(f"No thread '{name}'.")
+    ag, wins = agents(), windows()
+    st = live_state(fm, ag, wins)
+    if st == "working":
+        sys.exit(f"'{name}' is working; switch the model when it's idle.")
+    if name in wins and st == "idle":
+        sh(["tmux", "send-keys", "-t", f"{SESSION}:{name}", "C-u", f"/model {model}", "Enter"])
+        time.sleep(1.5)
+        # Claude Code asks once whether to re-read the history with the new model ("Yes" is preselected).
+        if "Switch model?" in sh(["tmux", "capture-pane", "-p", "-t", f"{SESSION}:{name}"]):
+            sh(["tmux", "send-keys", "-t", f"{SESSION}:{name}", "Enter"])
+    fm["model"] = model
+    write(name, fm, body)
+    print(f"'{name}' now uses {model}" + ("" if name in wins else " from its next resume") +
+          ". The new model reads the whole context once without cache.")
+
+
+def transcript_model(tpath):
+    model = ""
+    try:
+        with open(tpath, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if '"model":"claude-' in line:
+                    m = re.search(r'"model":"claude-(fable|opus|sonnet|haiku)', line)
+                    if m:
+                        model = m.group(1)
+    except OSError:
+        pass
+    return model or "opus"
+
+
+def title_of(tpath):
+    title = ""
+    try:
+        with open(tpath, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if '"custom-title"' in line or '"ai-title"' in line:
+                    try:
+                        e = json.loads(line)
+                        title = e.get("customTitle") or e.get("aiTitle") or title
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return title
+
+
+def cmd_adopt(args):
+    known = {t.get("session") for t in all_threads()}
+    names = {t["name"] for t in all_threads()}
+    ag = agents()
+    found = {}
+    for f in glob.glob(os.path.join(RECORDS, "*.json")):
+        try:
+            r = json.load(open(f))
+        except (OSError, ValueError):
+            continue
+        if r.get("role") == "main":
+            continue
+        found[r["id"]] = {"cwd": r.get("cwd", ""), "pane": r.get("pane", ""), "transcript": r.get("transcript", "")}
+    for sid, a in ag.items():
+        if a.get("kind") == "interactive" and sid and sid not in found:
+            found[sid] = {"cwd": a.get("cwd", ""), "pane": "", "transcript": ""}
+    me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    adopted = 0
+    for sid, r in found.items():
+        if sid in known or sid == me:
+            continue
+        cwd = r["cwd"]
+        if "/claude-ask" in cwd or cwd.endswith("/agentic/main"):
+            continue
+        tp = r["transcript"] if os.path.exists(r["transcript"] or "") else \
+            (glob.glob(os.path.join(HOME, ".claude/projects/*", sid + ".jsonl")) or [""])[0]
+        if not tp:
+            continue
+        title = title_of(tp) or os.path.basename(cwd)
+        name = slug(title)
+        while name in names or name == "main":
+            name = slug(title)[:28] + "-" + sid[:3]
+        names.add(name)
+        live = sid in ag
+        if live and r["pane"]:
+            # Name its tmux window after the thread, so `dock show <name>` finds it.
+            sh(["tmux", "rename-window", "-t", r["pane"], name])
+            sh(["tmux", "set-option", "-w", "-t", r["pane"], "automatic-rename", "off"])
+        # Open when the record was written: either still running or left open by a shutdown.
+        fm = {"name": name, "folder": cwd, "model": transcript_model(tp), "status": "running",
+              "session": sid, "started": datetime.fromtimestamp(os.path.getctime(tp)).strftime("%Y-%m-%d %H:%M")}
+        write(name, fm, body_template(f"(adopted from an earlier session: {title})", cwd))
+        adopted += 1
+        print(f"adopted {name:30} {'running' if live else 'stopped'}  {cwd.replace(HOME, '~', 1)}")
+    print(f"{adopted} sessions adopted." if adopted else "Nothing new to adopt.")
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return
+    cmd, rest = a[0], a[1:]
+    if cmd == "list":
+        cmd_list(rest)
+    elif cmd == "start":
+        cmd_start(rest)
+    elif cmd == "show":
+        fm, body = read(slug(rest[0]) if rest else "")
+        if fm is None:
+            sys.exit("thread show <name>")
+        print(open(path(slug(rest[0]))).read())
+    elif cmd == "stop":
+        if rest and rest[0] == "--all":
+            ag, wins = agents(), windows()
+            for t in running(ag, wins):
+                stop(t["name"])
+        elif rest:
+            stop(slug(rest[0]))
+        else:
+            sys.exit("thread stop <name> | --all")
+    elif cmd == "resume":
+        cmd_resume(rest)
+    elif cmd == "model":
+        cmd_model(rest)
+    elif cmd == "adopt":
+        cmd_adopt(rest)
+    elif cmd == "rm":
+        if rest and os.path.exists(path(slug(rest[0]))):
+            os.remove(path(slug(rest[0])))
+            print(f"Forgot '{slug(rest[0])}'; its transcript stays.")
+        else:
+            sys.exit("thread rm <name>")
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main()

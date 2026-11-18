@@ -33,6 +33,7 @@ LINKS=(
   ".local/bin/atlas|bin"
   ".local/bin/agentic|bin"
   ".local/bin/dock|bin"
+  ".local/bin/thread|bin"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"
