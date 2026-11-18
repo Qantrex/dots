@@ -75,7 +75,7 @@ def read(name):
 def write(name, fm, body):
     os.makedirs(DIR, exist_ok=True)
     fm["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    keys = ["name", "folder", "model", "status", "session", "started", "updated"]
+    keys = ["name", "folder", "model", "status", "origin", "session", "started", "updated"]
     head = "\n".join(f"{k}: {fm[k]}" for k in keys if k in fm)
     with open(path(name) + ".tmp", "w", encoding="utf-8") as f:
         f.write(f"---\n{head}\n---\n{body}")
@@ -124,8 +124,11 @@ def live_state(fm, ag, wins):
     return "left open" if fm.get("status") == "running" else "stopped"
 
 
-def running(ag, wins):
-    return [t for t in all_threads() if live_state(t, ag, wins) not in ("stopped", "left open")]
+def running(ag, wins, include_adopted=False):
+    """Threads that run now. Adopted sessions (my own from before) don't count toward the limit and are never
+    stopped automatically, unless include_adopted."""
+    return [t for t in all_threads() if live_state(t, ag, wins) not in ("stopped", "left open")
+            and (include_adopted or t.get("origin") != "adopted")]
 
 
 def launch(name, folder, cmd_args):
@@ -136,6 +139,7 @@ def launch(name, folder, cmd_args):
     with open(script, "w") as f:
         f.write("#!/bin/sh\n# Written by `thread`; runs one Claude session for thread " + name + ".\n"
                 f"exec env {unset} AGENTIC_ROLE=thread AGENTIC_THREAD={shlex.quote(name)} "
+                f"SSH_AUTH_SOCK={shlex.quote(os.environ.get('SSH_AUTH_SOCK') or os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % os.getuid()), 'ssh-agent.socket'))} "
                 f"{shlex.quote(CLAUDE)} {' '.join(shlex.quote(a) for a in cmd_args)}\n")
     os.chmod(script, 0o755)
     if subprocess.run(["tmux", "has-session", "-t", "=" + SESSION], capture_output=True).returncode:
@@ -148,12 +152,13 @@ def launch(name, folder, cmd_args):
 def make_room(ag, wins):
     live = running(ag, wins)
     while len(live) >= MAX_RUNNING:
-        idle = [t for t in live if live_state(t, ag, wins) == "idle"]
+        idle = [t for t in live if live_state(t, ag, wins) == "idle" and empty_prompt(f"{SESSION}:{t['name']}")]
         if not idle:
             sys.exit(f"{len(live)} threads are working; none is idle to stop. Stop one first (thread stop <name>).")
         oldest = min(idle, key=lambda t: t.get("updated", ""))
         print(f"Stopping the oldest idle thread '{oldest['name']}' to stay at {MAX_RUNNING} (thread resume brings it back).")
-        stop(oldest["name"])
+        if not stop(oldest["name"]):
+            sys.exit("Could not stop it safely; stop a thread yourself first.")
         live = [t for t in live if t["name"] != oldest["name"]]
 
 
@@ -163,7 +168,10 @@ def stop(name):
         sys.exit(f"No thread '{name}'.")
     wins = windows()
     if name in wins:
-        sh(["tmux", "send-keys", "-t", f"{SESSION}:{name}", "C-u", "/exit", "Enter"])
+        if not empty_prompt(f"{SESSION}:{name}"):
+            print(f"'{name}' has a question, a dialog or typed text open; not stopping it (answer or close it yourself).")
+            return False
+        sh(["tmux", "send-keys", "-t", f"{SESSION}:{name}", "/exit", "Enter"])
         for _ in range(30):
             time.sleep(0.2)
             if name not in windows():
@@ -174,6 +182,15 @@ def stop(name):
         return
     fm["status"] = "stopped"
     write(name, fm, body)
+    return True
+
+
+def empty_prompt(target):
+    """True when the session shows its normal input line with nothing typed (no dialog, no question)."""
+    screen = sh(["tmux", "capture-pane", "-p", "-t", target]).rstrip("\n").splitlines()
+    prompts = [l for l in screen if l.startswith("❯")]
+    return bool(prompts) and prompts[-1].strip() == "❯" and not any(
+        re.match(r"\s*❯ \d+\.", l) or "Enter to confirm" in l or "Esc to cancel" in l for l in screen[-15:])
 
 
 def cmd_start(args):
@@ -354,7 +371,7 @@ def cmd_adopt(args):
             sh(["tmux", "rename-window", "-t", r["pane"], name])
             sh(["tmux", "set-option", "-w", "-t", r["pane"], "automatic-rename", "off"])
         # Open when the record was written: either still running or left open by a shutdown.
-        fm = {"name": name, "folder": cwd, "model": transcript_model(tp), "status": "running",
+        fm = {"name": name, "folder": cwd, "model": transcript_model(tp), "status": "running", "origin": "adopted",
               "session": sid, "started": datetime.fromtimestamp(os.path.getctime(tp)).strftime("%Y-%m-%d %H:%M")}
         write(name, fm, body_template(f"(adopted from an earlier session: {title})", cwd))
         adopted += 1
@@ -379,6 +396,7 @@ def main():
         print(open(path(slug(rest[0]))).read())
     elif cmd == "stop":
         if rest and rest[0] == "--all":
+            # Only threads started by `thread`; adopted sessions are mine and stay.
             ag, wins = agents(), windows()
             for t in running(ag, wins):
                 stop(t["name"])

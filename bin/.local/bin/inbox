@@ -81,6 +81,16 @@ def fmt(e):
 
 def wake(e):
     """Tell the idle main chat by typing one line into its prompt, only when nobody is typing there."""
+    if os.path.exists(os.path.join(STATE, "off")):
+        return False   # agentic off: events only queue
+    # At most 3 wakes in 10 minutes, so a thread and the main chat can't wake each other in a loop.
+    wf = os.path.join(STATE, "inbox.wakes")
+    try:
+        recent = [float(x) for x in open(wf).read().split() if time.time() - float(x) < 600]
+    except (OSError, ValueError):
+        recent = []
+    if len(recent) >= 3:
+        return False
     wins = sh(["tmux", "list-windows", "-t", "=main", "-F", "#{window_name}"]).split()
     if "main" not in wins:
         return False
@@ -97,6 +107,8 @@ def wake(e):
     msg = "[inbox, from code] " + fmt(e)[2:] + " (inbox new shows the rest)"
     sh(["tmux", "send-keys", "-t", "main:main", "-l", msg.replace("\n", " ")])
     sh(["tmux", "send-keys", "-t", "main:main", "Enter"])
+    with open(wf, "w") as f:
+        f.write(" ".join(str(x) for x in recent + [time.time()]))
     e["shown"] = True
     items = load()
     for x in items:
