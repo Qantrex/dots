@@ -273,6 +273,30 @@ def homelab(c):
     return (m.group(0).replace("**", "")[:220] if m else "") + f" (details: `{short(note)}`)"
 
 
+def areas(c):
+    """The areas: from the "## Areas" list of a CLAUDE.md (areas_from in atlas.conf), so they're kept in one
+    place; a [areas] section in atlas.conf (path | description) works too."""
+    out = []
+    src = os.path.expanduser(c.get("atlas", "areas_from", fallback=""))
+    if src and os.path.exists(src):
+        text = open(src, encoding="utf-8").read()
+        m = re.search(r"^## Areas\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+        # Join wrapped lines back onto their bullet.
+        block = re.sub(r"\n\s+(?=\S)", " ", m.group(1) if m else "")
+        for line in block.splitlines():
+            mm = re.match(r"- `([^`]+)`[^:]*:\s*(.*)", line)
+            if not mm:
+                continue
+            p = os.path.expanduser(re.sub(r"/<[^>]+>.*$", "", mm.group(1)))
+            desc = mm.group(2)
+            out.append((p, desc if len(desc) <= 160 else desc[:157].rsplit(" ", 1)[0] + " …"))
+    if c.has_section("areas"):
+        for name, val in c.items("areas"):
+            path, _, desc = val.partition("|")
+            out.append((os.path.expanduser(path.strip()), f"{name}: {desc.strip()}"))
+    return out
+
+
 # ---------------------------------------------------------------- build
 
 def write(name, body):
@@ -355,13 +379,12 @@ def refresh():
     else:
         lines += ["- none yet (`thread list`)"]
     lines += [""]
-    if c.has_section("areas"):
+    ar = areas(c)
+    if ar:
         lines += ["## Areas (each has its own rules; read its CLAUDE.md before working there)"]
-        for name, val in c.items("areas"):
-            path, _, desc = val.partition("|")
-            p = os.path.expanduser(path.strip())
+        for p, desc in ar:
             md = " (CLAUDE.md)" if os.path.exists(os.path.join(p, "CLAUDE.md")) else ""
-            lines.append(f"- **{name}** `{short(p)}`{md}: {desc.strip()}")
+            lines.append(f"- `{short(p)}`{md}: {desc}")
         lines += [""]
     if hl:
         lines += ["## Homelab", hl, ""]
