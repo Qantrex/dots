@@ -25,6 +25,22 @@ PanelWindow {
     ]
     property int selected: 0
 
+    // The mouse only picks an entry when it really moves. Qt also reports hover
+    // "moves" while the pointer rests: during the open animation (the box scales
+    // under it) and when the list changes under it. Those used to take the
+    // selection away from the keyboard, so Enter ran whatever sat under the
+    // cursor. Compared in window pixels, which stay put while things move.
+    property point pointerAt: Qt.point(-1, -1)
+    property bool pointerKnown: false
+    function pointerMoved(item, m) {
+        const p = item.mapToItem(null, m.x, m.y);
+        const at = Qt.point(Math.round(p.x), Math.round(p.y));
+        const moved = pointerKnown && (at.x !== pointerAt.x || at.y !== pointerAt.y);
+        pointerAt = at;
+        pointerKnown = true;
+        return moved;
+    }
+
     screen: Quickshell.screens.find(s => s.name === Shell.focusedScreen) ?? Quickshell.screens[0]
     visible: open || box.opacity > 0.01
     color: "transparent"
@@ -38,6 +54,7 @@ PanelWindow {
         if (!open) return;
         search.text = "";
         selected = 0;
+        pointerKnown = false;
         reload();
         search.forceActiveFocus();
     }
@@ -375,7 +392,7 @@ PanelWindow {
                     height: view.cellHeight
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onPositionChanged: win.selected = index
+                    onPositionChanged: m => { if (win.pointerMoved(cell, m)) win.selected = index; }
                     onClicked: win.activate(index)
 
                     Rectangle {
