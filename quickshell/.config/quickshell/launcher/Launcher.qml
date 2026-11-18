@@ -29,14 +29,15 @@ PanelWindow {
     // "moves" while the pointer rests: during the open animation (the box scales
     // under it) and when the list changes under it. Those used to take the
     // selection away from the keyboard, so Enter ran whatever sat under the
-    // cursor. Compared in window pixels, which stay put while things move.
+    // cursor. Compared in window pixels, which stay put while things move; the
+    // 0.25 px margin swallows the float noise of the scaled coordinates.
     property point pointerAt: Qt.point(-1, -1)
     property bool pointerKnown: false
     function pointerMoved(item, m) {
         const p = item.mapToItem(null, m.x, m.y);
-        const at = Qt.point(Math.round(p.x), Math.round(p.y));
-        const moved = pointerKnown && (at.x !== pointerAt.x || at.y !== pointerAt.y);
-        pointerAt = at;
+        const moved = pointerKnown
+            && (Math.abs(p.x - pointerAt.x) > 0.25 || Math.abs(p.y - pointerAt.y) > 0.25);
+        if (moved || !pointerKnown) pointerAt = p;
         pointerKnown = true;
         return moved;
     }
