@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The side panel for the main Claude chat and its threads (`agentic`, `thread`).
-#   dock toggle          SUPER+SHIFT+A: show the panel; from a thread back to the main chat; hide it
+#   dock toggle          SUPER+SHIFT+A: show the panel with the main chat; from a thread back to the main
+#                        chat; from the main chat hide it
 #   dock show [target]   show the panel with the main chat ("main", the default), a thread by name, a tmux
 #                        pane (%12) or --first (the session that has waited longest)
 #   dock hide            hide it
@@ -72,7 +73,8 @@ toggle)
         exit 0
     fi
     ensure || exit 1
-    tmux has-session -t "=$session" 2>/dev/null && ! tmux list-windows -t "=$session" -F '#{window_name}' | grep -qx "$(tmux display -p -t "$panel:" '#{window_name}')" && select_target main
+    # Opening always shows the main chat; threads are shown on purpose (dock show <name>).
+    select_target main
     toggle; focus ;;
 show)
     ensure || exit 1
