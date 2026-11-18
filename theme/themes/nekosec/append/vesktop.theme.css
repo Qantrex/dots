@@ -64,3 +64,35 @@
 
 /* the message box says nya */
 [class*="slateTextArea"] [class*="placeholder"]::after { content: "  (=^･ω･^=)"; color: {{ accent }}; }
+
+/* Discord's current variables, in pink (the shared block above sets the greys). */
+:root, .theme-dark, .theme-darker, .theme-midnight, .visual-refresh {
+    --background-brand: {{ accent }} !important;
+    --background-accent: {{ accent }} !important;
+    --control-primary-background-default: {{ accent }} !important;
+    --control-primary-background-hover: {{ mix(accent, fg, 0.2) }} !important;
+    --control-primary-background-active: {{ mix(accent, bg, 0.25) }} !important;
+    --control-primary-text-default: {{ on_accent }} !important;
+    --control-primary-text-hover: {{ on_accent }} !important;
+    --control-primary-text-active: {{ on_accent }} !important;
+    --control-primary-icon-default: {{ on_accent }} !important;
+    --control-primary-icon-hover: {{ on_accent }} !important;
+    --control-primary-icon-active: {{ on_accent }} !important;
+    --interactive-background-selected: {{ accent.alpha(0.20) }} !important;
+    --interactive-accent-background-default: {{ accent }} !important;
+    --interactive-accent-background-hover: {{ mix(accent, fg, 0.2) }} !important;
+    --interactive-accent-background-selected: {{ accent }} !important;
+    --text-brand: {{ accent }} !important;
+    --icon-brand: {{ accent }} !important;
+    --text-link: {{ lilac }} !important;
+    --icon-link: {{ lilac }} !important;
+    --text-feedback-positive: {{ mint }} !important;
+    --mention-foreground: {{ accent }} !important;
+    --mention-background: {{ accent.alpha(0.18) }} !important;
+    --message-mentioned-background-default: {{ accent.alpha(0.07) }} !important;
+    --message-mentioned-background-hover: {{ accent.alpha(0.11) }} !important;
+    --app-frame-border: {{ accent.alpha(0.35) }} !important;
+    --background-base-lowest: {{ bg }} !important;
+    --background-base-lower: {{ mix(bg, lilac, 0.04) }} !important;
+    --background-base-low: {{ mix(bg, lilac, 0.06) }} !important;
+}

@@ -2108,3 +2108,98 @@ Collapsible Search Bar
     --control-brand-foreground-new: {{ tone(0xd0) }} !important;
     --text-link: {{ iris }} !important;
 }
+
+/* ---- Discord's current variables (its 2025-26 interface) ---------------------
+   The rules above target names and classes Discord has since renamed, so most of
+   them no longer match. These are the names Discord defines today (on .theme-dark
+   and .theme-midnight); read from its own stylesheets on 2026-11-18. Greys are
+   tone() steps, "this one" fills are greys too; nekosec's append turns them pink. */
+:root, .theme-dark, .theme-darker, .theme-midnight, .visual-refresh {
+    --background-base-lowest: {{ bg }} !important;
+    --background-base-lower: {{ tone(0x08) }} !important;
+    --background-base-low: {{ tone(0x0c) }} !important;
+    --background-surface-high: {{ tone(0x12) }} !important;
+    --background-surface-higher: {{ tone(0x18) }} !important;
+    --background-surface-highest: {{ tone(0x1e) }} !important;
+    --bg-surface-raised: {{ tone(0x14) }} !important;
+    --background-secondary-alt: {{ tone(0x0c) }} !important;
+    --chat-background: {{ bg }} !important;
+    --chat-background-default: {{ bg }} !important;
+    --channeltextarea-background: {{ tone(0x12) }} !important;
+    --home-background: {{ bg }} !important;
+    --panel-bg: {{ tone(0x08) }} !important;
+    --modal-background: {{ tone(0x0c) }} !important;
+    --modal-footer-background: {{ tone(0x08) }} !important;
+    --app-frame-background: {{ bg }} !important;
+    --app-frame-border: {{ tone(0x1a) }} !important;
+    --guild-folder-background: {{ tone(0x14) }} !important;
+    --card-background-default: {{ tone(0x0c) }} !important;
+
+    --background-mod-muted: {{ fg.alpha(0.03) }} !important;
+    --background-mod-subtle: {{ fg.alpha(0.05) }} !important;
+    --background-mod-normal: {{ fg.alpha(0.08) }} !important;
+    --background-mod-strong: {{ fg.alpha(0.12) }} !important;
+    --interactive-background-hover: {{ fg.alpha(0.06) }} !important;
+    --interactive-background-active: {{ fg.alpha(0.10) }} !important;
+    --interactive-background-selected: {{ fg.alpha(0.12) }} !important;
+    --interactive-text-default: {{ tone(0xa0) }} !important;
+    --interactive-text-hover: {{ fg }} !important;
+    --interactive-text-active: {{ fg }} !important;
+    --interactive-icon-default: {{ tone(0x99) }} !important;
+    --interactive-icon-hover: {{ fg }} !important;
+    --interactive-icon-active: {{ fg }} !important;
+    --interactive-muted: {{ tone(0x55) }} !important;
+
+    --text-default: {{ text }} !important;
+    --text-strong: {{ fg }} !important;
+    --text-subtle: {{ tone(0xaa) }} !important;
+    --text-muted: {{ tone(0x88) }} !important;
+    --text-link: {{ iris }} !important;
+    --text-brand: {{ fg }} !important;
+    --text-feedback-critical: {{ love }} !important;
+    --text-feedback-warning: {{ gold }} !important;
+    --text-feedback-positive: {{ term.green }} !important;
+    --icon-default: {{ tone(0xb0) }} !important;
+    --icon-strong: {{ fg }} !important;
+    --icon-subtle: {{ tone(0x99) }} !important;
+    --icon-muted: {{ tone(0x77) }} !important;
+    --icon-brand: {{ fg }} !important;
+    --icon-link: {{ iris }} !important;
+    --icon-feedback-critical: {{ love }} !important;
+    --icon-feedback-warning: {{ gold }} !important;
+
+    --border-subtle: {{ fg.alpha(0.06) }} !important;
+    --border-muted: {{ fg.alpha(0.08) }} !important;
+    --border-normal: {{ fg.alpha(0.12) }} !important;
+    --border-strong: {{ fg.alpha(0.20) }} !important;
+    --border-focus: {{ accent }} !important;
+    --input-background-default: {{ tone(0x10) }} !important;
+    --input-border-default: {{ fg.alpha(0.10) }} !important;
+    --input-border-hover: {{ fg.alpha(0.20) }} !important;
+    --input-border-active: {{ accent }} !important;
+    --input-text-default: {{ fg }} !important;
+    --input-placeholder-text-default: {{ tone(0x77) }} !important;
+
+    --background-brand: {{ tone(0x33) }} !important;
+    --background-accent: {{ tone(0x33) }} !important;
+    --control-primary-background-default: {{ tone(0x33) }} !important;
+    --control-primary-background-hover: {{ tone(0x40) }} !important;
+    --control-primary-background-active: {{ tone(0x2a) }} !important;
+    --control-primary-text-default: {{ fg }} !important;
+    --control-primary-text-hover: {{ fg }} !important;
+    --control-primary-text-active: {{ fg }} !important;
+    --control-primary-icon-default: {{ fg }} !important;
+    --control-primary-icon-hover: {{ fg }} !important;
+    --control-primary-icon-active: {{ fg }} !important;
+    --control-secondary-background-default: {{ tone(0x1a) }} !important;
+    --control-secondary-background-hover: {{ tone(0x22) }} !important;
+    --control-secondary-background-active: {{ tone(0x14) }} !important;
+    --control-secondary-text-default: {{ fg }} !important;
+
+    --mention-foreground: {{ rose }} !important;
+    --mention-background: {{ rose.alpha(0.16) }} !important;
+    --message-background-hover: {{ fg.alpha(0.03) }} !important;
+    --message-mentioned-background-default: {{ rose.alpha(0.06) }} !important;
+    --message-mentioned-background-hover: {{ rose.alpha(0.09) }} !important;
+    --message-highlight-background-default: {{ fg.alpha(0.04) }} !important;
+}
