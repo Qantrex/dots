@@ -57,6 +57,7 @@ One repo for both machines. Differences are picked by hostname (`/etc/hostname`)
 | What | Laptop `bauarch` | Desktop `bauarch-pc` | Where |
 | --- | --- | --- | --- |
 | Monitors | internal panel, scale 2 | two AOC screens | `hypr/lua/monitors.lua` |
+| Focus | keyboard decides: the mouse moves focus only with a click (`follow_mouse = 2`) | follows the mouse, so SUPER+N acts on the screen under the cursor | `hypr/lua/input.lua` |
 | Workspaces | one screen: 1–10, mail/music/chat on 8/9/10 | per screen 1–10 (side screen = Hyprland 11–20), chat/music/mail on the side screen's 1/2/3 | `hypr/lua/workspaces.lua` |
 | Shell: Local AI tile/icon (`ai-webui.sh`) | yes | no (2026-11-04: the desktop is a headless AI node instead) | `quickshell/.../services/Scripts.qml` (`Host.isLaptop`) |
 | Shell: battery, touchpad, power profile, brightness | yes | no (no battery, touchpad, asusctl or backlight) | `quickshell/.../services/` |

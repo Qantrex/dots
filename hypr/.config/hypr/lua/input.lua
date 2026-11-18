@@ -1,11 +1,22 @@
 -- Input
 -- https://wiki.hypr.land/configuring/core/config-options/
 
+local host = require("lua.host")
+
 hl.config({
     input = {
         kb_layout = "de",
 
-        follow_mouse = 1,
+        -- Laptop: the keyboard decides focus. The mouse only moves it with a
+        -- click (2 = "detached"); hovering still scrolls the window under it.
+        -- Before, a nudge of the mouse handed keyboard focus to whatever window
+        -- the resting cursor was over, e.g. right after SUPER+D or SUPER+V.
+        -- The PC keeps focus-follows-mouse: SUPER+N picks the screen under the
+        -- cursor (lua/workspaces.lua).
+        follow_mouse = host.is_pc and 1 or 2,
+        -- Laptop: no focus jump to the window under the cursor when a window
+        -- switches between tiled and floating (SUPER+V).
+        float_switch_override_focus = host.is_pc and 1 or 0,
 
         -- -1.0 to 1.0; 0 means libinput's default acceleration.
         sensitivity = 0,
