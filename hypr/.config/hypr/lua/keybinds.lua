@@ -22,6 +22,7 @@ hl.bind(mod .. " + L", hl.dsp.exec_cmd(apps.lock),        { description = "Lock 
 hl.bind(mod .. " + H", hl.dsp.exec_cmd(apps.mailHelp),    { description = "Toggle aerc cheatsheet" })
 hl.bind(mod .. " + D", hl.dsp.exec_cmd(apps.ask),         { description = "Quick ask (Claude)" })
 hl.bind(mod .. " + SHIFT + D", hl.dsp.exec_cmd(apps.ask .. " --clip"), { description = "Quick ask about the clipboard" })
+hl.bind(mod .. " + CTRL + D", hl.dsp.exec_cmd("~/.local/bin/voice talk"), { description = "Speak to the main Claude chat (again to send)" })
 hl.bind(mod .. " + SHIFT + A", hl.dsp.exec_cmd("~/.local/bin/dock toggle"),
     { description = "Main Claude chat (side panel)" })
 

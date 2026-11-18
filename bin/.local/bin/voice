@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Talk to the main Claude chat: press once to speak, once more to send (SUPER+SHIFT+V). Speech recognition
+# runs locally (whisper.cpp); the answer to a spoken question can be read out.
+#   voice talk           start recording, or stop and send what was said to the main chat
+#   voice say <text>     read text out (voice.conf: an HTTP voice service, or piper)
+#   voice reply <text>   used by the session hook: reads the main chat's answer when the question was spoken
+#   voice setup          what's missing
+# Settings: ~/.config/agentic/voice.conf (shell syntax):
+#   WHISPER_MODEL=~/.local/share/whisper/ggml-base.bin    model file for whisper-cli
+#   TTS_URL=https://host:port/speak                       POST {"text","pacing"} -> audio/wav, bearer token
+#   TTS_TOKEN_CMD='rbw get "voice token"'                 command that prints the token (never stored here)
+#   PIPER_MODEL=~/.local/share/piper/en_US-amy-medium.onnx   used when TTS_URL is empty
+
+set -u
+run="${XDG_RUNTIME_DIR:-/tmp}"
+rec="$run/voice-input.wav"; pidf="$run/voice-record.pid"; flag="$run/voice-reply"
+conf="${XDG_CONFIG_HOME:-$HOME/.config}/agentic/voice.conf"
+WHISPER_MODEL="$HOME/.local/share/whisper/ggml-base.bin"; TTS_URL=""; TTS_TOKEN_CMD=""; PIPER_MODEL=""
+[[ -f $conf ]] && source "$conf"
+WHISPER_MODEL=${WHISPER_MODEL/#\~/$HOME}; PIPER_MODEL=${PIPER_MODEL/#\~/$HOME}
+say_note() { notify-send -a Claude -t 2500 "Voice" "$1"; }
+
+missing() {
+    local m=()
+    command -v whisper-cli >/dev/null || m+=("whisper-cli: yay -S whisper.cpp")
+    [[ -f $WHISPER_MODEL ]] || m+=("a whisper model at $WHISPER_MODEL (voice setup prints the download)")
+    if [[ -z $TTS_URL ]]; then
+        { command -v piper >/dev/null || command -v piper-tts >/dev/null; } && [[ -f $PIPER_MODEL ]] ||
+            m+=("reading answers out: TTS_URL + TTS_TOKEN_CMD (homelab voice) or piper + PIPER_MODEL in $conf")
+    fi
+    printf '%s\n' "${m[@]}"
+}
+
+speak() {
+    local text=$1 wav="$run/voice-out.wav"
+    [[ -n $text ]] || return 0
+    text=$(sed -e 's/[*`#_>|]//g' -e 's/\[\([^]]*\)\]([^)]*)/\1/g' <<<"$text" | head -c 1200)
+    if [[ -n $TTS_URL ]]; then
+        local tok; tok=$(eval "$TTS_TOKEN_CMD" 2>/dev/null)
+        curl -sf -m 60 -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "${text:0:600}" '{text: $t, pacing: "live"}')" "$TTS_URL" -o "$wav" || return 1
+    else
+        local p; p=$(command -v piper || command -v piper-tts) || return 1
+        "$p" -m "$PIPER_MODEL" -f "$wav" <<<"$text" >/dev/null 2>&1 || return 1
+    fi
+    pw-play "$wav" 2>/dev/null || mpv --really-quiet "$wav"
+}
+
+case ${1:-talk} in
+talk)
+    if [[ -f $pidf ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+        kill -INT "$(cat "$pidf")"; rm -f "$pidf"; sleep 0.3
+        if [[ -n $(missing | head -1) ]]; then say_note "Not set up yet: voice setup"; exit 1; fi
+        text=$(whisper-cli -m "$WHISPER_MODEL" -l auto -nt -np -f "$rec" 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ *//; s/ *$//')
+        [[ -n $text ]] || { say_note "Didn't catch anything."; exit 0; }
+        touch "$flag"
+        # Through the inbox: typed into the main chat when it's idle and nobody is typing there.
+        "$HOME/.local/bin/inbox" add --wake needs voice "$text" >/dev/null
+        say_note "Sent: $text"
+    else
+        rm -f "$rec"
+        pw-record --rate 16000 --channels 1 "$rec" >/dev/null 2>&1 &
+        echo $! > "$pidf"
+        say_note "Listening… press again to send"
+    fi ;;
+say)
+    shift; speak "$*" ;;
+reply)
+    # The main chat answered; read it out only if the question was spoken.
+    [[ -f $flag ]] || exit 0
+    rm -f "$flag"; shift; speak "$*" ;;
+setup)
+    m=$(missing)
+    if [[ -z $m ]]; then echo "voice is ready"; exit 0; fi
+    echo "Missing:"; sed 's/^/  - /' <<<"$m"
+    [[ -f $WHISPER_MODEL ]] || echo "Model: mkdir -p ${WHISPER_MODEL%/*} && curl -L -o $WHISPER_MODEL https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+    exit 1 ;;
+*)
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
