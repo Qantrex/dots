@@ -1,68 +1,25 @@
 # File: ~/.config/zsh/functions/cr
-# Reopen the Claude sessions that were still open when the laptop shut down or the
-# terminal closed. A Claude Code hook (session-track.sh in ~/Projects/claude-config)
-# records each interactive session in ~/.local/state/claude-sessions and forgets it
-# when you close it on purpose (/exit, Ctrl+D, /clear).
-#   cr           reopen all of them, each in its own tmux window (foot windows outside tmux)
-#   cr <name>    reopen only the ones whose name (or id) contains <name>, e.g. `cr system-plan`
-#   cr -l        list them
-#   cr --count   just the number (for the greeting)
-# Sessions that were started in ~ itself reopen in the hub folder instead: Claude Code
-# never saves trust for the home folder, so they would ask on every resume. That needs no
-# file moves: `claude --resume <id>` finds the transcript in any project folder and keeps
-# writing to it there.
-
+# Reopen the Claude sessions a shutdown, crash or closed terminal left open. Since 2026-11-19 every
+# session is a thread of the main chat (`thread`, `agentic`), so this is a short way to call it:
+#   cr           reopen all of them, each in its own tmux window of session "main"
+#   cr <name>    reopen only those whose name contains <name>, e.g. `cr system-plan`
+#   cr -l        list all threads with their state
+#   cr --count   just the number left open (for the greeting)
+# Sessions started outside the main chat (plain `claude`) are adopted as threads first.
 cr() {
   emulate -L zsh
-  setopt null_glob
-  local state=${XDG_STATE_HOME:-$HOME/.local/state}/claude-sessions
-  local hub=$HOME/.local/share/claude-hub
-  local f id cwd transcript pid name n=0
-  local -a left found
-  local filter=""
-  [[ -n $1 && $1 != -* ]] && filter=$1
-
-  for f in $state/*.json; do
-    id=$(jq -r .id $f) pid=$(jq -r .pid $f)
-    # Look the transcript up by id: the stored path can be stale after a resume elsewhere.
-    found=($HOME/.claude/projects/*/$id.jsonl)
-    (( ${#found} )) || { rm -f $f; continue; }                       # session deleted
-    [[ $(cat /proc/$pid/comm 2>/dev/null) == claude ]] && continue   # still running
-    [[ $(jq -r '.role // empty' $f) == main ]] && { rm -f $f; continue; }   # the main chat restarts by itself
-    left+=($f)
-  done
-
-  if [[ $1 == --count ]]; then print ${#left}; return; fi
-  if (( ${#left} == 0 )); then print "No Claude sessions to reopen."; return; fi
-
-  for f in $left; do
-    id=$(jq -r .id $f) cwd=$(jq -r .cwd $f)
-    found=($HOME/.claude/projects/*/$id.jsonl) transcript=${found[1]}
-    [[ $cwd == $HOME || ! -d $cwd ]] && cwd=$hub
-    # The /rename name, else Claude Code's own title, else the start of the first prompt, else the short id.
-    name=$(command grep '"type":"custom-title"' $transcript | tail -1 | jq -r '.customTitle // empty' 2>/dev/null)
-    [[ -n $name ]] || name=$(command grep '"type":"ai-title"' $transcript | tail -1 | jq -r '.aiTitle // empty' 2>/dev/null)
-    [[ -n $name ]] || name=$(command grep -m1 '"type":"user"' $transcript |
-      jq -r '.message.content | if type == "string" then . else (map(.text? // empty) | join(" ")) end' 2>/dev/null |
-      tr -s '[:space:]' ' ' | cut -c1-28)
-    [[ -n $name ]] || name=${id:0:8}
-    [[ -z $filter || ${(L)name} == *${(L)filter}* || $id == ${filter}* ]] || continue
-
-    if [[ $1 == -l ]]; then
-      print -r -- "${name}  ·  ${cwd/#$HOME/~}  ·  $id"
-      continue
-    fi
-
-    local -a run=(command claude --resume $id)
-    [[ $cwd == $hub ]] && run+=(--add-dir $HOME)
-    # No need to delete the record: a resumed session keeps its id and records itself again.
-    if [[ -n $TMUX ]]; then
-      tmux new-window -n "${name//[^[:alnum:] ._-]/}" -c $cwd "${(j: :)${(@q)run}}; exec zsh"
-    else
-      foot --working-directory=$cwd ${run[2,-1]} &!
-    fi
-    (( n++ ))
-  done
-  [[ $1 == -l ]] || print "Reopened $n Claude session(s)."
-  [[ -n $filter && $n == 0 ]] && print "None matches \"$filter\" (cr -l lists them)."
+  case $1 in
+    --count)
+      thread list --json 2>/dev/null | jq '[.[] | select(.state == "left open")] | length' ;;
+    -l)
+      thread adopt >/dev/null 2>&1; thread list ;;
+    "")
+      thread adopt >/dev/null 2>&1; thread resume --open ;;
+    *)
+      thread adopt >/dev/null 2>&1
+      local -a names=(${(f)"$(thread list --json | jq -r --arg f "$1" \
+        '.[] | select(.state == "left open" and (.name | test($f; "i"))) | .name')"})
+      (( ${#names} )) || { print "None left open matches \"$1\" (cr -l lists them)."; return 1 }
+      local n; for n in $names; do thread resume $n; done ;;
+  esac
 }
