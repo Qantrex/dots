@@ -73,15 +73,26 @@ hl.window_rule({
 -- The main Claude chat's side panel (SUPER+SHIFT+A, `dock` in ~/.local/bin): right edge, full height
 -- below the bar, about 40 % wide, over whatever workspace you're on. The chat itself lives in tmux
 -- window main:1 (`agentic`); the panel only shows it.
-hl.window_rule({
-    name  = "agentic-panel",
-    match = { class = "^(agentic-panel)$" },
+-- PC: docked instead, tiled full height on the side screen's workspace ws.claude (14), which that screen
+-- shows by default (workspaces.lua).
+if ws.claude then
+    hl.window_rule({
+        name  = "agentic-panel",
+        match = { class = "^(agentic-panel)$" },
 
-    workspace = "special:agentic silent",
-    float     = true,
-    size      = "monitor_w*0.4 monitor_h-68",
-    move      = "monitor_w*0.6-15 53",
-})
+        workspace = ws.claude .. " silent",
+    })
+else
+    hl.window_rule({
+        name  = "agentic-panel",
+        match = { class = "^(agentic-panel)$" },
+
+        workspace = "special:agentic silent",
+        float     = true,
+        size      = "monitor_w*0.4 monitor_h-68",
+        move      = "monitor_w*0.6-15 53",
+    })
+end
 
 -- The aerc cheatsheet (SUPER+H) tiles next to aerc, and takes you there.
 hl.window_rule({

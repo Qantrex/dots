@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Talk to the main Claude chat: press once to speak, once more to send (SUPER+SHIFT+V). Speech recognition
+# Talk to the main Claude chat: press once to speak, once more to send (SUPER+CTRL+D). Speech recognition
 # runs locally (whisper.cpp); the answer to a spoken question can be read out.
 #   voice talk           start recording, or stop and send what was said to the main chat
-#   voice say <text>     read text out (voice.conf: an HTTP voice service, or piper)
+#   voice say <text>     read text out: the HTTP voice service first, local piper when it can't be reached
 #   voice reply <text>   used by the session hook: reads the main chat's answer when the question was spoken
 #   voice setup          what's missing
 # Settings: ~/.config/agentic/voice.conf (shell syntax):
 #   WHISPER_MODEL=~/.local/share/whisper/ggml-base.bin    model file for whisper-cli
 #   TTS_URL=https://host:port/speak                       POST {"text","pacing"} -> audio/wav, bearer token
 #   TTS_TOKEN_CMD='rbw get "voice token"'                 command that prints the token (never stored here)
-#   PIPER_MODEL=~/.local/share/piper/en_US-amy-medium.onnx   used when TTS_URL is empty
+#   PIPER_MODEL=~/.local/share/piper/en_US-amy-medium.onnx   fallback (the `piper-tts` command, not `piper`)
 
 set -u
 run="${XDG_RUNTIME_DIR:-/tmp}"
@@ -24,10 +24,10 @@ missing() {
     local m=()
     command -v whisper-cli >/dev/null || m+=("whisper-cli: yay -S whisper.cpp")
     [[ -f $WHISPER_MODEL ]] || m+=("a whisper model at $WHISPER_MODEL (voice setup prints the download)")
-    if [[ -z $TTS_URL ]]; then
-        { command -v piper >/dev/null || command -v piper-tts >/dev/null; } && [[ -f $PIPER_MODEL ]] ||
-            m+=("reading answers out: TTS_URL + TTS_TOKEN_CMD (homelab voice) or piper + PIPER_MODEL in $conf")
-    fi
+    local tts=0
+    [[ -n $TTS_URL && -n $TTS_TOKEN_CMD ]] && [[ -n $(eval "$TTS_TOKEN_CMD" 2>/dev/null) ]] && tts=1
+    command -v piper-tts >/dev/null && [[ -f $PIPER_MODEL ]] && tts=1
+    ((tts)) || m+=("reading answers out: the homelab token ($TTS_TOKEN_CMD) or piper-tts + $PIPER_MODEL")
     printf '%s\n' "${m[@]}"
 }
 
@@ -35,14 +35,17 @@ speak() {
     local text=$1 wav="$run/voice-out.wav"
     [[ -n $text ]] || return 0
     text=$(sed -e 's/[*`#_>|]//g' -e 's/\[\([^]]*\)\]([^)]*)/\1/g' <<<"$text" | head -c 1200)
+    local ok=0 tok
     if [[ -n $TTS_URL ]]; then
-        local tok; tok=$(eval "$TTS_TOKEN_CMD" 2>/dev/null)
-        curl -sf -m 60 -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
-            -d "$(jq -n --arg t "${text:0:600}" '{text: $t, pacing: "live"}')" "$TTS_URL" -o "$wav" || return 1
-    else
-        local p; p=$(command -v piper || command -v piper-tts) || return 1
-        "$p" -m "$PIPER_MODEL" -f "$wav" <<<"$text" >/dev/null 2>&1 || return 1
+        tok=$(eval "$TTS_TOKEN_CMD" 2>/dev/null)
+        [[ -n $tok ]] && curl -sf --connect-timeout 3 -m 60 -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "${text:0:600}" '{text: $t, pacing: "live"}')" "$TTS_URL" -o "$wav" && ok=1
     fi
+    # The homelab can't be reached (or has no token here): the local voice.
+    if ((!ok)) && command -v piper-tts >/dev/null && [[ -f $PIPER_MODEL ]]; then
+        piper-tts -m "$PIPER_MODEL" -f "$wav" <<<"$text" >/dev/null 2>&1 && ok=1
+    fi
+    ((ok)) || { say_note "${text:0:200}"; return 1; }
     pw-play "$wav" 2>/dev/null || mpv --really-quiet "$wav"
 }
 

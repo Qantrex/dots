@@ -65,6 +65,8 @@ end
 -- Where the side apps live. PC: the side screen's 1–3. Laptop: 8–10 as before.
 if host.is_pc then
     M.chat, M.music, M.mail = 11, 12, 13
+    -- The main Claude chat, docked on the side screen (`dock`); the side screen shows it by default.
+    M.claude = 14
 else
     M.chat, M.music, M.mail = 10, 9, 8
 end
@@ -74,7 +76,7 @@ end
 if host.is_pc then
     for i = 1, 10 do
         hl.workspace_rule({ workspace = tostring(i),      monitor = "desc:AOC Q27G2G4", default = i == 1 })
-        hl.workspace_rule({ workspace = tostring(i + 10), monitor = "desc:AOC 27G2G8",  default = i == 1 })
+        hl.workspace_rule({ workspace = tostring(i + 10), monitor = "desc:AOC 27G2G8",  default = i + 10 == M.claude })
     end
 end
 

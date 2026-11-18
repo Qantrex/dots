@@ -15,10 +15,18 @@
 set -u
 session=main
 panel=panel
+# The desktop docks the chat on the side screen's workspace 14 (rules.lua, workspaces.lua) instead of
+# a special workspace: there, "shown" means focused, and hiding goes back to where you were.
+docked=""; [[ $(cat /etc/hostname 2>/dev/null) == bauarch-pc ]] && docked=14
 
 window_open() { hyprctl clients -j | jq -e 'any(.[]; .class == "agentic-panel")' >/dev/null; }
-shown() { hyprctl monitors -j | jq -e 'any(.[]; .specialWorkspace.name == "special:agentic")' >/dev/null; }
-toggle() { hyprctl dispatch 'hl.dsp.workspace.toggle_special("agentic")' >/dev/null; }
+if [[ -n $docked ]]; then
+    shown() { [[ $(hyprctl activewindow -j | jq -r .class) == agentic-panel ]]; }
+    toggle() { if shown; then hyprctl dispatch 'hl.dsp.focus({ workspace = "previous" })' >/dev/null; fi; }
+else
+    shown() { hyprctl monitors -j | jq -e 'any(.[]; .specialWorkspace.name == "special:agentic")' >/dev/null; }
+    toggle() { hyprctl dispatch 'hl.dsp.workspace.toggle_special("agentic")' >/dev/null; }
+fi
 focus() { hyprctl dispatch 'hl.dsp.focus({ window = "class:^(agentic-panel)$" })' >/dev/null; }
 
 ensure() {
