@@ -30,6 +30,10 @@ hl.on("hyprland.start", function()
     -- The quick-ask Claude window (SUPER+D) starts hidden, so it opens instantly.
     hl.exec_cmd(apps.ask .. " --preload")
 
+    -- The always-running main Claude chat in tmux window main:1 and its hidden side panel
+    -- (`agentic`; does nothing after `agentic off`).
+    hl.exec_cmd("~/.local/bin/agentic on --login")
+
     -- Wallpaper: start hyprpaper without a config file, wait for its socket, then
     -- set the last picked wallpaper over IPC. hyprpaper.conf only turns off the
     -- splash text (on by default since hyprpaper 0.8); the old preload/wallpaper
