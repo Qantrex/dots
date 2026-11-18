@@ -33,9 +33,11 @@ start_main() {
     mkdir -p "$dir" "$state"
     [[ -e $dir/README.md ]] || printf '# Main chat\n\nWorking folder of the always-running main Claude chat (`agentic`). Its rules: CLAUDE.md here.\n' > "$dir/README.md"
     # The chat restarts by itself after /exit or a crash; everything that matters is in files.
+    # ~ comes in through settings, not --add-dir: --add-dir asks for trust in every new session.
     local loop='while :; do
         env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-            AGENTIC_ROLE=main "'"$claude"'" -n main --add-dir "$HOME" --autocompact 100000
+            AGENTIC_ROLE=main "'"$claude"'" -n main-chat --autocompact 100000 \
+            --settings "{\"permissions\":{\"additionalDirectories\":[\"$HOME\"]}}"
         sleep 2
     done'
     local first
