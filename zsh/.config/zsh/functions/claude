@@ -9,5 +9,7 @@
 claude() {
   local hub=~/.local/share/claude-hub
   mkdir -p "$hub"
+  # Never empty: an empty start folder makes plugins treat every session as a new project.
+  [[ -e $hub/README.md ]] || print "# Claude hub\n\nStart folder of plain \`claude\`; see ~/.config/zsh/functions/claude." > "$hub/README.md"
   ( cd "$hub" && command claude --add-dir ~ "$@" )
 }
