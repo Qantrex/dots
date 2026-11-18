@@ -6,7 +6,10 @@
 # ready. Closing the window ends it; the next SUPER+D starts it again.
 # Costs about 340 MB of RAM while it waits, and no plan usage.
 # It runs in ~/.local/share/claude-ask, whose CLAUDE.md (answer briefly, change
-# nothing) and settings (no memory) live in ~/Projects/claude-config/ask.
+# nothing) and settings (no memory, no plugins) live in ~/Projects/claude-config/ask.
+# Kept light on purpose: read-only tools plus Bash and the web (so no skills), no MCP
+# servers, no Chrome. A fresh question starts at about 13k tokens instead of 50k
+# (measured 2026-11-18).
 # SUPER+SHIFT+D (`claude-ask.sh --clip`) starts a fresh question about whatever is on
 # the clipboard, text or an image (SUPER+CTRL+S copies a screenshot region): the
 # clipboard is saved to inbox/ and Claude reads it first. Inbox files go after 2 days.
@@ -50,7 +53,7 @@ start() {
     # window would inherit that session's variables, e.g. the child-session
     # marker that turns transcript saving off. Never pass them on.
     local v
-    for v in $(compgen -e | grep -E '^(CLAUDE|AI_AGENT)'); do unset "$v"; done
+    for v in $(compgen -e | grep -E '^(CLAUDE|AI_AGENT|VERCEL_PLUGIN)'); do unset "$v"; done
 
     # The loop restarts Claude after /exit; the sleep keeps a failing start
     # (no network, logged out) from spinning.
@@ -58,8 +61,10 @@ start() {
         --working-directory="$dir" \
         sh -c 'while :; do
                    p=""; [ -f .next ] && { p=$(cat .next); rm -f .next; }
-                   if [ -n "$p" ]; then "$HOME/.local/bin/claude" --model sonnet "$p"
-                   else "$HOME/.local/bin/claude" --model sonnet; fi
+                   set -- --model sonnet --strict-mcp-config --no-chrome \
+                          --tools Bash,Read,Glob,Grep,WebSearch,WebFetch
+                   if [ -n "$p" ]; then "$HOME/.local/bin/claude" "$p" "$@"
+                   else "$HOME/.local/bin/claude" "$@"; fi
                    sleep 1
                done' &
     for _ in $(seq 1 50); do
