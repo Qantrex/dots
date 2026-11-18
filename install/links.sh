@@ -34,6 +34,8 @@ LINKS=(
   ".local/bin/agentic|bin"
   ".local/bin/dock|bin"
   ".local/bin/thread|bin"
+  ".local/bin/run-logged|bin"
+  ".local/bin/ssh-unlock|bin"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"

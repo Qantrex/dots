@@ -34,6 +34,10 @@ hl.on("hyprland.start", function()
     -- (`agentic`; does nothing after `agentic off`).
     hl.exec_cmd("~/.local/bin/agentic on --login")
 
+    -- ssh keys from ~/.ssh/config into the agent, with a passphrase window once per login, so scripts
+    -- and Claude sessions (no terminal to ask in) can ssh. Cancel it and run `ssh-unlock` later instead.
+    hl.exec_cmd("~/.local/bin/ssh-unlock --login")
+
     -- Wallpaper: start hyprpaper without a config file, wait for its socket, then
     -- set the last picked wallpaper over IPC. hyprpaper.conf only turns off the
     -- splash text (on by default since hyprpaper 0.8); the old preload/wallpaper

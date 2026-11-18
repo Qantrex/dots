@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Run a command in this terminal exactly as usual (sudo password, [y/N] questions, progress bars) and keep
+# a clean copy of everything it printed, so a Claude session can read it instead of you pasting it.
+#   run-logged <command> [args...]      e.g. run-logged sudo ./update-steps.sh
+#   run-logged --last                   print the newest log
+# Logs: ~/.cache/claude-run/<name>-<date>.log, plus latest.log; kept 14 days.
+
+set -u
+dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-run"
+mkdir -p "$dir"
+find "$dir" -name '*.log' -mtime +14 -delete 2>/dev/null
+
+if [[ ${1:-} == --last ]]; then
+    exec cat "$dir/latest.log"
+fi
+[[ $# -gt 0 ]] || { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+
+name=$(basename -- "${1/#sudo/${2:-sudo}}")
+name=${name//[^A-Za-z0-9._-]/_}
+log="$dir/${name}-$(date +%Y%m%d-%H%M%S).log"
+raw=$(mktemp)
+start=$(date '+%F %T')
+
+# `script` keeps the command on a real terminal, so it behaves as if run directly.
+script -q -e -c "$(printf '%q ' "$@")" "$raw"
+status=$?
+
+{
+    printf '== %s\n== started %s, finished %s, exit status %d\n\n' "$*" "$start" "$(date '+%F %T')" "$status"
+    # Without escape codes, carriage-return redraws and the "Script started" lines.
+    sed -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' -e 's/\x1b[()][A-Za-z0-9]//g' -e 's/\r$//' -e 's/.*\r//' "$raw" |
+        grep -v '^Script \(started\|done\) on '
+} > "$log"
+rm -f "$raw"
+ln -sfn "$(basename "$log")" "$dir/latest.log"
+printf '\n[run-logged] exit status %d, log: %s\n' "$status" "${log/#$HOME/\~}"
+exit "$status"

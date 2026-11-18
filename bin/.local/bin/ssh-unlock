@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Load the ssh keys from ~/.ssh/config (IdentityFile lines) into the agent, asking for each passphrase in a
+# small window instead of a terminal. Works from scripts and Claude sessions, which have no terminal to ask in:
+# the passphrase goes from the window straight to ssh-add, nothing else sees it.
+#   ssh-unlock            load every configured key the agent doesn't hold yet
+#   ssh-unlock --check    only list what's missing (exit 1 if something is)
+#   ssh-unlock --login    same as plain, quietly; started at login
+# The agent keeps the keys until logout or reboot.
+
+set -u
+if [[ ${SSH_UNLOCK_ASKPASS:-} == 1 ]]; then
+    # Called by ssh-add as its askpass program: $1 is ssh-add's prompt text.
+    exec zenity --password --title="${1:-ssh passphrase}" 2>/dev/null
+fi
+
+export SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-${XDG_RUNTIME_DIR:-/run/user/$UID}/ssh-agent.socket}
+loaded=$(ssh-add -l 2>/dev/null | awk '{print $2}')
+missing=()
+while read -r key; do
+    key=${key/#\~/$HOME}
+    [[ -f $key && -f $key.pub ]] || continue
+    fp=$(ssh-keygen -lf "$key.pub" 2>/dev/null | awk '{print $2}')
+    [[ -n $fp ]] && grep -qxF "$fp" <<<"$loaded" && continue
+    missing+=("$key")
+done < <(awk 'tolower($1) == "identityfile" {print $2}' "${SSH_UNLOCK_CONFIG:-$HOME/.ssh/config}" 2>/dev/null | sort -u)
+
+case ${1:-} in
+--check)
+    if (( ${#missing[@]} )); then printf 'not loaded: %s\n' "${missing[@]/#$HOME/\~}"; exit 1; fi
+    echo "all configured keys are loaded"; exit 0 ;;
+esac
+
+(( ${#missing[@]} )) || { [[ ${1:-} == --login ]] || echo "all configured keys are loaded"; exit 0; }
+status=0
+for key in "${missing[@]}"; do
+    SSH_UNLOCK_ASKPASS=1 SSH_ASKPASS="$0" SSH_ASKPASS_REQUIRE=force ssh-add "$key" </dev/null >/dev/null 2>&1 \
+        && echo "loaded ${key/#$HOME/\~}" || { echo "not loaded: ${key/#$HOME/\~} (cancelled or wrong passphrase)"; status=1; }
+done
+exit $status
