@@ -188,9 +188,21 @@ def stop(name):
 def empty_prompt(target):
     """True when the session shows its normal input line with nothing typed (no dialog, no question)."""
     screen = sh(["tmux", "capture-pane", "-p", "-t", target]).rstrip("\n").splitlines()
-    prompts = [l for l in screen if l.startswith("❯")]
-    return bool(prompts) and prompts[-1].strip() == "❯" and not any(
-        re.match(r"\s*❯ \d+\.", l) or "Enter to confirm" in l or "Esc to cancel" in l for l in screen[-15:])
+    if any(re.match(r"\s*❯ \d+\.", l) or "Enter to confirm" in l or "Esc to cancel" in l for l in screen[-15:]):
+        return False
+    return input_empty(sh(["tmux", "capture-pane", "-p", "-e", "-t", target]))
+
+def input_empty(screen_e):
+    """The last input line (captured with escape codes) has nothing typed: only Claude Code's dimmed
+    placeholder ("Try ...") or nothing at all after the prompt sign."""
+    lines = [l for l in screen_e.splitlines() if "❯" in l]
+    if not lines:
+        return False
+    rest = lines[-1].split("❯", 1)[1]
+    rest = re.sub(r"\x1b\[2m.*?(\x1b\[0m|\x1b\[22m|$)", "", rest)   # dimmed placeholder
+    rest = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", rest)                  # other colours
+    return rest.replace("\u00a0", " ").strip() == ""
+
 
 
 def cmd_start(args):

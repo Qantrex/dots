@@ -79,6 +79,18 @@ def fmt(e):
     return f"- {t} [{e['level']}] {e['source']}: {text}"
 
 
+def input_empty(screen_e):
+    """The last input line (captured with escape codes) has nothing typed: only Claude Code's dimmed
+    placeholder ("Try ...") or nothing at all after the prompt sign."""
+    lines = [l for l in screen_e.splitlines() if "❯" in l]
+    if not lines:
+        return False
+    rest = lines[-1].split("❯", 1)[1]
+    rest = re.sub(r"\x1b\[2m.*?(\x1b\[0m|\x1b\[22m|$)", "", rest)   # dimmed placeholder
+    rest = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", rest)                  # other colours
+    return rest.replace("\u00a0", " ").strip() == ""
+
+
 def wake(e):
     """Tell the idle main chat by typing one line into its prompt, only when nobody is typing there."""
     if os.path.exists(os.path.join(STATE, "off")):
@@ -101,9 +113,10 @@ def wake(e):
     if not any(a.get("name") == "main-chat" and a.get("status") == "idle" for a in agents):
         return False
     screen = sh(["tmux", "capture-pane", "-p", "-t", "main:main"]).rstrip("\n").splitlines()
-    prompt = [l for l in screen if l.startswith("❯")]
-    if not prompt or prompt[-1].strip() != "❯":
-        return False   # something is typed there, or a dialog is open: leave it for the next prompt
+    if any(re.match(r"\s*❯ \d+\.", l) or "Enter to confirm" in l or "Esc to cancel" in l for l in screen[-15:]):
+        return False   # a dialog is open: leave it for the next prompt
+    if not input_empty(sh(["tmux", "capture-pane", "-p", "-e", "-t", "main:main"])):
+        return False   # something is typed there: leave it for the next prompt
     msg = "[inbox, from code] " + fmt(e)[2:] + " (inbox new shows the rest)"
     sh(["tmux", "send-keys", "-t", "main:main", "-l", msg.replace("\n", " ")])
     sh(["tmux", "send-keys", "-t", "main:main", "Enter"])
