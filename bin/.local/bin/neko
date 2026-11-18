@@ -52,6 +52,9 @@ CONFIG = HOME / ".config" / "nekosec" / "settings.json"
 STATE = CACHE / "state.json"
 PIDFILE = CACHE / "daemon.pid"
 WALL_LAST = HOME / ".cache" / "wallpaper" / "last"
+# Where the seeing stone sits on the theme's own wallpaper (wallpaper.svg, 2880x1800),
+# for the shell's clickable stone (quickshell/.../neko/Stone.qml).
+STATIC_STONE = {"cx": 1440, "cy": 900, "r": 320, "w": 2880, "h": 1800}
 UA = "catgirl-fetcher"
 
 DEFAULTS = {"mode": "sfw", "interval": 10, "glitch": True, "sound": "chirp", "paused": False}
@@ -403,6 +406,8 @@ def compose(src, entry, feed, c, out):
                 stamp=time.strftime("%Y-%m-%d %H:%M:%S"), name=entry["name"])
     svg = out / "hud.svg"
     svg.write_text(hud_svg(W, H, (x, y, w, h), info, c))
+    info["stone"] = {"cx": round(W - 60 * s - 90 * s) if W - 60 * s < x + w + 640 * s else round(x + w + 640 * s - 90 * s),
+                     "cy": round(H - 330 * s), "r": round(94 * s), "w": W, "h": H}
     r = run("resvg", "--monospace-family", "DepartureMono Nerd Font", str(svg), str(out / "hud.png"), timeout=60)
     if r and r.returncode == 0:
         canvas = Image.alpha_composite(canvas.convert("RGBA"), Image.open(out / "hud.png").convert("RGBA")).convert("RGB")
@@ -547,6 +552,7 @@ class Daemon:
                               page=e.get("page", ""), safe=bool(e.get("safe")), mode=mode,
                               kaomoji=info["kaomoji"], threat=info["threat"], subject=info["subject"],
                               avatar=str(CACHE / f"avatar{self.slot}.png"), wall=str(d / "wall.png"),
+                              stone=info["stone"],
                               since=time.time(), seen=sorted(self.seen)[-3000:])
             save_json(STATE, self.state)
             run("hyprctl", "-q", "hyprpaper", "unload", "unused", timeout=5)
@@ -560,6 +566,9 @@ class Daemon:
             set_wall(w)
             notify_shell()
             return True
+        self.state["stone"] = STATIC_STONE  # the theme's own wallpaper is up
+        save_json(STATE, self.state)
+        notify_shell()
         return False
 
     def loop(self):
@@ -582,6 +591,12 @@ class Daemon:
             now = time.time()
             if self.mtime(WALL_LAST) != self.wall_mtime and not st.get("paused"):
                 set_setting("paused", True)  # a wallpaper was picked by hand
+                try:
+                    picked = WALL_LAST.read_text().strip()
+                except OSError:
+                    picked = ""
+                self.state["stone"] = STATIC_STONE if picked.endswith("nekosec-seeing-stone.png") else None
+                save_json(STATE, self.state)
                 notify_shell()
                 st = settings()
             forced = self.wake.is_set()
@@ -630,26 +645,30 @@ def opsec_hud():
     f = dict(l.split("=", 1) for l in (fw.stdout.splitlines() if fw else []) if "=" in l)
     fw_on = f.get("ActiveState") == "active" or (f.get("Result") == "success" and f.get("ExecMainStatus") == "0"
                                                  and f.get("ExecMainStartTimestampMonotonic", "0") != "0")
-    cams = set()
+    cams = {}
     for proc in Path("/proc").iterdir():
         if not proc.name.isdigit():
             continue
         try:
             for fd in (proc / "fd").iterdir():
                 if os.readlink(fd).startswith("/dev/video"):
-                    cams.add(proc.name)
+                    cams[proc.name] = clean((proc / "comm").read_text().strip())
                     break
         except OSError:
             continue
-    mics = 0
+    mic_apps = []
     r = run("pactl", "-f", "json", "list", "source-outputs", timeout=3)
     try:
-        mics = sum(1 for o in json.loads(r.stdout)
-                   if not str(o.get("properties", {}).get("application.name", "")).lower().startswith(("cava", "pavucontrol")))
+        for o in json.loads(r.stdout):
+            name = str(o.get("properties", {}).get("application.name", "") or "?")
+            if not name.lower().startswith(("cava", "pavucontrol")):
+                mic_apps.append(clean(name))
     except Exception:  # noqa: BLE001
         pass
+    mics = len(mic_apps)
     return dict(vpn=vpn, tor=bool(tor and tor.returncode == 0),
-                firewall=fw_on, cams=len(cams), mics=mics)
+                firewall=fw_on, cams=len(cams), mics=mics,
+                cam_apps=sorted(set(cams.values())), mic_apps=sorted(set(mic_apps)))
 
 
 def cmd_status():

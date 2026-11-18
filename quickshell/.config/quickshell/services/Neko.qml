@@ -29,6 +29,8 @@ Singleton {
     property string shown: ""
     property string mode: "sfw"
     property bool paused: false
+    property var stone: null          // {cx, cy, r, w, h}: the seeing stone on the wallpaper, in its pixels
+    property bool stoneOpen: false    // the "look into the stone" panel
 
     // From `neko hud`.
     property var vpn: []
@@ -36,6 +38,8 @@ Singleton {
     property bool firewall: false
     property int cams: 0
     property int mics: 0
+    property var camApps: []
+    property var micApps: []
     readonly property int watchers: cams + mics
 
     function refresh() { conf.reload(); state.reload(); settings.reload(); hud.running = true; }
@@ -84,6 +88,7 @@ Singleton {
                 root.subject = s.subject || "";
                 root.artist = s.artist || "";
                 root.shown = s.shown || "";
+                root.stone = s.stone || null;
             } catch (e) {}
         }
     }
@@ -115,6 +120,8 @@ Singleton {
                     root.firewall = h.firewall === true;
                     root.cams = h.cams || 0;
                     root.mics = h.mics || 0;
+                    root.camApps = h.cam_apps || [];
+                    root.micApps = h.mic_apps || [];
                 } catch (e) {}
             }
         }
@@ -132,6 +139,8 @@ Singleton {
         target: "neko"
         // `neko` calls this after a new picture; `theme set` reloads the shell's theme.
         function refresh(): void { root.refresh(); }
+        // `qs ipc call neko stone`: open or close the seeing stone's panel.
+        function stone(): void { root.stoneOpen = !root.stoneOpen; if (root.stoneOpen) hud.running = true; }
     }
 
     // A theme switch swaps theme/current; pick up whether neko.json is there.

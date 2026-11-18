@@ -25,10 +25,16 @@ ShellRoot {
                 active: Neko.enabled
                 WindowEars { modelData: perScreen.modelData }
             }
+            // nekosec: the seeing stone on the wallpaper, clickable
+            LazyLoader {
+                active: Neko.enabled
+                Stone { modelData: perScreen.modelData }
+            }
         }
     }
 
     Popups {}
     Osd {}
     Launcher {}
+    LazyLoader { active: Neko.enabled; StonePanel {} }
 }
