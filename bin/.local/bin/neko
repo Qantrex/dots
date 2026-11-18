@@ -413,25 +413,6 @@ def compose(src, entry, feed, c, out):
         canvas = Image.alpha_composite(canvas.convert("RGBA"), Image.open(out / "hud.png").convert("RGBA")).convert("RGB")
     canvas.save(out / "wall.png", compress_level=2)
 
-    # Glitch frames.
-    def slices(im, n, amp):
-        im = im.copy()
-        for _ in range(n):
-            y0 = random.randint(0, H - 10)
-            hh = random.randint(int(8 * s), int(90 * s))
-            band = im.crop((0, y0, W, min(H, y0 + hh)))
-            im.paste(ImageChops.offset(band, random.randint(-amp, amp), 0), (0, y0))
-        return im
-
-    r, g, b = canvas.split()
-    split = Image.merge("RGB", (ImageChops.offset(r, int(34 * s), 0), g, ImageChops.offset(b, -int(34 * s), 0)))
-    slices(split, 14, int(120 * s)).save(out / "g1.png", compress_level=1)
-    g2 = slices(canvas, 22, int(220 * s))
-    g2 = Image.blend(g2, ImageOps.invert(g2), 0.18)
-    g2.save(out / "g2.png", compress_level=1)
-    duo = ImageOps.grayscale(canvas).convert("RGB").point(lut)
-    slices(Image.blend(canvas, duo, 0.75), 6, int(60 * s)).save(out / "g3.png", compress_level=1)
-
     # Square crops from the top centre (where the face usually is).
     def crop(frac):
         side = int(min(img.width, img.height) * frac)
@@ -448,7 +429,7 @@ def compose(src, entry, feed, c, out):
     ring = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
     ImageDraw.Draw(ring).ellipse((2, 2, 125, 125), outline=hexrgb(c["accent"]) + (255,), width=6)
     Image.alpha_composite(av, ring).save(out / "avatar.png")
-    files = ["wall.png", "g1.png", "g2.png", "g3.png", "avatar.png"]
+    files = ["wall.png", "avatar.png"]
     if entry.get("safe") and entry.get("strict"):
         sq.resize((560, 560), Image.LANCZOS).save(out / "portrait.png")
         g = face.resize((300, 300), Image.LANCZOS)
@@ -501,14 +482,15 @@ class Daemon:
         except OSError:
             return 0
 
-    def burst(self, d, final):
-        if not settings()["glitch"]:
-            return set_wall(final)
-        for g, pause in (("g1.png", 0.07), ("g2.png", 0.09), ("g3.png", 0.06)):
-            if (d / g).is_file():
-                set_wall(d / g)
-                time.sleep(pause)
-        return set_wall(final)
+    def burst(self, final=""):
+        """Glitch over to FINAL (or, with "", only glitch). The shell draws it and
+        switches hyprpaper at the peak (quickshell/.../neko/Glitch.qml); without
+        the shell, or with the glitch off, the picture is simply set."""
+        if settings()["glitch"]:
+            r = run("qs", "ipc", "call", "neko", "glitch", str(final), timeout=5)
+            if r and r.returncode == 0:
+                return True
+        return set_wall(final) if final else False
 
     def next(self):
         st = settings()
@@ -539,7 +521,7 @@ class Daemon:
             shutil.copy(raw, d / "src.img")
             if self.wall_mtime != self.mtime(WALL_LAST) or st.get("paused"):
                 return False  # paused meanwhile: keep the picture for later
-            self.burst(d, d / "wall.png")
+            self.burst(d / "wall.png")
             # Safe pictures also feed the lock screen and the terminal greeting.
             for f in ("portrait.png", "greet.png", "greet.six"):
                 if (d / f).exists():
@@ -611,9 +593,7 @@ class Daemon:
                 last_change = time.time() if ok else last_change
                 fails = 0 if ok else time.time() + 60
             elif not st.get("paused") and st["glitch"] and now >= next_glitch and not self.locked:
-                d = CACHE / f"slot{self.slot}"
-                if (d / "wall.png").is_file():
-                    self.burst(d, d / "wall.png")
+                self.burst()
                 next_glitch = now + random.uniform(180, 480)
             # Unlock: hyprlock went away.
             locked = bool(run("pidof", "hyprlock", timeout=5) and run("pidof", "hyprlock").returncode == 0)

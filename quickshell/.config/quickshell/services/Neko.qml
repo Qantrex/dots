@@ -31,6 +31,15 @@ Singleton {
     property bool paused: false
     property var stone: null          // {cx, cy, r, w, h}: the seeing stone on the wallpaper, in its pixels
     property bool stoneOpen: false    // the "look into the stone" panel
+    property string wallpaper: ""     // what hyprpaper shows now (neko/Glitch.qml glitches it)
+
+    // Glitch over to another wallpaper (or, with "", just glitch the current one).
+    // neko/Glitch.qml does it and switches hyprpaper underneath at the peak.
+    signal glitchRequested(string to)
+    function glitchTo(path) {
+        if (root.enabled) root.glitchRequested(path || "");
+        else if (path) Quickshell.execDetached(["hyprctl", "-q", "hyprpaper", "wallpaper", "," + path]);
+    }
 
     // From `neko hud`.
     property var vpn: []
@@ -42,7 +51,7 @@ Singleton {
     property var micApps: []
     readonly property int watchers: cams + mics
 
-    function refresh() { conf.reload(); state.reload(); settings.reload(); hud.running = true; }
+    function refresh() { conf.reload(); state.reload(); settings.reload(); hud.running = true; active.running = true; }
     function run(args) { Quickshell.execDetached([root.bin].concat(args)); }
     function next() { run(["next"]); }
     function togglePause() { run([root.paused ? "resume" : "pause"]); }
@@ -108,6 +117,18 @@ Singleton {
         }
     }
 
+    // `eDP-1: /path` per monitor; the first is enough (one picture on every screen).
+    Process {
+        id: active
+        command: ["hyprctl", "hyprpaper", "listactive"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const m = text.match(/:\s*(\/\S.*)$/m);
+                if (m) root.wallpaper = m[1].trim();
+            }
+        }
+    }
+
     Process {
         id: hud
         command: [root.bin, "hud"]
@@ -132,7 +153,7 @@ Singleton {
         running: root.enabled
         repeat: true
         triggeredOnStart: true
-        onTriggered: hud.running = true
+        onTriggered: { hud.running = true; if (!root.wallpaper) active.running = true; }
     }
 
     IpcHandler {
@@ -140,6 +161,8 @@ Singleton {
         // `neko` calls this after a new picture; `theme set` reloads the shell's theme.
         function refresh(): void { root.refresh(); }
         // `qs ipc call neko stone`: open or close the seeing stone's panel.
+        // `qs ipc call neko glitch PATH`: the daemon's changes (PATH "" = only a glitch).
+        function glitch(path: string): void { root.glitchTo(path); }
         function stone(): void { root.stoneOpen = !root.stoneOpen; if (root.stoneOpen) hud.running = true; }
     }
 

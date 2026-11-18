@@ -25,6 +25,11 @@ ShellRoot {
                 active: Neko.enabled
                 WindowEars { modelData: perScreen.modelData }
             }
+            // nekosec: the glitch between wallpapers (the first screen switches hyprpaper)
+            LazyLoader {
+                active: Neko.enabled
+                Glitch { modelData: perScreen.modelData; primary: perScreen.modelData === Quickshell.screens[0] }
+            }
             // nekosec: the seeing stone on the wallpaper, clickable
             LazyLoader {
                 active: Neko.enabled

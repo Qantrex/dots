@@ -438,15 +438,18 @@ There are two themes:
     catboys from the sources of the `catgirl` command. Every 10 minutes one becomes a
     "surveillance feed" wallpaper (a neon backdrop, target brackets, an agent panel
     with class, threat level, clearance and the artist) and arrives with a short
-    glitch; now and then the screen glitches on its own. Picking a wallpaper with
-    SUPER+SHIFT+W pauses it. `neko` shows the state; `neko next`, `pause`, `resume`,
+    glitch; now and then the wallpaper glitches on its own. The glitch is drawn by
+    the shell (`neko/Glitch.qml`, a layer just above the wallpaper: shifted bands and
+    pink/mint colour splits, hyprpaper switched underneath at the peak), so it also
+    plays for `neko next` and for a wallpaper picked in the launcher. Picking a
+    wallpaper with SUPER+SHIFT+W pauses the changing. `neko` shows the state; `neko next`, `pause`, `resume`,
     `save`, `open`, `interval MIN`, `glitch on|off` and `sound NAME|off` do what they
     say. `neko mode sfw|mixed|nsfw` switches the pictures; sfw is the default and
     follows Danbooru's "general" rating on every source. Child characters are
     skipped in every mode, school tags outside sfw. The lock screen portrait and
     the terminal greeting only ever use pictures rated safe.
   - **Shell.** Cat ears on every bar island, on every pill (workspaces, hovered bar
-    items, launcher tabs, active tiles), on the launcher and on every window (a
+    items, launcher tabs, active tiles), on the launcher, on notification popups and on every window (a
     click-through layer, `quickshell/.../neko/WindowEars.qml`, fed by `hyprctl`);
     they twitch now and then, and a window's ears twitch when it gets focus.
     Pink, lavender and mint gradient frames on islands, popouts, tooltips,

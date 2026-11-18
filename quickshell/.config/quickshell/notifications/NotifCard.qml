@@ -29,6 +29,8 @@ Rectangle {
     NekoFrame {
         anchors.fill: parent
         radius: parent.radius
+        ears: root.popup          // popups get ears (the list in the panel stays flat)
+        earWidth: 24; earHeight: 14
         c1: root.critical ? Theme.love : Theme.accent
         c3: root.critical ? Theme.love : Neko.mint
     }

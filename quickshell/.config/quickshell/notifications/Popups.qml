@@ -17,15 +17,18 @@ PanelWindow {
     exclusiveZone: 0
     margins { top: 6; right: 15 }
     implicitWidth: 440
-    implicitHeight: Math.max(1, col.implicitHeight)
+    // nekosec: room above each card for its cat ears
+    readonly property int earRoom: Neko.enabled ? 14 : 0
+    implicitHeight: Math.max(1, col.implicitHeight + earRoom)
 
     WlrLayershell.namespace: "qs-notifications"
     WlrLayershell.layer: WlrLayer.Overlay
 
     Column {
         id: col
+        y: win.earRoom
         width: parent.width
-        spacing: 8
+        spacing: 8 + win.earRoom
 
         Repeater {
             model: Notifs.popups

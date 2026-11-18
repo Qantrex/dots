@@ -182,8 +182,16 @@ PanelWindow {
         if (mode === "wallpaper") {
             return wallpapers.filter(w => !q || w.toLowerCase().includes(q)).map(w => ({
                 wallpaper: w, title: w.split("/").pop(), subtitle: "",
-                run: () => Quickshell.execDetached(["sh", "-c",
-                    'hyprctl -q hyprpaper wallpaper ",$1" && mkdir -p ~/.cache/wallpaper && echo "$1" > ~/.cache/wallpaper/last', "wp", w])
+                run: () => {
+                    // nekosec glitches over to the new picture (neko/Glitch.qml switches it).
+                    if (Neko.enabled) {
+                        Neko.glitchTo(w);
+                        Quickshell.execDetached(["sh", "-c", 'mkdir -p ~/.cache/wallpaper && echo "$1" > ~/.cache/wallpaper/last', "wp", w]);
+                    } else {
+                        Quickshell.execDetached(["sh", "-c",
+                            'hyprctl -q hyprpaper wallpaper ",$1" && mkdir -p ~/.cache/wallpaper && echo "$1" > ~/.cache/wallpaper/last', "wp", w]);
+                    }
+                }
             }));
         }
         if (mode === "theme") {
