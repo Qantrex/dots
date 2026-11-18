@@ -23,7 +23,8 @@ source $ZSH/oh-my-zsh.sh
 
 # ~/.zshrc - auto-attach but don't leave orphan sessions
 if [[ -z "$TMUX" ]]; then
-  tmux attach 2>/dev/null || tmux new-session
+  # By name: the side panel of the main Claude chat is its own grouped session ("panel").
+  tmux attach -t main 2>/dev/null || tmux new-session -s main
 fi
 
 # -----------------------------------------------------------------------------

@@ -28,6 +28,7 @@ cr() {
     found=($HOME/.claude/projects/*/$id.jsonl)
     (( ${#found} )) || { rm -f $f; continue; }                       # session deleted
     [[ $(cat /proc/$pid/comm 2>/dev/null) == claude ]] && continue   # still running
+    [[ $(jq -r '.role // empty' $f) == main ]] && { rm -f $f; continue; }   # the main chat restarts by itself
     left+=($f)
   done
 
