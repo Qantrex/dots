@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The side panel for the main Claude chat and its threads (`agentic`, `thread`).
 #   dock toggle          SUPER+SHIFT+A: show the panel, or hide it when it's in front
-#   dock show [name]     show the panel with the main chat or a thread ("main" by default)
+#   dock show [target]   show the panel with the main chat ("main", the default), a thread by name, a tmux
+#                        pane (%12) or --first (the session that has waited longest)
 #   dock hide            hide it
 #   dock ensure          start the panel window hidden, so it opens instantly later
 #   dock close           close the panel window (agentic off)
@@ -35,7 +36,18 @@ ensure() {
 }
 
 select_target() {
-    local name=${1:-main}
+    local name=${1:-main} win
+    if [[ $name == --first ]]; then
+        # The session that has waited longest (bar flag, session-track.sh in claude-config).
+        name=$(jq -r '.[0].pane // empty' "${XDG_CACHE_HOME:-$HOME/.cache}/claude-waiting.json" 2>/dev/null)
+        [[ -n $name ]] || name=main
+    fi
+    if [[ $name == %* ]]; then
+        # A tmux pane: show its window if it belongs to the main session's group.
+        win=$(tmux display -p -t "$name" '#{window_id}' 2>/dev/null)
+        [[ -n $win ]] && tmux select-window -t "$panel:$win" 2>/dev/null && { tmux select-pane -t "$name"; return 0; }
+        notify-send -a Claude "Claude" "That session isn't in the main tmux session."; return 1
+    fi
     tmux select-window -t "$panel:$name" 2>/dev/null || {
         notify-send -a Claude "Claude" "No thread called '$name' is running."; return 1; }
 }

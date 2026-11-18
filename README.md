@@ -188,7 +188,7 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `S` | Scratchpad |
 | `ALT+F` | Maximize |
 | `D` / `SHIFT+D` | Quick ask (Claude, Sonnet) / a fresh quick ask about the clipboard, text or image (`claude-ask.sh`) |
-| `SHIFT+A` | Answer a waiting Claude session over the current workspace, in a floating window on its tmux window (`claude-peek.sh`); again to hide |
+| `SHIFT+A` | The main Claude chat as a side panel over the current workspace (`dock`); again to hide. The chat itself always runs in tmux window `main:1` (`agentic`) |
 | `CTRL+S` | Screenshot region → file + clipboard |
 | `SHIFT+F` | Screenshot region (flameshot) → Claude Code → answer as a faint bottom-right overlay (`~/.config/scripts/claude-screen/`) |
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
@@ -220,8 +220,8 @@ and every click opens something you can act in instead of another program.
 - **Right, exceptions** (each only while it applies): mic / camera / screen share
   in use (love), homelab problems (love) or approvals waiting (gold), vault open,
   touchpad off, power profile above Quiet, local AI on, Claude sessions waiting for
-  you (click: answer it here, middle-click: go to its terminal, right-click: dismiss;
-  `claude-peek.sh` / `claude-jump.sh`, fed by the session hook in claude-config), Claude usage over 70 %, RAM over 85 % (gold),
+  you (click: answer it in the side panel, middle-click: go to its terminal, right-click: dismiss;
+  `dock` / `claude-jump.sh`, fed by the session hook in claude-config), Claude usage over 70 %, RAM over 85 % (gold),
   caffeine, Do Not Disturb, unread notifications, no or limited network.
 - **Right, status:** network, Bluetooth (only with a device connected), volume,
   battery (percentage only on battery; gold under 30 %, love under 15 %). One
@@ -670,3 +670,22 @@ key is still in Bitwarden.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Main Claude chat and threads
+
+One Claude chat runs all the time in tmux window `main:1` and shows as a side panel on SUPER+SHIFT+A.
+Work streams run as threads: named Claude sessions in their own tmux windows, started by the chat or by
+hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
+
+| Command | What |
+|---|---|
+| `agentic on/off/status/restart` | the main chat, its panel and threads; `off` stops everything and keeps the data |
+| `dock toggle/show/hide` | the side panel; `dock show <thread>` shows a thread instead of the main chat |
+| `thread start/list/show/stop/resume/model/adopt` | threads (at most 5 run); `cr` reopens what a shutdown left open |
+| `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |
+| `claude-usage report/calibrate/estimate` | Claude usage from the local transcripts, priced at API rates |
+| `run-logged <cmd>` | run a command as usual and keep a clean log for Claude to read |
+| `ssh-unlock` | load the keys from `~/.ssh/config` with a passphrase window (also at login) |
+
+Private settings (areas, the chat's rules) live in a separate private repo and are linked into
+`~/.config/agentic/` and `~/.local/share/agentic/main/`.

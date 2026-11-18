@@ -70,18 +70,6 @@ hl.window_rule({
     center    = true,
 })
 
--- Claude peek (SUPER+SHIFT+A, ~/.config/scripts/claude-peek.sh): a waiting Claude
--- session shown over whatever workspace you're on, large enough to read an answer.
-hl.window_rule({
-    name  = "claude-peek",
-    match = { class = "^(claude-peek)$" },
-
-    workspace = "special:peek silent",
-    float     = true,
-    size      = "1180 760",
-    center    = true,
-})
-
 -- The main Claude chat's side panel (SUPER+SHIFT+A, `dock` in ~/.local/bin): right edge, full height
 -- below the bar, about 40 % wide, over whatever workspace you're on. The chat itself lives in tmux
 -- window main:1 (`agentic`); the panel only shows it.
