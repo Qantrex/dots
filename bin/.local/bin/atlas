@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""A map of this machine for people and agents, built by plain code (no AI, about 1-2 s).
+
+  atlas                 print the index (short: what needs attention, areas, threads, pointers)
+  atlas refresh         rebuild everything
+  atlas <topic>         print one detail file: repos, deadlines, keybinds, tools, packages,
+                        services, recent, sessions
+  atlas topics          list the topics
+
+Output: ~/.local/share/agentic/atlas/. Settings: ~/.config/agentic/atlas.conf (areas, where repos,
+deadline notes and the homelab note are). A topic whose collector fails is marked "stale" instead
+of breaking the rest.
+"""
+import configparser
+import glob
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from datetime import date, datetime
+
+HOME = os.path.expanduser("~")
+DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share"), "agentic")
+OUT = os.path.join(DATA, "atlas")
+THREADS = os.path.join(DATA, "threads")
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "agentic", "atlas.conf")
+TOPICS = ["repos", "deadlines", "keybinds", "tools", "packages", "services", "recent", "sessions"]
+
+
+def sh(cmd, timeout=20):
+    try:
+        return subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True,
+                              timeout=timeout).stdout
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
+def short(p):
+    return p.replace(HOME, "~", 1) if p.startswith(HOME) else p
+
+
+def conf():
+    c = configparser.ConfigParser(interpolation=None, delimiters=("=",))
+    c.optionxform = str
+    c.read(CONF)
+    return c
+
+
+def paths(value):
+    return [os.path.expanduser(p) for p in (value or "").split()]
+
+
+def ago(ts):
+    d = time.time() - ts
+    if d < 3600:
+        return f"{int(d / 60)} min"
+    if d < 86400:
+        return f"{int(d / 3600)} h"
+    return f"{int(d / 86400)} d"
+
+
+# ---------------------------------------------------------------- collectors (each returns markdown)
+
+def machine():
+    host = socket.gethostname()
+    up = sh("uptime -p").strip().replace("up ", "")
+    mem = sh("free -m").split("\n")[1].split() if sh("free -m") else []
+    ram = f"{int(mem[6]) / 1024:.1f} of {int(mem[1]) / 1024:.0f} GB free" if len(mem) > 6 else "?"
+    disks = []
+    for mnt in ("/", "/home"):
+        try:
+            u = shutil.disk_usage(mnt)
+            disks.append((mnt, u.free / u.total, u.free / 1e9))
+        except OSError:
+            pass
+    seen, dl = set(), []
+    for mnt, frac, gb in disks:
+        if round(gb) in seen:
+            continue
+        seen.add(round(gb))
+        dl.append(f"`{mnt}` {gb:.0f} GB free ({frac * 100:.0f} %)")
+    bat = ""
+    for b in glob.glob("/sys/class/power_supply/BAT*/capacity"):
+        st = open(b.replace("capacity", "status")).read().strip()
+        bat = f", battery {open(b).read().strip()} % ({st.lower()})"
+    kernel = os.uname().release
+    return (f"{host}, kernel {kernel}, up {up}, RAM {ram}, " + ", ".join(dl) + bat,
+            [f"disk {m} has only {f * 100:.0f} % free" for m, f, g in disks if f < 0.10])
+
+
+def repos(c):
+    roots = paths(c.get("repos", "roots", fallback="~/Projects ~/dotfiles"))
+    found = []
+    for root in roots:
+        for g in sorted(glob.glob(os.path.join(root, "**", ".git"), recursive=True)):
+            if "node_modules" in g or g.count(os.sep) - root.count(os.sep) > 5:
+                continue
+            found.append(os.path.dirname(g))
+    rows, attention = [], []
+    for r in found:
+        st = sh(["git", "-C", r, "status", "--porcelain=v1", "-b"]).splitlines()
+        if not st:
+            continue
+        head = st[0][3:]
+        branch = head.split("...")[0]
+        ahead = re.search(r"ahead (\d+)", head)
+        changed = len(st) - 1
+        last = sh(["git", "-C", r, "log", "-1", "--format=%ct\t%s"]).strip().split("\t", 1)
+        ts = int(last[0]) if last and last[0].isdigit() else 0
+        subj = last[1][:60] if len(last) > 1 else ""
+        md = "yes" if os.path.exists(os.path.join(r, "CLAUDE.md")) else ""
+        rows.append((ts, short(r), branch, changed, int(ahead.group(1)) if ahead else 0, subj, md))
+        if changed or ahead:
+            attention.append(f"`{short(r)}`: " + ", ".join(
+                x for x in (f"{changed} uncommitted" if changed else "", f"{ahead.group(1)} unpushed" if ahead else "") if x))
+    rows.sort(reverse=True)
+    lines = ["| Repo | Branch | Uncommitted | Unpushed | Last commit | CLAUDE.md |", "|---|---|---|---|---|---|"]
+    for ts, p, b, ch, ah, subj, md in rows:
+        lines.append(f"| `{p}` | {b} | {ch or ''} | {ah or ''} | {ago(ts) if ts else '?'} ago: {subj} | {md} |")
+    return "\n".join(lines), rows, attention
+
+
+def frontmatter(path):
+    try:
+        text = open(path, encoding="utf-8", errors="ignore").read(3000)
+    except OSError:
+        return {}
+    m = re.match(r"---\n(.*?)\n---", text, re.S)
+    if not m:
+        return {}
+    out = {}
+    for line in m.group(1).splitlines():
+        if ":" in line and not line.startswith(" "):
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip().strip('"')
+    return out
+
+
+def deadlines(c):
+    roots = paths(c.get("deadlines", "notes", fallback=""))
+    items = []
+    for root in roots:
+        for f in glob.glob(os.path.join(root, "**", "*.md"), recursive=True):
+            fm = frontmatter(f)
+            if fm.get("type") not in ("assignment", "test", "project", "exam") or fm.get("status") == "done":
+                continue
+            items.append((fm.get("due") or "", fm.get("subject", ""), os.path.splitext(os.path.basename(f))[0],
+                          fm.get("type"), fm.get("status", ""), short(f)))
+    items.sort(key=lambda x: (x[0] == "", x[0]))
+    today = date.today()
+    lines = ["| Due | Subject | What | Type | Status | Note |", "|---|---|---|---|---|---|"]
+    soon = []
+    for due, subj, name, typ, st, f in items:
+        tag = ""
+        try:
+            d = (date.fromisoformat(due) - today).days
+            tag = "overdue" if d < 0 else f"in {d} d"
+            if d <= 7:
+                soon.append(f"{subj} {name}: {due} ({tag})")
+        except ValueError:
+            pass
+        lines.append(f"| {due or 'no date'} {tag} | {subj} | {name} | {typ} | {st} | `{f}` |")
+    return "\n".join(lines), soon, sum(1 for i in items if not i[0])
+
+
+def keybinds(c):
+    out = ["| Keys | What |", "|---|---|"]
+    for f in paths(c.get("desktop", "keybinds", fallback="")):
+        try:
+            text = open(f, encoding="utf-8").read()
+        except OSError:
+            continue
+        for m in re.finditer(r'hl\.bind\(\s*mod \.\. "([^"]+)"[^\n]*?(?:\n[^\n]*?)?description = "([^"]+)"', text):
+            out.append(f"| SUPER{m.group(1)} | {m.group(2)} |")
+    return "\n".join(out), len(out) - 2
+
+
+def tools(c):
+    out = []
+    dirs = paths(c.get("desktop", "tools", fallback="~/.local/bin"))
+    for d in dirs:
+        for f in sorted(glob.glob(os.path.join(d, "*"))):
+            if not os.access(f, os.X_OK) or os.path.isdir(f):
+                continue
+            desc = ""
+            try:
+                with open(f, "rb") as fb:
+                    head = fb.read(2048)
+                if head.startswith(b"\x7fELF") or b"\0" in head:
+                    out.append(f"- `{short(f)}`: (binary)")
+                    continue
+                if True:
+                    for line in head.decode("utf-8", "ignore").splitlines()[:12]:
+                        s = line.strip()
+                        if s.startswith("#!") or not s:
+                            continue
+                        if s.startswith(("#", '"""', "//")):
+                            desc = s.lstrip('#"/ ').strip()
+                            if desc:
+                                break
+                        else:
+                            break
+            except (OSError, UnicodeDecodeError):
+                pass
+            out.append(f"- `{short(f)}`: {desc[:110]}")
+    return "\n".join(out), len(out)
+
+
+def packages():
+    explicit = sh("pacman -Qeq").split()
+    foreign = set(sh("pacman -Qmq").split())
+    return (f"{len(explicit)} explicitly installed ({len(foreign)} from the AUR).\n\n" +
+            " ".join(f"{p}{'*' if p in foreign else ''}" for p in explicit) + "\n\n`*` = AUR"), len(explicit)
+
+
+def services():
+    failed_sys = [l.split()[0] for l in sh("systemctl --failed --no-legend --plain").splitlines() if l.strip()]
+    failed_usr = [l.split()[0] for l in sh("systemctl --user --failed --no-legend --plain").splitlines() if l.strip()]
+    usr = [l.split()[0] for l in sh("systemctl --user list-unit-files --state=enabled --no-legend").splitlines() if l.strip()]
+    sysd = [l.split()[0] for l in sh("systemctl list-unit-files --state=enabled --no-legend").splitlines() if l.strip()]
+    timers = [l.split()[-2] for l in sh("systemctl list-timers --all --no-legend").splitlines() if l.strip()]
+    md = (f"Failed: {', '.join(failed_sys + failed_usr) or 'none'}\n\n"
+          f"User units enabled: {', '.join(usr)}\n\nSystem units enabled: {', '.join(sysd)}\n\n"
+          f"Timers: {', '.join(timers)}")
+    return md, [f"failed unit {u}" for u in failed_sys] + [f"failed user unit {u}" for u in failed_usr]
+
+
+def recent(rows):
+    cutoff = time.time() - 7 * 86400
+    out = []
+    for ts, p, b, ch, ah, subj, md in rows:
+        if ts < cutoff:
+            continue
+        r = os.path.expanduser(p.replace("~", HOME, 1)) if p.startswith("~") else p
+        log = sh(["git", "-C", r, "log", f"--since={int(cutoff)}", "--format=%cd %s", "--date=format:%a %H:%M"])
+        n = len(log.splitlines())
+        out.append(f"### `{p}` ({n} commits)\n" + "\n".join(f"- {l[:110]}" for l in log.splitlines()[:8]))
+    return "\n\n".join(out) or "No commits in the last 7 days."
+
+
+def sessions():
+    claude = shutil.which("claude") or os.path.join(HOME, ".local/bin/claude")
+    try:
+        j = json.loads(sh([claude, "agents", "--json"], timeout=15) or "[]")
+    except ValueError:
+        j = []
+    out = ["| Name | Kind | State | Folder |", "|---|---|---|---|"]
+    for s in j:
+        out.append(f"| {s.get('name', '')} | {s.get('kind', '')} | {s.get('state') or s.get('status') or ''} | "
+                   f"`{short(s.get('cwd', ''))}` |")
+    return "\n".join(out), len(j)
+
+
+def threads():
+    out = []
+    for f in sorted(glob.glob(os.path.join(THREADS, "*.md"))):
+        fm = frontmatter(f)
+        out.append((fm.get("status", "?"), fm.get("name", os.path.basename(f)[:-3]), fm.get("model", ""),
+                    short(fm.get("folder", "")), fm.get("updated", "")))
+    return out
+
+
+def homelab(c):
+    note = os.path.expanduser(c.get("homelab", "note", fallback=""))
+    if not note or not os.path.exists(note):
+        return ""
+    text = open(note, encoding="utf-8", errors="ignore").read(6000)
+    m = re.search(r"Last verified[^\n]*", text)
+    return (m.group(0).replace("**", "")[:220] if m else "") + f" (details: `{short(note)}`)"
+
+
+# ---------------------------------------------------------------- build
+
+def write(name, body):
+    with open(os.path.join(OUT, name + ".md"), "w", encoding="utf-8") as f:
+        f.write(f"<!-- atlas {name}, generated {datetime.now():%Y-%m-%d %H:%M} -->\n{body}\n")
+
+
+def refresh():
+    os.makedirs(OUT, exist_ok=True)
+    c = conf()
+    attention, stale, facts = [], [], {}
+
+    def run(name, fn, *a):
+        try:
+            return fn(*a)
+        except Exception as e:  # one broken collector must not break the map
+            stale.append(f"{name} ({type(e).__name__})")
+            return None
+
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=8)
+    fut = {n: pool.submit(run, n, f, *a) for n, f, a in (
+        ("machine", machine, ()), ("repos", repos, (c,)), ("deadlines", deadlines, (c,)),
+        ("keybinds", keybinds, (c,)), ("tools", tools, (c,)), ("packages", packages, ()),
+        ("services", services, ()), ("sessions", sessions, ()), ("threads", threads, ()),
+        ("homelab", homelab, (c,)))}
+    got = {n: f.result() for n, f in fut.items()}
+    m = got["machine"]
+    if m:
+        facts["machine"] = m[0]
+        attention += m[1]
+    r = got["repos"]
+    rows = []
+    if r:
+        write("repos", r[0])
+        rows = r[1]
+        facts["repos"] = len(rows)
+        attention += r[2][:8] + ([f"... and {len(r[2]) - 8} more repos with changes"] if len(r[2]) > 8 else [])
+    d = got["deadlines"]
+    if d:
+        write("deadlines", d[0])
+        attention += [f"deadline {x}" for x in d[1]]
+        facts["undated"] = d[2]
+    k = got["keybinds"]
+    if k:
+        write("keybinds", k[0])
+        facts["keybinds"] = k[1]
+    t = got["tools"]
+    if t:
+        write("tools", t[0])
+        facts["tools"] = t[1]
+    p = got["packages"]
+    if p:
+        write("packages", p[0])
+        facts["packages"] = p[1]
+    s = got["services"]
+    if s:
+        write("services", s[0])
+        attention += s[1]
+    if rows:
+        rc = run("recent", recent, rows)
+        if rc:
+            write("recent", rc)
+    se = got["sessions"]
+    if se:
+        write("sessions", se[0])
+        facts["sessions"] = se[1]
+    th = got["threads"] or []
+    hl = got["homelab"] or ""
+
+    lines = [f"# Atlas of {socket.gethostname()}", f"Generated {datetime.now():%a %Y-%m-%d %H:%M} by `atlas refresh` "
+             f"(code, no AI). Details: `atlas <topic>` with topics {', '.join(TOPICS)}.", ""]
+    if stale:
+        lines += [f"**Stale:** {', '.join(stale)} (collector failed; older detail files kept).", ""]
+    lines += ["## Machine", facts.get("machine", "?"), ""]
+    lines += ["## Needs attention"] + ([f"- {a}" for a in attention] or ["- nothing"]) + [""]
+    lines += ["## Threads"]
+    if th:
+        lines += [f"- **{n}** ({st}, {mo}) in `{fo}`" + (f", updated {u}" if u else "") for st, n, mo, fo, u in th]
+    else:
+        lines += ["- none yet (`thread list`)"]
+    lines += [""]
+    if c.has_section("areas"):
+        lines += ["## Areas (each has its own rules; read its CLAUDE.md before working there)"]
+        for name, val in c.items("areas"):
+            path, _, desc = val.partition("|")
+            p = os.path.expanduser(path.strip())
+            md = " (CLAUDE.md)" if os.path.exists(os.path.join(p, "CLAUDE.md")) else ""
+            lines.append(f"- **{name}** `{short(p)}`{md}: {desc.strip()}")
+        lines += [""]
+    if hl:
+        lines += ["## Homelab", hl, ""]
+    lines += ["## Counts",
+              f"{facts.get('repos', '?')} repos (`atlas repos`), {facts.get('packages', '?')} explicit packages, "
+              f"{facts.get('keybinds', '?')} keybinds, {facts.get('tools', '?')} own commands (`atlas tools`), "
+              f"{facts.get('sessions', '?')} Claude sessions open (`atlas sessions`), "
+              f"{facts.get('undated', '?')} school tasks without a date (`atlas deadlines`)."]
+    write("index", "\n".join(lines))
+
+
+def main():
+    a = sys.argv[1:] or ["index"]
+    if a[0] in ("-h", "--help", "help"):
+        print(__doc__)
+    elif a[0] == "refresh":
+        t = time.time()
+        refresh()
+        print(f"atlas refreshed in {time.time() - t:.1f} s: {short(OUT)}")
+    elif a[0] == "topics":
+        print(" ".join(TOPICS))
+    else:
+        f = os.path.join(OUT, a[0] + ".md")
+        if not os.path.exists(os.path.join(OUT, "index.md")):
+            refresh()
+        if not os.path.exists(f):
+            sys.exit(f"No topic '{a[0]}'. Topics: {' '.join(TOPICS)}")
+        sys.stdout.write(open(f, encoding="utf-8").read())
+
+
+if __name__ == "__main__":
+    main()
