@@ -29,6 +29,7 @@ LINKS=(
   ".local/bin/away|bin"
   ".local/bin/theme|bin"
   ".local/bin/neko|bin"
+  ".local/bin/claude-usage|bin"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"

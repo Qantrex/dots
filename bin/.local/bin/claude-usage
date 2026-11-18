@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Claude Code usage from the local transcripts, priced at API rates as a stand-in for plan usage.
+
+  claude-usage [report] [--days N]     cost per day, model, project and session (default 7 days)
+  claude-usage calibrate               what 1 % of the 5-hour and weekly limit is worth, from the
+                                       status line's history (~/.local/state/agentic/usage.log)
+  claude-usage estimate --agents N [--model opus|sonnet|haiku|fable]
+                                       what a fan-out of N agents costs, from past agents' average
+  claude-usage session <id-prefix>     cost of one session (with its agents)
+
+Plan limits are not published in tokens. API prices are only a proxy; `calibrate` checks how
+well it fits. Usage outside these transcripts (another machine, a headless agent) is not seen.
+"""
+import argparse
+import glob
+import json
+import os
+import statistics
+import sys
+import time
+from collections import defaultdict
+from datetime import datetime
+
+# $ per million tokens: input, output, cache read, cache write 5 min, cache write 1 h
+PRICES = {
+    "fable": (8.0, 40.0, 0.20, 10.0, 16.0),
+    "opus": (4.0, 20.0, 0.20, 5.0, 8.0),
+    "sonnet": (2.0, 10.0, 0.10, 2.5, 4.0),
+    "haiku": (0.10, 0.50, 0.01, 0.125, 0.20),
+}
+FALLBACK_PER_PERCENT = 13.0   # $ per 1 % of the weekly limit, measured 2026-11-18
+PROJECTS = os.path.expanduser("~/.claude/projects")
+LOG = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "agentic", "usage.log")
+
+
+def family(model):
+    for k in PRICES:
+        if k in (model or ""):
+            return k
+    return None
+
+
+def price(fam, inp, out, read, w5, w1):
+    p = PRICES[fam]
+    return (inp * p[0] + out * p[1] + read * p[2] + w5 * p[3] + w1 * p[4]) / 1e6
+
+
+def load(since):
+    """One row per API request since `since`: (time, family, dollars, project, session, agent file or '')."""
+    rows, seen = [], set()
+    for f in glob.glob(os.path.join(PROJECTS, "**", "*.jsonl"), recursive=True):
+        try:
+            if os.path.getmtime(f) < since:
+                continue
+            fh = open(f, encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        rel = os.path.relpath(f, PROJECTS).split(os.sep)
+        project = rel[0]
+        agent = f if "subagents" in rel else ""
+        session = rel[1][:8] if len(rel) > 2 else os.path.basename(f)[:8]
+        with fh:
+            for line in fh:
+                if '"usage"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("type") != "assistant":
+                    continue
+                m = e.get("message") or {}
+                key = (m.get("id"), e.get("requestId"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    t = datetime.fromisoformat(e["timestamp"].replace("Z", "+00:00")).timestamp()
+                except (KeyError, ValueError):
+                    continue
+                if t < since:
+                    continue
+                u = m.get("usage") or {}
+                fam = family(m.get("model"))
+                if fam:
+                    cc = u.get("cache_creation") or {}
+                    w1 = cc.get("ephemeral_1h_input_tokens") or 0
+                    w5 = cc.get("ephemeral_5m_input_tokens") or (0 if cc else u.get("cache_creation_input_tokens") or 0)
+                    d = price(fam, u.get("input_tokens") or 0, u.get("output_tokens") or 0,
+                              u.get("cache_read_input_tokens") or 0, w5, w1)
+                    rows.append((t, fam, d, project, session, agent))
+                # The advisor runs as a separate model inside the same request.
+                for it in u.get("iterations") or []:
+                    if it.get("type") == "advisor_message" and family(it.get("model")):
+                        fa = family(it.get("model"))
+                        d = price(fa, it.get("input_tokens") or 0, it.get("output_tokens") or 0,
+                                  it.get("cache_read_input_tokens") or 0, it.get("cache_creation_input_tokens") or 0, 0)
+                        rows.append((t, fa + " (advisor)", d, project, session, agent))
+    return rows
+
+
+def per_percent():
+    """$ per 1 % of the weekly limit, from calibrate, else the fallback."""
+    cal = calibrate_values()
+    return cal.get("week", FALLBACK_PER_PERCENT)
+
+
+def read_log():
+    out = []
+    try:
+        for line in open(LOG):
+            p = line.split()
+            if len(p) == 5:
+                out.append(tuple(float(x) if x else 0 for x in p))
+    except OSError:
+        pass
+    return out
+
+
+def calibrate_values(verbose=False):
+    log = read_log()
+    if len(log) < 2:
+        return {}
+    rows = load(log[0][0] - 1)
+    result = {}
+    for name, ip, ia in (("5h", 1, 2), ("week", 3, 4)):
+        ratios = []
+        # Pairs of readings in the same window (same reset time) where the percentage went up.
+        for a, b in zip(log, log[1:]):
+            if a[ia] != b[ia] or b[ip] <= a[ip]:
+                continue
+            dollars = sum(r[2] for r in rows if a[0] <= r[0] < b[0])
+            if dollars > 0:
+                ratios.append(dollars / (b[ip] - a[ip]))
+        if ratios:
+            result[name] = statistics.median(ratios)
+            if verbose:
+                print(f"{name:5} 1 % ≈ ${result[name]:.2f}  (median of {len(ratios)} steps, "
+                      f"range ${min(ratios):.2f}-${max(ratios):.2f}; whole-percent steps, so single steps are rough)")
+    return result
+
+
+def cmd_report(days):
+    since = time.time() - days * 86400
+    rows = load(since)
+    if not rows:
+        print("No usage in that period.")
+        return
+    ppp = per_percent()
+    total = sum(r[2] for r in rows)
+    print(f"Last {days} days: ${total:.2f} API-equivalent ≈ {total / ppp:.1f} % of a week "
+          f"(1 % ≈ ${ppp:.2f}{'' if os.path.exists(LOG) and len(read_log()) > 5 else ', not calibrated yet'})")
+    day, model, proj, sess = defaultdict(float), defaultdict(float), defaultdict(float), defaultdict(float)
+    agents = 0.0
+    for t, fam, d, project, session, agent in rows:
+        day[datetime.fromtimestamp(t).strftime("%a %m-%d")] += d
+        model[fam] += d
+        proj[project.replace("-home-" + os.environ.get("USER", ""), "~")] += d
+        sess[session] += d
+        if agent:
+            agents += d
+    print("\nPer day:  " + "  ".join(f"{k} {v / ppp:.1f}%" for k, v in sorted(day.items(), key=lambda x: x[0][4:])))
+    print("Models:   " + "  ".join(f"{k} {100 * v / total:.0f}%" for k, v in sorted(model.items(), key=lambda x: -x[1])))
+    print(f"Agents:   {100 * agents / total:.0f}% of the total")
+    print("\nFolders:")
+    for k, v in sorted(proj.items(), key=lambda x: -x[1])[:8]:
+        print(f"  {v / ppp:5.1f} %  {k}")
+    print("\nSessions:")
+    titles = session_titles()
+    for k, v in sorted(sess.items(), key=lambda x: -x[1])[:8]:
+        print(f"  {v / ppp:5.1f} %  {k}  {titles.get(k, '')[:60]}")
+
+
+def session_titles():
+    out = {}
+    for f in glob.glob(os.path.join(PROJECTS, "*", "*.jsonl")):
+        if os.path.getmtime(f) < time.time() - 30 * 86400:
+            continue
+        title = ""
+        with open(f, encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                if '"custom-title"' in line or '"ai-title"' in line:
+                    try:
+                        e = json.loads(line)
+                        title = e.get("customTitle") or e.get("aiTitle") or title
+                    except ValueError:
+                        pass
+        out[os.path.basename(f)[:8]] = title
+    return out
+
+
+def cmd_estimate(n, model):
+    rows = load(time.time() - 30 * 86400)
+    per_agent = defaultdict(float)
+    fam_of = {}
+    for t, fam, d, project, session, agent in rows:
+        if agent:
+            per_agent[agent] += d
+            fam_of[agent] = fam
+    costs = [v for k, v in per_agent.items() if fam_of[k] == model]
+    ppp = per_percent()
+    if len(costs) >= 3:
+        med, q = statistics.median(costs), statistics.quantiles(costs, n=10)
+        lo, hi = q[0], q[8]
+        src = f"from {len(costs)} past {model} agents (last 30 days)"
+    else:
+        # Too few own runs: scale the Opus figures by price.
+        base = [v for k, v in per_agent.items() if fam_of[k] == "opus"] or [0.6]
+        f = PRICES[model][1] / PRICES["opus"][1]
+        med = statistics.median(base) * f
+        lo, hi = med * 0.3, med * 3
+        src = f"scaled from Opus agents (too few {model} runs of my own)"
+    print(f"{n} {model} agents: about {n * med / ppp:.1f} % of a week "
+          f"(range {n * lo / ppp:.1f}-{n * hi / ppp:.1f} %), ${n * med:.0f} API-equivalent; {src}")
+
+
+def cmd_session(prefix):
+    rows = [r for r in load(time.time() - 90 * 86400) if r[4].startswith(prefix)]
+    if not rows:
+        print("No such session in the last 90 days.")
+        return
+    total = sum(r[2] for r in rows)
+    print(f"{prefix}: ${total:.2f} ≈ {total / per_percent():.1f} % of a week, {len(rows)} requests, "
+          f"agents {100 * sum(r[2] for r in rows if r[5]) / total:.0f}%")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("cmd", nargs="?", default="report", choices=["report", "calibrate", "estimate", "session"])
+    ap.add_argument("arg", nargs="?")
+    ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--agents", type=int, default=10)
+    ap.add_argument("--model", default="opus", choices=list(PRICES))
+    a = ap.parse_args()
+    if a.cmd == "report":
+        cmd_report(a.days)
+    elif a.cmd == "calibrate":
+        if not calibrate_values(verbose=True):
+            print(f"Not enough history in {LOG} yet; it grows while Claude sessions run.")
+    elif a.cmd == "estimate":
+        cmd_estimate(a.agents, a.model)
+    elif a.cmd == "session":
+        if not a.arg:
+            sys.exit("claude-usage session <id-prefix>")
+        cmd_session(a.arg)
+
+
+if __name__ == "__main__":
+    main()
