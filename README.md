@@ -466,6 +466,12 @@ There are two themes:
     command) and tmux, and the catgirl in the greeting (sixel, also through tmux).
   - **Lock screen.** The last safe catgirl as a framed portrait with her artist,
     next to the stone's eye.
+  - **Apps.** Discord: pink brand colour, a gradient window frame, cat ears on
+    avatars. Spotify: gradient progress bars, a glowing cover with cat ears, pink
+    rows. Firefox: the selected tab in pink with cat ears, a gradient line under the
+    toolbar. aerc: a pink, lavender and mint styleset. GTK selections and suggested
+    buttons in pink (`gtk_accent`), Qt highlights in pink. Discord picks it up on
+    Ctrl+R, Spotify and Firefox on their next start.
   - **Sounds.** Three sets, `chirp`, `robo` and `blip` (`sounds/make.sh` builds
     them): on notifications, on unlock and when the daemon starts.
 
@@ -516,7 +522,7 @@ assumes anyway). The installer renders the theme before it links anything.
 After a switch, Hyprland, the shell, GTK (gsettings), the cursor, tmux and the
 wallpaper change at once. Spotify (spicetify is refreshed), Discord, open
 terminals, btop, yazi, nvim and zathura show the new theme the next time they
-start. Firefox keeps its own theme (`assets.firefox` names the right one).
+start. Firefox keeps its own theme (`assets.firefox` names the right one); a theme can add to its chrome through `firefox-userChrome.css`, linked by the installer (`setup_firefox_chrome`), which Firefox reads at its next start.
 
 ### Templates
 
@@ -541,7 +547,9 @@ active tab or tile, today in the calendar, slider levels) use `accent` and
    change the palette, fonts, look and assets.
 2. `theme render <name> /tmp/x` and look through the files, then `theme set <name>`.
 3. Where the tone steps don't suit the new palette, copy that template to
-   `theme/themes/<name>/templates/` and change it there. The lock screen's layout
+   `theme/themes/<name>/templates/` and change it there. To only add to a long
+   template (Discord's or Spotify's CSS), put the addition in
+   `theme/themes/<name>/append/<template>`: it is rendered and added to the end. The lock screen's layout
    belongs to root's wallpaper (the password sits between the fingers), so a theme
    with another wallpaper wants its own `hyprlock.conf`.
 4. A theme may bring hooks: `theme/themes/<name>/hooks/enter` and `leave`, run by
