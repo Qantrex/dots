@@ -1,0 +1,66 @@
+
+/* ---- nekosec (theme/themes/nekosec/append/vesktop.theme.css) ----------------
+   Discord's brand colour turns hot pink (buttons, switches, unread pills), the
+   window gets a pink -> lavender -> mint frame, mentions glow pink, and the avatars
+   in the user panel and the member list wear cat ears. */
+:root, .theme-dark, .theme-darker, .theme-midnight, .visual-refresh {
+    --brand-360: {{ mix(accent, fg, 0.45) }} !important;
+    --brand-400: {{ mix(accent, fg, 0.3) }} !important;
+    --brand-430: {{ mix(accent, fg, 0.15) }} !important;
+    --brand-460: {{ accent }} !important;
+    --brand-500: {{ accent }} !important;
+    --brand-530: {{ mix(accent, bg, 0.15) }} !important;
+    --brand-560: {{ mix(accent, bg, 0.3) }} !important;
+    --brand-600: {{ mix(accent, bg, 0.45) }} !important;
+    --brand-experiment: {{ accent }} !important;
+    --brand-experiment-500: {{ accent }} !important;
+    --brand-experiment-560: {{ mix(accent, bg, 0.3) }} !important;
+    --button-filled-brand-background: {{ accent }} !important;
+    --button-filled-brand-background-hover: {{ mix(accent, fg, 0.2) }} !important;
+    --button-filled-brand-background-active: {{ mix(accent, bg, 0.25) }} !important;
+    --button-filled-brand-text: {{ on_accent }} !important;
+    --control-brand-foreground: {{ accent }} !important;
+    --control-brand-foreground-new: {{ accent }} !important;
+    --background-mentioned: {{ accent.alpha(0.10) }} !important;
+    --background-mentioned-hover: {{ accent.alpha(0.16) }} !important;
+    --info-warning-foreground: {{ gold }} !important;
+    --text-link: {{ lilac }} !important;
+    --rose: {{ accent }};
+    --pine: {{ lilac.mix(bg, 0.6) }};
+    --iris: {{ lilac.mix(bg, 0.5) }};
+}
+
+/* the whole window: a thin gradient frame and faint scanlines */
+#app-mount::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+    border: 2px solid transparent; border-radius: {{ look.radius }}px;
+    background: linear-gradient(135deg, {{ accent }}, {{ lilac }}, {{ mint }}) border-box;
+    -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+}
+[class*="chatContent"] {
+    background-image: repeating-linear-gradient(0deg, {{ bg.alpha(0) }} 0 3px, {{ accent.alpha(0.025) }} 3px 4px) !important;
+}
+
+/* messages that mention you */
+[class*="mentioned"] { box-shadow: inset 3px 0 0 {{ accent }} !important; }
+
+/* cat ears on avatars (user panel bottom left, member list, voice) */
+[class*="avatarWrapper"], [class*="panels"] [class*="avatar"], [class*="member"] [class*="avatar"] { position: relative; overflow: visible !important; }
+[class*="panels"] [class*="avatarWrapper"]::before, [class*="panels"] [class*="avatarWrapper"]::after,
+[class*="member"] [class*="avatar"]::before, [class*="member"] [class*="avatar"]::after {
+    content: ""; position: absolute; top: -5px; width: 0; height: 0; z-index: 3; pointer-events: none;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-bottom: 8px solid {{ accent }};
+}
+[class*="panels"] [class*="avatarWrapper"]::before, [class*="member"] [class*="avatar"]::before { left: 1px; transform: rotate(-14deg); }
+[class*="panels"] [class*="avatarWrapper"]::after, [class*="member"] [class*="avatar"]::after { right: 1px; transform: rotate(14deg); border-bottom-color: {{ lilac }}; }
+
+/* the selected channel and server */
+[class*="modeSelected"] [class*="link"], [class*="selected"][class*="containerDefault"] [class*="link"] {
+    background: linear-gradient(90deg, {{ accent.alpha(0.28) }}, {{ lilac.alpha(0.12) }}) !important;
+}
+[class*="pill"] [class*="item"] { background-color: {{ accent }} !important; }
+
+/* the message box says nya */
+[class*="slateTextArea"] [class*="placeholder"]::after { content: "  (=^･ω･^=)"; color: {{ accent }}; }

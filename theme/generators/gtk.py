@@ -88,12 +88,22 @@ def luma(r, g, b):
 
 def build(ctx, out):
     tone = ctx["tone"]
+    # [look] gtk_accent = true: Adwaita's blue (selection, focus, suggested buttons)
+    # becomes the theme's accent at the same weight instead of a grey (nekosec: pink).
+    accent = ctx["accent"] if getattr(ctx["look"], "gtk_accent", False) else None
+    made = set()   # the accent shades handed out, to put on_accent text on them
 
     def remap(r, g, b):
         if (r, g, b) == ERROR:
             return ctx["love"]
         if (r, g, b) == WARNING:
             return ctx["gold"]
+        if accent is not None and b > r + 40 and b > g + 20:  # a blue: the accent, as light or dark
+            v = luma(r, g, b) / 0x4b
+            c = accent.mix(ctx["bg"], min(0.8, max(0, 1 - v))) if v < 1 else accent.mix(ctx["fg"], min(0.7, v - 1))
+            if c.luma > 110:   # light enough to carry text
+                made.add(c.hex)
+            return c
         if max(r, g, b) - min(r, g, b) <= 3:  # already grey
             v = GREYS.get(luma(r, g, b), luma(r, g, b))
         else:  # coloured; blues sit around luma 0x4b, i.e. selection
@@ -126,6 +136,18 @@ def build(ctx, out):
         # they only match root; on a light theme the text would vanish on the background.
         css = re.sub(r"(?<=[\s:(,])(white|black)(?=[\s;,)])",
                      lambda m: str(remap(*((255,) * 3 if m.group(1) == "white" else (0,) * 3))), css)
+        if accent is not None and made:
+            # Light text on a light accent fill is unreadable: on_accent instead.
+            shades = "|".join(made)
+            on = "#" + ctx["on_accent"].hex
+
+            def fix(m):
+                body = m.group(2)
+                if re.search(rf"background(-color)?:[^;]*#({shades})\b", body):
+                    body = re.sub(r"(?<![-\w])color: #[0-9a-f]{6};",
+                                  lambda c: f"color: {on};" if int(c.group(0)[8:10], 16) > 0xa0 else c.group(0), body)
+                return m.group(1) + body + "}"
+            css = re.sub(r"([^{}]*\{)([^{}]*)\}", fix, css)
         # Adwaita's embossed text shadows look muddy on a flat background.
         css = re.sub(r"text-shadow: 0 -1px rgba\(0, 0, 0, [0-9.]+\);", "text-shadow: none;", css)
         css = re.sub(r"-gtk-icon-shadow: 0 -1px rgba\(0, 0, 0, [0-9.]+\);", "-gtk-icon-shadow: none;", css)
@@ -135,7 +157,7 @@ def build(ctx, out):
 
         header = (f"/* The {ctx['theme']} theme: generated from Adwaita-dark by "
                   "~/dotfiles/theme/generators/gtk.py -- do not edit. */\n")
-        extra = EXTRA.format(name=ctx["theme"], focus=tone(0x8A), fg=ctx["fg"],
+        extra = EXTRA.format(name=ctx["theme"], focus=tone(0x8A), fg="currentColor" if accent is not None else ctx["fg"],
                              tooltip=tone(0x0A), border=tone(0x33))
         (out / subdir).mkdir(parents=True, exist_ok=True)
         (out / subdir / "gtk.css").write_text(header + css + extra)

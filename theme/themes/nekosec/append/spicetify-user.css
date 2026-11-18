@@ -1,0 +1,34 @@
+
+/* ---- nekosec (theme/themes/nekosec/append/spicetify-user.css) ---------------
+   Pink -> lavender -> mint where Spotify shows progress, cat ears on the cover of
+   what is playing, a kaomoji after its title, and pink rows under the pointer. */
+.x-progressBar-fillColor,
+.playback-bar .x-progressBar-fillColor,
+.volume-bar .x-progressBar-fillColor {
+  background: linear-gradient(90deg, {{ accent }}, {{ lilac }}, {{ mint }}) !important;
+}
+.progress-bar__slider, .x-progressBar-sliderHandle { background-color: {{ fg }} !important; box-shadow: 0 0 8px {{ accent }} !important; }
+
+.main-nowPlayingWidget-coverArt, .main-coverSlotCollapsed-container { position: relative; overflow: visible !important; }
+.main-nowPlayingWidget-coverArt::before, .main-nowPlayingWidget-coverArt::after,
+.main-coverSlotCollapsed-container::before, .main-coverSlotCollapsed-container::after {
+  content: ""; position: absolute; top: -9px; width: 0; height: 0; z-index: 2;
+  border-left: 8px solid transparent; border-right: 8px solid transparent;
+  border-bottom: 11px solid {{ accent }};
+}
+.main-nowPlayingWidget-coverArt::before, .main-coverSlotCollapsed-container::before { left: 6px; transform: rotate(-12deg); }
+.main-nowPlayingWidget-coverArt::after, .main-coverSlotCollapsed-container::after { right: 6px; transform: rotate(12deg); border-bottom-color: {{ lilac }}; }
+.main-nowPlayingWidget-coverArt img, .main-coverSlotCollapsed-container img { box-shadow: 0 0 0 2px {{ accent }}, 0 0 14px {{ accent.alpha(0.45) }}; border-radius: {{ look.radius_small }}px; }
+
+.main-trackInfo-name::after { content: "  (=^･ω･^=)"; color: {{ accent }}; font-size: 0.85em; }
+
+.main-trackList-trackListRow:hover, .main-trackList-trackListRow:focus-within {
+  background-color: {{ accent.alpha(0.12) }} !important;
+}
+.main-trackList-trackListRow[aria-selected="true"], .main-trackList-selected {
+  background-color: {{ accent.alpha(0.22) }} !important;
+}
+.Root__main-view { box-shadow: inset 0 0 0 1px {{ accent.alpha(0.35) }}; }
+.main-playButton-PlayButton, .main-playButton-button, button[data-testid="play-button"] > span {
+  background: linear-gradient(135deg, {{ accent }}, {{ lilac }}) !important; color: {{ bg }} !important;
+}

@@ -16,6 +16,7 @@ How it fits together (details in the README, "Themes"):
   theme/themes/<name>/theme.toml   one palette, fonts, shape and assets per theme
   theme/templates/                 one file per app, with {{ ... }} where colours go
   theme/themes/<name>/templates/   optional: a theme's own version of a template
+  theme/themes/<name>/append/      optional: added to the end of a shared template
   theme/themes/<name>/hooks/       optional: `enter` and `leave`, run on a real switch
                                    (never on apply or render) and `enter` at login
   theme/generators/                files built in code (the GTK theme from Adwaita)
@@ -221,10 +222,17 @@ def generator(stem):
 def render(name, out):
     ctx = load(name)
     out = Path(out)
+    appends = THEMES / name / "append"
     for rel, src in templates(name).items():
         dest = out / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(render_text(src.read_text(), ctx, src.relative_to(REPO)))
+        text = render_text(src.read_text(), ctx, src.relative_to(REPO))
+        # themes/<name>/append/<rel>: added to the end of the shared template's output,
+        # for a theme that only adds to a long file (CSS) instead of copying it.
+        extra = appends / rel
+        if extra.is_file():
+            text += render_text(extra.read_text(), ctx, extra.relative_to(REPO))
+        dest.write_text(text)
         shutil.copymode(src, dest)
     # The GTK theme is built from the installed GTK's own Adwaita, unless the theme
     # names an installed GTK theme instead.

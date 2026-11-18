@@ -66,6 +66,7 @@ terminal_alpha   = 0.82
 bar_height       = 34
 bar_gap          = 8
 pad              = 12
+gtk_accent       = true    # GTK selections and suggested buttons in pink, not grey
 
 [assets]
 wallpaper    = "~/Pictures/Wallpapers/nekosec-seeing-stone.png"  # rendered from wallpaper.svg here
