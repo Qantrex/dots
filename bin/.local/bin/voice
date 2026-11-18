@@ -19,15 +19,20 @@ WHISPER_MODEL="$HOME/.local/share/whisper/ggml-base.bin"; TTS_URL=""; TTS_TOKEN_
 [[ -f $conf ]] && source "$conf"
 WHISPER_MODEL=${WHISPER_MODEL/#\~/$HOME}; PIPER_MODEL=${PIPER_MODEL/#\~/$HOME}
 say_note() { notify-send -a Claude -t 2500 "Voice" "$1"; }
+# The piper speech tool (AUR piper-tts); a plain `piper` may be the mouse configuration tool, so check it.
+piper_bin() {
+    command -v piper-tts && return
+    command -v piper >/dev/null && piper --help 2>&1 | grep -q -- '--model' && command -v piper
+}
 
 missing() {
     local m=()
-    command -v whisper-cli >/dev/null || m+=("whisper-cli: yay -S whisper.cpp")
+    command -v whisper-cli >/dev/null || m+=("whisper-cli: sudo pacman -S whisper-cpp")
     [[ -f $WHISPER_MODEL ]] || m+=("a whisper model at $WHISPER_MODEL (voice setup prints the download)")
     local tts=0
     [[ -n $TTS_URL && -n $TTS_TOKEN_CMD ]] && [[ -n $(eval "$TTS_TOKEN_CMD" 2>/dev/null) ]] && tts=1
-    command -v piper-tts >/dev/null && [[ -f $PIPER_MODEL ]] && tts=1
-    ((tts)) || m+=("reading answers out: the homelab token ($TTS_TOKEN_CMD) or piper-tts + $PIPER_MODEL")
+    [[ -n $(piper_bin) && -f $PIPER_MODEL ]] && tts=1
+    ((tts)) || m+=("reading answers out: the homelab token ($TTS_TOKEN_CMD) or piper (yay -S piper-tts) + $PIPER_MODEL")
     printf '%s\n' "${m[@]}"
 }
 
@@ -42,8 +47,9 @@ speak() {
             -d "$(jq -n --arg t "${text:0:600}" '{text: $t, pacing: "live"}')" "$TTS_URL" -o "$wav" && ok=1
     fi
     # The homelab can't be reached (or has no token here): the local voice.
-    if ((!ok)) && command -v piper-tts >/dev/null && [[ -f $PIPER_MODEL ]]; then
-        piper-tts -m "$PIPER_MODEL" -f "$wav" <<<"$text" >/dev/null 2>&1 && ok=1
+    local p; p=$(piper_bin)
+    if ((!ok)) && [[ -n $p && -f $PIPER_MODEL ]]; then
+        "$p" -m "$PIPER_MODEL" -f "$wav" <<<"$text" >/dev/null 2>&1 && ok=1
     fi
     ((ok)) || { say_note "${text:0:200}"; return 1; }
     pw-play "$wav" 2>/dev/null || mpv --really-quiet "$wav"
