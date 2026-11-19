@@ -33,35 +33,6 @@ ShellRoot {
     property var brief: []
     property bool done: false
 
-    // The keyboard after a suspend (2026-11-19): the lock's window has the keyboard, loses it as the suspend
-    // begins, and after resume typing works only after a click on the field. Not settled yet which side
-    // loses it (LockView logs both). Hyprland gives a lock surface the keyboard on pointer motion, so when
-    // no screen of the lock has had the keyboard for half a second, ask Hyprland for one: the cursor moved
-    // to where it already is (`hl.dsp.cursor.move` warps and simulates a movement). On the 23:23 lid close
-    // twelve of these changed nothing, so LockView also asks Qt to activate the window (focusTry). Every 2 s,
-    // at most 30 times per loss. The preview (tests) only logs, so a test never moves the desktop's focus.
-    property int keyboardViews: 0          // LockView windows that have the keyboard
-    property int focusTries: 0
-    signal focusTry(int n)
-    onKeyboardViewsChanged: if (keyboardViews > 0) focusTries = 0
-    Timer {
-        interval: root.focusTries === 0 ? 500 : 2000
-        repeat: true
-        running: (lock.secure || root.preview) && !root.done && root.keyboardViews <= 0 && root.focusTries < 30
-        onTriggered: {
-            root.focusTries += 1;
-            console.info("agentic-lock: no screen has the keyboard, asking Hyprland for it (" + root.focusTries + ")"
-                         + (root.preview ? " [preview: not sent]" : ""));
-            if (!root.preview) refocus.running = true;
-            root.focusTry(root.focusTries);
-        }
-    }
-    Process {
-        id: refocus
-        command: ["sh", "-c", 'p=$(hyprctl cursorpos) && hyprctl dispatch "hl.dsp.cursor.move({ x = ${p%%,*}, y = ${p##*, } })"']
-        stdout: StdioCollector { onStreamFinished: if (text.trim() !== "ok") console.warn("agentic-lock: hyprctl said: " + text.trim()) }
-    }
-
     function submit() {
         if (checking || done || buffer === "") return;
         checking = true;

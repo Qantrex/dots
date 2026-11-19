@@ -12,11 +12,12 @@ Item {
 
     property date now: new Date()
 
-    // The password field keeps the keyboard. Two things can go: the window's keyboard (Window.active, what the
-    // compositor gives) and the field's focus inside the window. On the lid close of 2026-11-19 23:23 the
-    // window went inactive as the suspend began and never became active again, yet a click on the field
-    // made typing work; so the field takes its focus back whatever the window says, and the log records
-    // both, every click and the first typing after a loss, to tell which of the two was missing.
+    // The password field keeps its focus, whatever the window says. After a suspend Qt reports the lock's
+    // window as inactive (Window.active false) and the field loses its focus with it, but the compositor
+    // still sends the keys: on the lid closes of 2026-11-19 a click on the field was all it took, and once the
+    // field took its focus back by itself, typing worked with the window still "inactive" (23:29). The old
+    // refocus only ran while the window was active, so never in that case. The log keeps the changes and the
+    // first typing after a loss.
     readonly property bool windowActive: Window.active
     readonly property bool fieldFocus: input.activeFocus
     readonly property string focusItem: Window.activeFocusItem ? String(Window.activeFocusItem).split("(")[0] : "none"
@@ -24,28 +25,14 @@ Item {
     function focusState() { return "window active: " + view.windowActive + ", field focus: " + view.fieldFocus; }
     onWindowActiveChanged: {
         console.info("agentic-lock: window " + (windowActive ? "has" : "lost") + " the keyboard (" + focusState() + ")");
-        view.shell.keyboardViews += windowActive ? 1 : -1;   // shell.qml asks Hyprland when no screen has it
         if (!windowActive) view.lostSince = true;
         if (input.enabled) input.forceActiveFocus();
     }
     onFieldFocusChanged: console.info("agentic-lock: field " + (fieldFocus ? "has" : "lost") + " its focus (" + focusState() + ")")
-    Component.onDestruction: if (windowActive) view.shell.keyboardViews -= 1
     Timer {
         interval: 1000; repeat: true
         running: !input.activeFocus && input.enabled
         onTriggered: { console.info("agentic-lock: field had no focus, taking it back (" + view.focusState() + ")"); input.forceActiveFocus(); }
-    }
-    // shell.qml's tries while no screen has the keyboard: log the state, and from the third try on also ask
-    // Qt to activate the window (the real lock only: in the preview it would take focus from the desktop).
-    Connections {
-        target: view.shell
-        function onFocusTry(n) {
-            console.info("agentic-lock: try " + n + " (" + view.focusState() + ")");
-            if (n >= 3 && !view.shell.preview && !view.windowActive && view.Window.window) view.Window.window.requestActivate();
-        }
-    }
-    PointHandler {
-        onActiveChanged: if (active) console.info("agentic-lock: pointer press (" + view.focusState() + ")")
     }
     Timer { interval: 1000; running: true; repeat: true; onTriggered: view.now = new Date() }
 
