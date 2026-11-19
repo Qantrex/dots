@@ -188,7 +188,7 @@ git show 8122bbf:hypr/.config/hypr/_backup-hyprlang-2026-09-23/hyprland.conf
 | `S` | Scratchpad |
 | `ALT+F` | Maximize |
 | `D` / `SHIFT+D` | Quick ask (Claude, Sonnet) / a fresh quick ask about the clipboard, text or image (`claude-ask.sh`) |
-| `SHIFT+A` | The main Claude chat as a side panel over the current workspace (`dock`); again to hide. The chat itself always runs in tmux window `main:1` (`agentic`) |
+| `SHIFT+A` | The main Claude chat as a side panel over the current workspace (`dock`); again to hide. In the `root-agentic` theme it opens the shell's own agent panel instead. The chat itself always runs in tmux window `main:1` (`agentic`) |
 | `CTRL+S` | Screenshot region → file + clipboard |
 | `SHIFT+F` | Screenshot region (flameshot) → Claude Code → answer as a faint bottom-right overlay (`~/.config/scripts/claude-screen/`) |
 | `F1` / `F2` / `F3` | Power profile: Quiet / Performance / Balanced |
@@ -253,10 +253,36 @@ dismissed. Do Not Disturb keeps critical ones only.
 
 **OSD:** volume (from anywhere), mic mute and brightness, bottom centre.
 
+**Agent panel** (theme `root-agentic` only, `agentic/`, `services/Agentic.qml`):
+the main Claude chat as part of the shell, on the right edge, about 40 % wide,
+over the windows and under the bar (`SUPER+SHIFT+A`, `dock`). Tabs across the
+top: `main`, one per thread (marked when it waits for you) and `home` with the
+login brief and the inbox (a badge counts what is new). A tab shows the
+conversation as text you can select, read from the transcript Claude Code
+writes (`agentic-shell feed`), and its input box sends with `thread send`:
+Enter sends, Shift+Enter is a new line. Esc hides the panel, Ctrl+Tab and
+Ctrl+Shift+Tab change the tab, and Ctrl+T (or the button on the top right)
+opens the real Claude Code terminal of that tab, the foot and tmux panel the
+other themes use. Questions Claude asks with its own dialog and permission
+prompts are still answered there. The sessions stay ordinary Claude Code in
+tmux, so the panel costs no usage of its own and nothing breaks without it.
+
+The panel exists only while the theme renders `agentic.json`; in every other
+theme `Agentic.enabled` is false and nothing of it is loaded. It is a layer
+surface (`qs-agentic`) only while it is open, and its feed process runs only
+then. `shell.qml` loads it with an inline `LazyLoader { active: Agentic.enabled;
+Panel {} }` on purpose: loaded by `source:`, Quickshell 0.3.2 crashed when the
+process ended within about two seconds of a config reload. To try a change
+without touching the desktop, run a second instance (`qs -p <copy>`) with
+`QS_AGENTIC_CONF=<an agentic.json>` and `QS_AGENTIC_NOFOCUS=1` (it then never
+takes the keyboard).
+
 **IPC** (`qs ipc show` lists all): the scripts call `qs ipc call bar refresh
 <vault|touchpad|powerprofile|ai>` after a change; keybinds use `launcher toggle
 <mode>`, `bar popout <name>`, `osd brightness`; also `notifs dnd`, `caffeine
-toggle`, `homelab refresh`.
+toggle`, `homelab refresh` and, in `root-agentic`, `agentic open
+<main|home|thread>`, `toggle`, `hide`, `refresh` and `status` (`off`, `hidden`
+or `shown <tab>`).
 
 Every bar icon has a tooltip (what it is, what the clicks do).
 
@@ -408,13 +434,23 @@ theme render NAME DIR # only render into DIR, change nothing (to diff or check a
 theme preview NAME OUT.png # draw a mock desktop of a theme into a PNG
 ```
 
-There are two themes:
+There are three themes:
 
 - **root**: true-black monochrome (`#000000`, white and greys) for the OLED
   panel. Selections, buttons and active states are greys or white. Rosé Pine Moon
   colour appears only where it helps reading: love / gold for errors and
   warnings, and rose / iris for Discord mentions and links and for syntax
   highlighting. It is never used as a full-app theme.
+- **root-agentic**: root with the agent as part of the desktop. It has no
+  palette of its own (`base = "root"`), so it looks exactly like root. It adds
+  one rendered file, `agentic.json`, which switches on the shell's agent panel
+  (see [Shell](#shell-quickshell)), and two hooks: `enter` hides the terminal
+  panel and tells the shell to look, `leave` closes the agent panel. It starts
+  no units and adds no keybinds. `theme set root` is the way back at any time,
+  and `agentic-shell leave-check` (run from root) switches there and back and
+  compares what is running before and after: units, layers, keybinds, windows
+  and the shell's processes. The tag `pre-agentic-os` marks the repo before any
+  of this.
 - **nekosec**: neon catgirl opsec. Purple-black (`#0b0710`), hot pink for
   everything that marks "this one", mint and lavender for the rest, and no blue
   (lavender takes the terminal's blue slot). Maple Mono NF in the terminals,
@@ -503,7 +539,7 @@ theme/
 `theme set` (`bin/.local/bin/theme`) renders every template into a fresh
 `build/` folder, then swaps the `current` link in one step, so apps never see a
 half-written theme. Tracked files never change when you switch, and nothing runs
-between switches. The configs in the repo reach `theme/current` in one of two
+between switches (except what a theme's own hooks start). The configs in the repo reach `theme/current` in one of two
 ways:
 
 - **An include line** where the app can include a file: foot, tmux, zathura,
@@ -557,6 +593,11 @@ active tab or tile, today in the calendar, slider levels) use `accent` and
    `theme set` on a real switch (never by `apply` or `render`), and `enter` again at
    login (`theme hook enter` in Hyprland's autostart). nekosec starts its picture
    daemon there.
+5. A theme can build on another one: `base = "<name>"` in its `theme.toml`. It
+   then gets the base's palette, templates and append files, and its own
+   `theme.toml`, `templates/` and `append/` win where both have something. Hooks
+   run for the whole chain, on enter the base first and on leave the base last.
+   root-agentic is the example: one line, one extra template and two hooks.
 
 A light theme (`mode = "light"`) works the same way: `tone()` runs from the light
 `bg` to the dark `fg`, so the generated GTK theme and every template invert with it.
@@ -673,15 +714,18 @@ MIT — see [LICENSE](LICENSE).
 
 ## Main Claude chat and threads
 
-One Claude chat runs all the time in tmux window `main:1` and shows as a side panel on SUPER+SHIFT+A.
+One Claude chat runs all the time in tmux window `main:1` and shows as a side panel on SUPER+SHIFT+A
+(a foot terminal on tmux; in the `root-agentic` theme the shell's own agent panel, see [Shell](#shell-quickshell)).
 Work streams run as threads: named Claude sessions in their own tmux windows, started by the chat or by
 hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
 
 | Command | What |
 |---|---|
 | `agentic on/off/status/restart` | the main chat, its panel and threads; `off` stops everything and keeps the data |
-| `dock toggle/show/hide` | the side panel; `dock show <thread>` shows a thread instead of the main chat |
+| `dock toggle/show/hide/term` | the side panel; `dock show <thread>` shows a thread instead of the main chat. In `root-agentic` these open the shell's agent panel, and `dock term [thread]` the terminal one |
 | `thread start/list/show/stop/resume/model/adopt` | threads (at most 5 run); `cr` reopens what a shutdown left open |
+| `thread send <name\|main> <text>` | type a message into a thread or the main chat and send it; refuses when that session is asking something or has a draft typed |
+| `agentic-shell feed/home/snapshot/leave-check` | what the agent panel reads, as JSON (a conversation, the brief and inbox), and the check that leaving `root-agentic` leaves nothing running |
 | `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |
 | `claude-usage report/calibrate/estimate` | Claude usage from the local transcripts, priced at API rates |
 | `run-logged <cmd>` | run a command as usual and keep a clean log for Claude to read |
