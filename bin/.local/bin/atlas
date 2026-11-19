@@ -537,7 +537,7 @@ def school_items(c):
     today = date.today()
     if data:
         alls = data.get("all") or []
-        # My class: the most common class in course names ("AM 5BHIT 26/27"); entries for the parallel
+        # My class: the most common class in course names ("AM 3CHIT 25/26"); entries for the parallel
         # classes ("... 5AHIT") are left out.
         classes = {}
         for x in alls:
