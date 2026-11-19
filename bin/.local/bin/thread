@@ -12,7 +12,10 @@
   thread send <name|main> <text...>          type a message into a thread or the main chat and send it, as if
                                              typed there; refused (exit 3) while a question or dialog is open
                                              or something is already typed. The shell's agent panel uses this.
-  thread progress [--brief]                  what each running thread is doing right now (state, how long, last action)
+  thread progress [--brief]                  what each running thread is doing right now: state, how long, steps
+                                             done (4/7, 57 %), last action, its share of the weekly limit
+  thread step [<name>] <done>/<total> [next] a thread records how far it is (inside a thread the name comes
+                                             from $AGENTIC_THREAD), e.g. `thread step 4/7 panel QML`
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread rm <name>                           forget a thread (the transcript stays)
 
@@ -83,7 +86,7 @@ def read(name):
 def write(name, fm, body):
     os.makedirs(DIR, exist_ok=True)
     fm["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    keys = ["name", "folder", "model", "status", "origin", "session", "started", "updated"]
+    keys = ["name", "folder", "model", "status", "origin", "session", "started", "updated", "progress"]
     head = "\n".join(f"{k}: {fm[k]}" for k in keys if k in fm)
     with open(path(name) + ".tmp", "w", encoding="utf-8") as f:
         f.write(f"---\n{head}\n---\n{body}")
@@ -312,7 +315,10 @@ def cmd_start(args):
     if brief:
         prompt = [brief + "\n\n"
                   f"(You are thread '{name}', started by the main chat. Your state file is {path(name)}: keep its "
-                  "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. When you "
+                  "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. Split the work "
+                  "into steps once you know them and record how far you are with `thread step <done>/<total> <next "
+                  "step>` (e.g. `thread step 0/6 reading the repo`, then after each finished step; change the total "
+                  "when the plan changes; <total>/<total> only when done and checked). When you "
                   "stop, the main chat hears it by itself and reads the first line of your answer, so start every "
                   "final answer with a one-line summary. To pass something longer to the main chat, use SendMessage "
                   "to \"main-chat\".)"]
@@ -377,6 +383,38 @@ def ago(t):
     return f"{d // 60} min" if d < 3600 else f"{d // 3600} h {d % 3600 // 60} min"
 
 
+def steps(fm):
+    """(done, total, next step) from the state file's `progress: 4/7 next step`, or None."""
+    m = re.match(r"(\d+)/(\d+)\s*(.*)", fm.get("progress", ""))
+    if not m or not int(m.group(2)):
+        return None
+    return int(m.group(1)), int(m.group(2)), m.group(3)
+
+
+def cmd_step(args):
+    name = slug(args[0]) if args and "/" not in args[0] else os.environ.get("AGENTIC_THREAD", "")
+    rest = args[1:] if args and "/" not in args[0] else args
+    m = re.fullmatch(r"(\d+)/(\d+)", rest[0]) if rest else None
+    if not name or not m or not 0 <= int(m.group(1)) <= int(m.group(2)) or not 0 < int(m.group(2)) <= 50:
+        sys.exit("thread step [<name>] <done>/<total> [next step]   (e.g. thread step 4/7 panel QML; total 1-50)")
+    fm, body = read(name)
+    if fm is None:
+        sys.exit(f"No thread '{name}'.")
+    fm["progress"] = " ".join([f"{int(m.group(1))}/{int(m.group(2))}"] + rest[1:])[:120]
+    write(name, fm, body)
+    print(f"{name}: {fm['progress']}")
+
+
+def usage_module():
+    """claude-usage loaded as a module, for the per-session cost (None if it can't be loaded)."""
+    try:
+        from importlib.machinery import SourceFileLoader
+        return SourceFileLoader("claude_usage", shutil.which("claude-usage")
+                                or os.path.join(HOME, ".local/bin/claude-usage")).load_module()
+    except Exception:
+        return None
+
+
 def cmd_progress(args):
     """What every running thread is doing, from the progress the session hook writes (code, no tokens)."""
     ag, wins = agents(), windows()
@@ -392,7 +430,7 @@ def cmd_progress(args):
         state = p.get("state") or st
         if st == "waiting":
             state = "needs you"
-        rows.append((p.get("at", 0), t["name"], state, p.get("since"), p.get("detail", ""), t.get("model", "")))
+        rows.append((p.get("at", 0), t["name"], state, p.get("since"), p.get("detail", ""), t.get("model", ""), t))
     if not rows:
         print("No thread is running." if "--brief" not in args else "")
         return
@@ -402,11 +440,36 @@ def cmd_progress(args):
         if not rows:
             return
         print("Threads right now (from code): " + "; ".join(
-            f"{n} {s}" + (f" for {ago(since)}" if since else "") + (f", last: {d[:80]}" if d else "")
-            for at, n, s, since, d, m in rows))
+            f"{n} {s}" + (f" for {ago(since)}" if since else "")
+            + (f", step {st[0]}/{st[1]}" if (st := steps(t)) else "") + (f", last: {d[:80]}" if d else "")
+            for at, n, s, since, d, m, t in rows))
         return
-    for at, n, s, since, d, m in rows:
-        print(f"{n:33} {s:10} {('for ' + ago(since)) if since else '':14} {m:7} {d[:90]}")
+    try:
+        lim = json.load(open(os.path.join(HOME, ".cache/claude-usage.json")))
+        fmt = lambda k, f: f"{lim[k]['used']} % (resets {datetime.fromtimestamp(lim[k]['resets_at']).strftime(f)})"
+        print(f"Limits: 5 h {fmt('five_hour', '%H:%M')}, week {fmt('seven_day', '%a %H:%M')}\n")
+    except (OSError, ValueError, KeyError):
+        pass
+    cu = usage_module()
+    for at, n, s, since, d, m, t in rows:
+        st = steps(t)
+        if st:
+            done, total, nxt = st
+            pct = round(100 * done / total)
+            bar = "█" * round(10 * done / total) + "░" * (10 - round(10 * done / total))
+            how = f"{bar} {done}/{total} {pct:3} %" + (f"  next: {nxt}" if nxt and done < total else "")
+        else:
+            how = "no steps recorded yet"
+        cost = ""
+        if cu and t.get("session"):
+            try:
+                dollars, week = cu.session_cost(t["session"])
+                cost = f"   {week:.1f} % of the week (${dollars:.0f})"
+            except Exception:
+                pass
+        print(f"{n:33} {s:10} {('for ' + ago(since)) if since else '':14} {m:6} {how}{cost}")
+        if d:
+            print(f"{'':33} last: {d[:100]}")
 
 
 def cmd_model(args):
@@ -540,6 +603,8 @@ def main():
         cmd_resume(rest)
     elif cmd == "model":
         cmd_model(rest)
+    elif cmd == "step":
+        cmd_step(rest)
     elif cmd == "progress":
         cmd_progress(rest)
     elif cmd == "send":
