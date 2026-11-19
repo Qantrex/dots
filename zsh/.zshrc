@@ -103,3 +103,6 @@ export PATH="$HOME/.local/bin:$PATH"
 export EDITOR=micro VISUAL=micro
 # systemd user ssh-agent.socket; ~/.ssh/config adds keys on first use (AddKeysToAgent)
 [[ -z $SSH_AUTH_SOCK && -S $XDG_RUNTIME_DIR/ssh-agent.socket ]] && export SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/ssh-agent.socket
+# Claude Code's shells (it snapshots this file): no aliases, so `ls`, `cat`, `grep` are the plain tools it
+# expects. Functions and PATH stay.
+[[ -n $CLAUDECODE ]] && unalias -a
