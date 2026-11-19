@@ -226,6 +226,15 @@ Singleton {
         onTriggered: { root.refresh(); root.ask(); }
     }
 
+    // With the panel closed, a slow look as well (a thread round has no hook that calls in).
+    Timer {
+        interval: 15000
+        running: root.enabled && !root.open
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.ask()
+    }
+
     Process {
         id: asked
         property bool again: false
@@ -323,7 +332,8 @@ Singleton {
         function hide(): void { root.hide(); }
         function refresh(): void { conf.reload(); root.refresh(); }
         // The requests changed (`agentic-shell hold`, `release`, `answer`). A closed panel reads them when it opens.
-        function requests(): void { if (root.open) root.ask(); }
+        // Called by the hook when a request comes or goes: the bar item counts them with the panel closed too.
+        function requests(): void { root.ask(); }
         // off: this theme has no panel. `dock` and `agentic-shell snapshot` read this.
         function status(): string { return !root.enabled ? "off" : (root.open ? "shown " + root.target : "hidden"); }
     }

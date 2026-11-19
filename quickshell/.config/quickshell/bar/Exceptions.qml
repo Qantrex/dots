@@ -99,10 +99,13 @@ Island {
         }
     }
 
+    // Theme root-agentic: one agent item in place of the three Claude items below (bar/AgentItem.qml).
+    AgentItem {}
+
     // Claude sessions waiting for me. Click: answer the one that waited longest in the side panel
     // (`dock`); middle-click: go to its terminal; right-click: dismiss.
     Flag {
-        visible: ClaudeWaiting.count > 0
+        visible: ClaudeWaiting.count > 0 && !Agentic.enabled
         icon: "󰭹"
         label: ClaudeWaiting.count > 1 ? String(ClaudeWaiting.count) : ""
         tip: "Claude is waiting\n" + ClaudeWaiting.tooltip + "\nClick: answer in the side panel · middle: go to the terminal · right: dismiss all"
@@ -114,7 +117,7 @@ Island {
     // Threads of the main Claude chat at work (`thread`): how many, gold when one needs me. Tooltip: what each
     // one does right now. Click: show it in the side panel.
     Flag {
-        visible: ClaudeThreads.live.length > 0
+        visible: ClaudeThreads.live.length > 0 && !Agentic.enabled
         icon: "󰑮"
         tint: ClaudeThreads.needsMe ? Theme.gold : Theme.fg
         label: ClaudeThreads.working > 0 ? String(ClaudeThreads.working) : ""
@@ -124,7 +127,7 @@ Island {
 
     // Claude plan usage: only from 70 % of the 5-hour or the weekly window.
     Flag {
-        visible: ClaudeUsage.high
+        visible: ClaudeUsage.high && !Agentic.enabled
         icon: "󰊚"
         tint: ClaudeUsage.peak >= 90 ? Theme.love : Theme.gold
         label: Math.round(ClaudeUsage.peak) + "%"

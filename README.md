@@ -222,6 +222,11 @@ and every click opens something you can act in instead of another program.
   touchpad off, power profile above Quiet, local AI on, Claude sessions waiting for
   you (click: answer it in the side panel, middle-click: go to its terminal, right-click: dismiss;
   `dock` / `claude-jump.sh`, fed by the session hook in claude-config), Claude usage over 70 %, RAM over 85 % (gold),
+  In theme `root-agentic` these three Claude items become one agent item (`bar/AgentItem.qml`): a gold
+  count of what needs you (request cards, sessions waiting, threads that need you), else how many threads
+  are at work, plus the usage from 70 %. Click: the agent panel on the tab that needs you first; middle:
+  that tab's terminal; right: dismiss the waiting marks. The shell looks for request cards every 15 s
+  while the panel is closed, and at once when the hook calls in.
   caffeine, Do Not Disturb, unread notifications, no or limited network.
 - **Right, status:** network, Bluetooth (only with a device connected), volume,
   battery (percentage only on battery; gold under 30 %, love under 15 %). One
