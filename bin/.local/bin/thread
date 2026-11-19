@@ -64,7 +64,7 @@ RUN = os.path.join(DIR, ".run")
 PROGRESS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "agentic", "progress")
 RECORDS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "claude-sessions")
 SESSION = "main"
-MAX_RUNNING = 5
+MAX_RUNNING = 8
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
 # about 90k and it compacted after a few fetched pages. Requests under 250k cost about half of those above it.
 AUTOCOMPACT = "240000"
