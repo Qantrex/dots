@@ -421,11 +421,30 @@ def cmd_resume(args):
     print(f"Thread '{name}' resumed in {folder}: `dock show {name}`.")
 
 
+def list_row(t, ag, wins):
+    """One thread for `thread list --json`: the state file's fields plus the live state, progress as numbers
+    (step, total, next), the label of its last stop (signal) and the minutes since its transcript changed."""
+    st = steps(t)
+    row = dict(t, state=live_state(t, ag, wins), step=st[0] if st else None, total=st[1] if st else None,
+               next=st[2] if st else "", signal=None, quiet_minutes=None)
+    try:
+        row["signal"] = json.load(open(os.path.join(PROGRESS, t["name"] + ".json"))).get("signal")
+    except (OSError, ValueError, KeyError):
+        pass
+    tpath = (glob.glob(os.path.join(HOME, ".claude/projects/*", t.get("session", "x") + ".jsonl")) or [""])[0]
+    if tpath:
+        try:
+            row["quiet_minutes"] = int((time.time() - os.path.getmtime(tpath)) // 60)
+        except OSError:
+            pass
+    return row
+
+
 def cmd_list(args):
     ag, wins = agents(), windows()
     ts = all_threads(archived="--all" in args)
     if "--json" in args:
-        print(json.dumps([dict(t, state=live_state(t, ag, wins)) for t in ts]))
+        print(json.dumps([list_row(t, ag, wins) for t in ts]))
         return
     if not ts:
         print("No threads. Start one: thread start <name> <folder> [model] -- <brief>")
