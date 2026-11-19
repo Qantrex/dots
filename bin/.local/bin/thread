@@ -1185,7 +1185,7 @@ def build_runs(events):
                     prev = cur
                     prev_total = prev["steps"][-1]["total"] if prev["steps"] else 0
                     cur = new_run(name, e, follow_up=True, after=prev["done_at"],
-                                  base=d if d >= prev_total else 0, model=e.get("model") or prev["model"])
+                                  base=prev_total if d >= prev_total else 0, model=e.get("model") or prev["model"])
                     runs.append(cur)
                 cur["steps"].append(e)
                 cur["done_at"] = e["ts"] if d == t else None
@@ -1279,7 +1279,7 @@ def backfill_thread(name, fm, tpath):
                     continue
                 if e["type"] == "assistant" and b.get("type") == "tool_use" and b.get("name") == "Bash" \
                         and b.get("id") not in seen \
-                        and re.search(r"(^|[;&|(\s])thread\s+step\s+\d+/\d+", str((b.get("input") or {}).get("command", ""))):
+                        and re.search(r"(^|[;&|(\s])thread\s+step\s+([\w.-]+\s+)?\d+/\d+", str((b.get("input") or {}).get("command", ""))):
                     seen.add(b.get("id"))
                     pending[b.get("id")] = t
                 elif e["type"] == "user" and b.get("type") == "tool_result" and b.get("tool_use_id") in pending:

@@ -195,7 +195,18 @@ class DurationsTest(unittest.TestCase):
         op = d["open"][0]
         self.assertTrue(op["follow_up"])
         self.assertEqual(op["start"], T0 + 1000)                  # the message after the done, not the step
-        self.assertEqual((op["done"], op["total"], op["n_steps"]), (1, 2, 2))
+        self.assertEqual((op["done"], op["total"], op["n_steps"]), (1, 2, 2))   # a new plan: all its steps
+
+    def test_a_follow_up_that_extends_the_plan_counts_only_the_new_steps(self):
+        self.e.state("demo", "s1", status="stopped")
+        self.e.events([
+            {"thread": "demo", "session": "s1", "event": "start", "ts": 0},
+            {"thread": "demo", "session": "s1", "event": "step", "done": 12, "total": 12, "ts": 50},
+            {"thread": "demo", "session": "s1", "event": "step", "done": 13, "total": 14, "ts": 500},
+            {"thread": "demo", "session": "s1", "event": "step", "done": 14, "total": 14, "ts": 600},
+        ])
+        runs = self.e.durations()["finished"]
+        self.assertEqual([(r["follow_up"], r["n_steps"]) for r in runs], [(False, 12), (True, 2)])
 
     def test_text_output_and_a_name(self):
         self.e.state("demo", "s1", status="stopped")
@@ -228,15 +239,16 @@ class BackfillTest(unittest.TestCase):
             bash(10, "a", "thread step 0/2 reading 2>&1 | tail -1"), result(11, "a", "demo: 0/2 reading"),
             bash(20, "b", "echo 'thread step 1/2 quoted'"), result(21, "b", "thread step 1/2 quoted"),
             bash(30, "c", "cd /x; thread step 1/2 building"), result(31, "c", "demo: 1/2 building"),
+            bash(35, "e", "thread step demo 1/2 'named form'"), result(36, "e", "demo: 1/2 named form"),
             bash(40, "d", "thread step 2/2 done"), result(41, "d", "demo: 2/2 done"),
             answer(50, "Summary: built it"),
             prompt(500, "thanks"), answer(510),
         ])
         out = self.e.run("durations", "--backfill")
-        self.assertIn("Added 5 events", out)
+        self.assertIn("Added 6 events", out)
         ev = [(x["event"], x.get("done"), x.get("label"), round(x["ts"] - T0)) for x in self.e.logged()]
         self.assertEqual(ev, [("start", None, None, 0), ("step", 0, None, 10), ("step", 1, None, 30),
-                              ("step", 2, None, 40), ("stop", None, "done", 50)])
+                              ("step", 1, None, 35), ("step", 2, None, 40), ("stop", None, "done", 50)])
         self.assertTrue(all(x["src"] == "backfill" for x in self.e.logged()))
         self.assertIn("Added 0 events", self.e.run("durations", "--backfill"))
         r = self.e.durations()["finished"][0]
