@@ -4,8 +4,9 @@
   agentic-shell feed <main|thread> [--once] [--strong '#fff'] [--code '#aaa']
                                the conversation of that session, one JSON object per line, and
                                then every new message as it is written (until killed)
-  agentic-shell home [--seen]  one JSON object: the brief, the last inbox events and how many
-                               are new since the home tab was last looked at (--seen: now)
+  agentic-shell home [--seen]  one JSON object: the brief, the last inbox events, how many are
+                               new since the home tab was last looked at (--seen: now), and
+                               the threads that are open
   agentic-shell snapshot       what is running that a theme could have started: user units,
                                layers, keybinds, windows, the shell's child processes, wallpaper
   agentic-shell leave-check    from root: switch to root-agentic and back, and compare the
@@ -312,11 +313,25 @@ def cmd_feed(args):
 
 # ---- home tab ---------------------------------------------------------------------------------
 
+def threads():
+    """The threads that have a window in tmux "main" right now, with what the session hook last said."""
+    said = {}
+    try:
+        for t in json.load(open(os.path.join(HOME, ".cache/agentic-threads.json"), encoding="utf-8")):
+            said[t.get("name")] = t
+    except (OSError, ValueError, AttributeError):
+        pass
+    res = []
+    for name in sh(["tmux", "list-windows", "-t", f"={SESSION}", "-F", "#{window_name}"]).split():
+        if name == "main" or not os.path.isfile(os.path.join(THREADS, name + ".md")):
+            continue
+        t = said.get(name) or {}
+        res.append({"name": name, "state": t.get("state") or "idle", "detail": clip(t.get("detail") or "", 160),
+                    "since": t.get("since") or 0})
+    return res
+
+
 def cmd_home(args):
-    if "--seen" in args:
-        os.makedirs(STATE, exist_ok=True)
-        with open(SEEN, "w") as f:
-            f.write(str(int(time.time())))
     try:
         seen = int(open(SEEN).read().strip())
     except (OSError, ValueError):
@@ -340,8 +355,15 @@ def cmd_home(args):
     inbox = [{"at": stamp(e.get("ts", 0)), "level": e.get("level", ""), "source": e.get("source", ""),
               "text": clip(e.get("text", ""), 400), "untrusted": bool(e.get("untrusted")), "new": e.get("ts", 0) > seen}
              for e in events[:40]]
+    new = sum(1 for e in events if e.get("ts", 0) > seen)
+    if "--seen" in args:
+        # This answer still marks what is new; from the next one on it counts as looked at.
+        os.makedirs(STATE, exist_ok=True)
+        with open(SEEN, "w") as f:
+            f.write(str(int(time.time())))
+        new = 0
     brief = sh([os.path.join(BIN, "agentic"), "brief", "--print"], timeout=20).strip().splitlines()
-    out({"brief": brief, "inbox": inbox, "new": sum(1 for e in events if e.get("ts", 0) > seen)})
+    out({"brief": brief, "inbox": inbox, "new": new, "threads": threads()})
 
 
 # ---- what is running (the leave check) --------------------------------------------------------
@@ -388,7 +410,8 @@ def snapshot():
         lines.append("wallpaper-last " + open(os.path.join(HOME, ".cache/wallpaper/last")).read().strip())
     except OSError:
         pass
-    status = sh(["qs", "ipc", "call", "agentic", "status"]).strip()
+    # "off", "hidden" or "shown <tab>"; without the service (an older shell) it is off too.
+    status = (sh(["qs", "ipc", "call", "agentic", "status"]).split() or ["off"])[0]
     lines.append(f"panel {status if status in ('shown', 'hidden') else 'off'}")
     return sorted(lines)
 
