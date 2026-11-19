@@ -8,6 +8,7 @@
   inbox new [--context]  print events not shown yet and mark them shown (--context: for a Claude hook)
   inbox list [N]         the last N events (default 20)
   inbox ack              mark everything shown
+  inbox prune [--days N] drop events older than N days (default 7); `inbox collect` runs it
   inbox flush            wake the main chat for events whose wake didn't get through (the main chat's stop
                          hook runs it, so a wake missed while it was busy arrives when it is idle again)
 
@@ -208,7 +209,17 @@ def flush():
     return r == "woken"
 
 
+def prune(days=7):
+    """Drop events older than `days` days; returns how many went."""
+    items = load()
+    keep = [e for e in items if e.get("ts", 0) >= time.time() - days * 86400]
+    if len(keep) < len(items):
+        save(keep)
+    return len(items) - len(keep)
+
+
 def collect():
+    prune(7)
     last = os.path.getmtime(MARK) if os.path.exists(MARK) else time.time() - 86400
     found = 0
     for folder, label in ((os.path.join(HOME, "Downloads"), "download"),
@@ -277,6 +288,12 @@ def main():
         n = int(rest[0]) if rest else 20
         for e in load()[-n:]:
             print(fmt(e) + ("" if e.get("shown") else "  (new)"))
+    elif cmd == "prune":
+        try:
+            days = float(rest[rest.index("--days") + 1]) if "--days" in rest else 7
+        except (IndexError, ValueError):
+            sys.exit("inbox prune [--days N]")
+        print(f"{prune(days)} removed")
     elif cmd == "ack":
         items = load()
         for e in items:
