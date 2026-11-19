@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Threads: named Claude sessions for one work stream each, in tmux windows of session "main".
 
-  thread list [--json]                       every thread with its live state
+  thread list [--all] [--json]               every thread with its live state; --all includes archived ones
   thread start <name> <folder> [model] [-- brief...]
                                              new session in <folder> (its CLAUDE.md loads), tmux window <name>
   thread show <name>                         the state file (goal, now, next, decisions, where, open)
@@ -17,7 +17,9 @@
   thread step [<name>] <done>/<total> [next] a thread records how far it is (inside a thread the name comes
                                              from $AGENTIC_THREAD), e.g. `thread step 4/7 panel QML`
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
-  thread rm <name>                           forget a thread (the transcript stays)
+  thread archive <name>...                   finished thread off the lists; state and transcript stay, and
+                                             `thread resume`/`thread show` still work
+  thread rm <name>                           forget a thread (the transcript stays, but nothing points to it)
 
 The main chat (`agentic`) uses these; they work just as well by hand. At most MAX_RUNNING threads run;
 starting another stops the oldest idle one, which `thread resume` brings back. State files:
@@ -98,11 +100,11 @@ def body_template(goal, folder):
             f"## Where things are\n- Folder: `{folder}`\n\n## Open for the owner\n")
 
 
-def all_threads():
+def all_threads(archived=False):
     out = []
     for f in sorted(glob.glob(os.path.join(DIR, "*.md"))):
         fm, _ = read(os.path.basename(f)[:-3])
-        if fm:
+        if fm and (archived or fm.get("status") != "archived"):
             out.append(fm)
     return out
 
@@ -365,7 +367,7 @@ def cmd_resume(args):
 
 def cmd_list(args):
     ag, wins = agents(), windows()
-    ts = all_threads()
+    ts = all_threads(archived="--all" in args)
     if "--json" in args:
         print(json.dumps([dict(t, state=live_state(t, ag, wins)) for t in ts]))
         return
@@ -529,8 +531,8 @@ def title_of(tpath):
 
 
 def cmd_adopt(args):
-    known = {t.get("session") for t in all_threads()}
-    names = {t["name"] for t in all_threads()}
+    known = {t.get("session") for t in all_threads(archived=True)}
+    names = {t["name"] for t in all_threads(archived=True)}
     ag = agents()
     found = {}
     for f in glob.glob(os.path.join(RECORDS, "*.json")):
@@ -612,6 +614,20 @@ def main():
         cmd_send(rest)
     elif cmd == "adopt":
         cmd_adopt(rest)
+    elif cmd == "archive":
+        if not rest:
+            sys.exit("thread archive <name>...")
+        ag, wins = agents(), windows()
+        for n in map(slug, rest):
+            fm, body = read(n)
+            if not fm:
+                print(f"No thread '{n}'.")
+            elif live_state(fm, ag, wins) not in ("stopped", "left open"):
+                print(f"'{n}' is running; stop it first.")
+            else:
+                fm["status"] = "archived"
+                write(n, fm, body)
+                print(f"Archived '{n}'; `thread resume {n}` brings it back.")
     elif cmd == "rm":
         if rest and os.path.exists(path(slug(rest[0]))):
             os.remove(path(slug(rest[0])))
