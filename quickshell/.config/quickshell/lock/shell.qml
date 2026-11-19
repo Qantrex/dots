@@ -60,6 +60,7 @@ ShellRoot {
             if (result === PamResult.Success) { root.unlock("password"); return; }
             root.failed = true;
             root.buffer = "";
+            console.info("agentic-lock: password not accepted");
             root.status = result === PamResult.MaxTries ? "Too many tries, wait a moment" : "Wrong password";
         }
         onError: err => {
