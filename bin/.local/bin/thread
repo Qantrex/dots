@@ -36,6 +36,12 @@
                                              pane, transcript and subagents stay unchanged 10 min gives one
                                              [stalled] inbox line with a wake
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
+  thread durations [name...] [--json]        how long thread work took, per finished run of work: working time
+                                             (waits for the owner left out), start to done, steps, minutes per
+                                             step, and the medians; with a name every step with its time.
+                                             From ~/.local/share/agentic/durations.jsonl (one line per start,
+                                             resume, step, stop, end, model change) and the transcripts.
+                                             --backfill [--dry-run]: once, from older transcripts
   thread archive <name>...                   finished thread off the lists; state and transcript stay, and
                                              `thread resume`/`thread show` still work
   thread rm <name>                           forget a thread (the transcript stays, but nothing points to it)
@@ -63,6 +69,8 @@ DIR = os.path.join(DATA, "threads")
 RUN = os.path.join(DIR, ".run")
 PROGRESS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "agentic", "progress")
 RECORDS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "claude-sessions")
+# One JSON line per thread event (start, resume, step, stop, end, model), for `thread durations`.
+DURATIONS = os.path.join(DATA, "durations.jsonl")
 SESSION = "main"
 MAX_RUNNING = 8
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
@@ -113,6 +121,24 @@ def write(name, fm, body):
     with open(path(name) + ".tmp", "w", encoding="utf-8") as f:
         f.write(f"---\n{head}\n---\n{body}")
     os.replace(path(name) + ".tmp", path(name))
+
+
+def log_event(name, event, fm=None, **fields):
+    """Append one event of a thread to durations.jsonl (one write, O_APPEND, so parallel threads don't mix
+    lines). Never fails the command that logs it."""
+    try:
+        fm = fm if fm is not None else (read(name)[0] or {})
+        e = {"ts": round(time.time(), 1), "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+             "thread": name, "session": fm.get("session", ""), "model": fm.get("model", ""), "event": event}
+        e.update(fields)
+        os.makedirs(DATA, exist_ok=True)
+        fd = os.open(DURATIONS, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, (json.dumps(e, ensure_ascii=False) + "\n").encode())
+        finally:
+            os.close(fd)
+    except Exception:
+        pass
 
 
 def body_template(goal, folder):
@@ -257,6 +283,7 @@ def stop(name):
     fm["status"] = "stopped"
     write(name, fm, body)
     clear_progress(name)
+    log_event(name, "end", fm)
     return True
 
 
@@ -362,6 +389,7 @@ def cmd_start(args):
     fm = {"name": name, "folder": folder, "model": model, "status": "running", "session": sid,
           "started": datetime.now().strftime("%Y-%m-%d %H:%M")}
     write(name, fm, body_template(brief.split("\n")[0][:300], folder))
+    log_event(name, "start", fm, folder=folder)
     prompt = []
     if brief:
         prompt = [brief + "\n\n"
@@ -418,6 +446,7 @@ def cmd_resume(args):
                           "--model", fm.get("model", "opus"), "--effort", "high", "--autocompact", AUTOCOMPACT] + extra)
     fm["status"] = "running"
     write(name, fm, body)
+    log_event(name, "resume", fm)
     print(f"Thread '{name}' resumed in {folder}: `dock show {name}`.")
 
 
@@ -479,6 +508,7 @@ def cmd_step(args):
         sys.exit(f"No thread '{name}'.")
     fm["progress"] = " ".join([f"{int(m.group(1))}/{int(m.group(2))}"] + rest[1:])[:120]
     write(name, fm, body)
+    log_event(name, "step", fm, done=int(m.group(1)), total=int(m.group(2)), next=" ".join(rest[1:])[:120])
     print(f"{name}: {fm['progress']}")
 
 
@@ -569,6 +599,7 @@ def cmd_model(args):
     fm["model"] = model
     fm["status"] = "stopped"
     write(name, fm, body)
+    log_event(name, "model", fm)
     if was_running:
         cmd_resume([name])
     print(f"'{name}' now uses {model}" + ("" if was_running else " from its next resume") +
@@ -901,6 +932,9 @@ def cmd_signal(args):
         label, detail = "done", f"{st[0]}/{st[1]}"
     else:
         label, detail = "paused", f"{st[0]}/{st[1]}" if st else ""
+    # Only the stop hook passes --transcript: a look by hand is not a stop.
+    if tpath:
+        log_event(name, "stop", fm, label=label, detail=detail)
     print(f"{label}\t{detail}\t{sent}")
 
 
@@ -1013,6 +1047,358 @@ def cmd_watch(args):
         if os.path.basename(f)[:-5] not in seen:
             os.remove(f)
 
+# ---- thread durations: how long thread work takes, from durations.jsonl and the transcripts ------------
+
+def iso_ts(s):
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def load_events(path=None):
+    out = []
+    try:
+        with open(path or DURATIONS, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(e, dict) and e.get("thread") and isinstance(e.get("ts"), (int, float)):
+                    out.append(e)
+    except OSError:
+        pass
+    out.sort(key=lambda e: e["ts"])
+    return out
+
+
+def transcript_of(session):
+    return (glob.glob(os.path.join(HOME, ".claude/projects/*", session + ".jsonl")) or [""])[0] if session else ""
+
+
+def is_notification(text):
+    """A background task (subagent, shell) reporting back: the session was working, not waiting."""
+    return text.lstrip().startswith("<task-notification>") and "artifact-auto-react" not in text
+
+
+def entry_text(c):
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return " ".join(str(b.get("text", "")) for b in c if isinstance(b, dict))
+    return ""
+
+
+def activity(tpath):
+    """A session's timeline from its transcript: (gaps, prompts). gaps: [(end, seconds)], the time between two
+    entries that the session spent working, i.e. the later entry is the model's answer, a tool result, the
+    end of a compaction or its summary, or a background task reporting back. A gap that ends in a message from outside (the
+    owner, the main chat, an answer round) was waiting and is left out, and so is every gap ending in other
+    bookkeeping entries (a resume writes some). prompts: the times of the outside messages."""
+    gaps, prompts, prev = [], [], None
+    try:
+        f = open(tpath, encoding="utf-8", errors="ignore")
+    except OSError:
+        return gaps, prompts
+    with f:
+        for line in f:
+            if '"timestamp"' not in line:
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            t = iso_ts(e.get("timestamp") or "")
+            typ, work, prompt = e.get("type"), False, False
+            # Only the conversation itself: bookkeeping lines (api-request, queue-operation) can be written in
+            # a block ahead of the messages they belong to and would push the timeline forward.
+            if t is None or typ not in ("user", "assistant", "system", "attachment"):
+                continue
+            if typ == "assistant" or (typ == "system" and e.get("subtype") == "compact_boundary"):
+                work = True
+            elif typ == "user":
+                c = (e.get("message") or {}).get("content")
+                if e.get("isCompactSummary") or (isinstance(c, list) and any(
+                        isinstance(b, dict) and b.get("type") == "tool_result" for b in c)):
+                    work = True
+                elif not e.get("isMeta"):
+                    work = is_notification(entry_text(c))
+                    prompt = not work
+            elif typ == "attachment" and (e.get("attachment") or {}).get("type") == "queued_command":
+                work = is_notification(str(e["attachment"].get("prompt") or ""))
+                prompt = not work
+            if work and prev is not None and t > prev:
+                gaps.append((t, t - prev))
+            if prompt:
+                prompts.append(t)
+            prev = t if prev is None else max(prev, t)
+    return gaps, prompts
+
+
+def work_between(gaps, a, b):
+    """Seconds of work between a and b (a gap that started before a counts from a)."""
+    return sum(min(g, end - a) for end, g in gaps if a < end <= b)
+
+
+def new_run(name, e, **kw):
+    return dict({"thread": name, "session": e.get("session", ""), "model": e.get("model", ""), "start": e["ts"],
+                 "partial": False, "follow_up": False, "after": None, "base": 0, "steps": [], "done_at": None,
+                 "finished": False}, **kw)
+
+
+def build_runs(events):
+    """Runs of work per thread. A run begins at `start` (or, after a finished run, at the next step below its
+    total: new work in the same thread) and finishes at done: the stop labelled done after the step
+    total/total, else (no such stop, or the thread was ended) that step. A run whose start was never logged
+    is partial and stays out of the medians."""
+    by = {}
+    for e in events:
+        by.setdefault(e["thread"], []).append(e)
+    runs = []
+    for name, evs in by.items():
+        cur = None
+        for e in evs:
+            ev = e.get("event")
+            if ev == "start":
+                if cur and not cur["finished"] and cur["done_at"]:
+                    cur["finished"] = True
+                cur = new_run(name, e)
+                runs.append(cur)
+                continue
+            if cur is None and ev != "step":
+                continue
+            if ev in ("model", "resume") and not cur["finished"] and e.get("model"):
+                cur["model"] = e["model"]
+            elif ev == "step":
+                d, t = e.get("done"), e.get("total")
+                if not isinstance(d, int) or not isinstance(t, int) or t <= 0:
+                    continue
+                if cur is None:
+                    cur = new_run(name, e, partial=True)
+                    runs.append(cur)
+                elif cur["done_at"] and not cur["finished"] and d < t:
+                    cur["finished"] = True       # reached total/total, then new work without a done stop
+                if cur["finished"]:
+                    if d >= t:
+                        continue                 # total/total again after done
+                    prev = cur
+                    prev_total = prev["steps"][-1]["total"] if prev["steps"] else 0
+                    cur = new_run(name, e, follow_up=True, after=prev["done_at"],
+                                  base=d if d >= prev_total else 0, model=e.get("model") or prev["model"])
+                    runs.append(cur)
+                cur["steps"].append(e)
+                cur["done_at"] = e["ts"] if d == t else None
+            elif ev == "stop" and cur["done_at"] and not cur["finished"]:
+                if e.get("label") == "done":
+                    cur["done_at"], cur["finished"] = e["ts"], True
+            elif ev == "end" and cur["done_at"]:
+                cur["finished"] = True
+        if cur and cur["done_at"]:
+            cur["finished"] = True               # at total/total; its done stop may still come
+    return runs
+
+
+def dur(sec):
+    if sec is None:
+        return "?"
+    m = int(round(sec / 60))
+    return f"{m} min" if m < 60 else f"{m // 60} h {m % 60:02d}"
+
+
+def median(xs):
+    xs = sorted(x for x in xs if x is not None)
+    if not xs:
+        return None
+    n = len(xs)
+    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+
+
+def measure(runs, now=None):
+    """Fill each run with its times: start (a follow-up begins at the first outside message after the done
+    before it), end, wall (start to done, waiting included), work (only the time the session was working,
+    from its transcript), steps and its step list with times."""
+    now = now or time.time()
+    cache = {}
+    for r in runs:
+        sid = r["session"]
+        if sid not in cache:
+            tp = transcript_of(sid)
+            cache[sid] = activity(tp) if tp else None
+        act = cache[sid]
+        if r["follow_up"] and act:
+            first_step = r["steps"][0]["ts"]
+            p = [t for t in act[1] if r["after"] < t <= first_step]
+            r["start"] = p[0] if p else r["start"]
+        r["end"] = r["done_at"] if r["finished"] else now
+        r["wall"] = r["end"] - r["start"]
+        r["work"] = work_between(act[0], r["start"], r["end"]) if act else None
+        last = r["steps"][-1] if r["steps"] else None
+        r["total"] = last["total"] if last else 0
+        r["n_steps"] = max(r["total"] - r["base"], 1) if last else 0
+        r["done"] = last["done"] if last else 0
+        r["per_step"] = r["work"] / r["n_steps"] / 60 if r["work"] is not None and r["n_steps"] else None
+        prev = r["start"]
+        r["step_list"] = []
+        for s in r["steps"]:
+            r["step_list"].append({"at": s["ts"], "done": s["done"], "total": s["total"], "next": s.get("next", ""),
+                                   "wall": s["ts"] - prev,
+                                   "work": work_between(act[0], prev, s["ts"]) if act else None})
+            prev = max(prev, s["ts"])
+    return runs
+
+
+def backfill_thread(name, fm, tpath):
+    """Events for one thread from its transcript: start at its first message, every `thread step` the thread
+    ran itself (only when its output line "<name>: d/t" is in the tool result, so a failed or quoted command
+    doesn't count), and a stop labelled done where the turn with a step total/total ended."""
+    pending, seen, steps, first = {}, set(), [], None
+    out_re = re.compile(rf"^{re.escape(name)}: (\d+)/(\d+) ?(.*)$", re.M)
+    try:
+        f = open(tpath, encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    with f:
+        for line in f:
+            if '"timestamp"' not in line:
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            t = iso_ts(e.get("timestamp") or "")
+            if t is None or e.get("type") not in ("user", "assistant"):
+                continue
+            if first is None:
+                first = t
+            content = (e.get("message") or {}).get("content")
+            if not isinstance(content, list):
+                continue
+            for b in content:
+                if not isinstance(b, dict):
+                    continue
+                if e["type"] == "assistant" and b.get("type") == "tool_use" and b.get("name") == "Bash" \
+                        and b.get("id") not in seen \
+                        and re.search(r"(^|[;&|(\s])thread\s+step\s+\d+/\d+", str((b.get("input") or {}).get("command", ""))):
+                    seen.add(b.get("id"))
+                    pending[b.get("id")] = t
+                elif e["type"] == "user" and b.get("type") == "tool_result" and b.get("tool_use_id") in pending:
+                    m = out_re.search(entry_text(b.get("content")))
+                    at = pending.pop(b["tool_use_id"])
+                    if m and 0 < int(m.group(2)) and int(m.group(1)) <= int(m.group(2)):
+                        steps.append((at, int(m.group(1)), int(m.group(2)), m.group(3).strip()))
+    if not steps or first is None:
+        return []
+    base = {"thread": name, "session": fm.get("session", ""), "model": fm.get("model", ""), "src": "backfill"}
+    mk = lambda ts, ev, **kw: dict(base, ts=round(ts, 1), at=datetime.fromtimestamp(ts).astimezone()
+                                   .isoformat(timespec="seconds"), event=ev, **kw)
+    events = [mk(first, "start", folder=fm.get("folder", ""))]
+    gaps, prompts = activity(tpath)
+    for at, d, tot, nxt in steps:
+        events.append(mk(at, "step", done=d, total=tot, next=nxt[:120]))
+        if d == tot:
+            nxt_prompt = min([p for p in prompts if p > at] or [float("inf")])
+            ends = [end for end, _ in gaps if at <= end < nxt_prompt]
+            if ends:
+                events.append(mk(max(ends), "stop", label="done", detail=f"{d}/{tot}"))
+    return events
+
+
+def cmd_backfill(dry):
+    """Once, idempotent: events from the transcripts of threads that recorded steps before the log existed.
+    Skips adopted sessions and sessions already backfilled; for a session with live events, only what came
+    before its first live event."""
+    have = load_events()
+    done_sessions = {e.get("session") for e in have if e.get("src") == "backfill"}
+    first_live = {}
+    for e in have:
+        if e.get("src") != "backfill":
+            first_live.setdefault(e.get("session"), e["ts"])
+    add = []
+    for t in all_threads(archived=True):
+        sid = t.get("session", "")
+        if t.get("origin") == "adopted" or not sid or sid in done_sessions:
+            continue
+        tp = transcript_of(sid)
+        evs = [e for e in backfill_thread(t["name"], t, tp) if e["ts"] < first_live.get(sid, float("inf"))] if tp else []
+        if evs:
+            add += evs
+            print(f"{t['name']:33} {len(evs):3} events from {os.path.basename(tp)}")
+    if dry or not add:
+        print(("Would add" if dry else "Added") + f" {len(add)} events.")
+        return
+    add.sort(key=lambda e: e["ts"])
+    os.makedirs(DATA, exist_ok=True)
+    fd = os.open(DURATIONS, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        os.write(fd, "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in add).encode())
+    finally:
+        os.close(fd)
+    print(f"Added {len(add)} events to {DURATIONS}.")
+
+
+def run_json(r):
+    keys = ["thread", "session", "model", "start", "end", "finished", "partial", "follow_up", "wall", "work",
+            "n_steps", "done", "total", "per_step", "step_list"]
+    return {k: r.get(k) for k in keys}
+
+
+def cmd_durations(args):
+    if "--backfill" in args:
+        cmd_backfill("--dry-run" in args)
+        return
+    names = [slug(a) for a in args if not a.startswith("--")]
+    runs = build_runs(load_events())
+    if names:
+        runs = [r for r in runs if r["thread"] in names]
+    measure(runs)
+    status = {t["name"]: t.get("status") for t in all_threads(archived=True)}
+    done = [r for r in runs if r["finished"]]
+    full = [r for r in done if not r["partial"]]
+    open_runs = [r for r in runs if not r["finished"] and (names or status.get(r["thread"]) == "running")]
+    med = {"runs": len(full), "wall": median(r["wall"] for r in full), "work": median(r["work"] for r in full),
+           "steps": median(r["n_steps"] for r in full), "per_step": median(r["per_step"] for r in full)}
+    if "--json" in args:
+        print(json.dumps({"finished": [run_json(r) for r in done], "open": [run_json(r) for r in open_runs],
+                          "median": med}, ensure_ascii=False))
+        return
+    if not runs:
+        print(f"No thread events{' for ' + ', '.join(names) if names else ''} yet ({DURATIONS}).")
+        return
+    hhmm = lambda ts: datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
+    print("work: time the thread was working (waiting for the owner or the main chat left out); "
+          "wall: start to done.")
+    head = f"{'thread':33} {'model':6} {'started':11}  {'work':>8} {'wall':>8} {'steps':>5} {'min/step':>8}"
+    if done:
+        print("\nFinished\n" + head)
+        for r in done:
+            mark = " (partial: start not logged)" if r["partial"] else " (follow-up)" if r["follow_up"] else ""
+            ps = f"{r['per_step']:.1f}" if r["per_step"] is not None else "?"
+            print(f"{r['thread']:33} {r['model']:6} {hhmm(r['start'])}  {dur(r['work']):>8} {dur(r['wall']):>8} "
+                  f"{r['n_steps']:>5} {ps:>8}{mark}")
+    if open_runs:
+        print("\nIn progress (so far)\n" + head.replace("steps", " step"))
+        for r in open_runs:
+            mark = " (partial: start not logged)" if r["partial"] else " (follow-up)" if r["follow_up"] else ""
+            st = f"{r['done']}/{r['total']}" if r["steps"] else "-"
+            print(f"{r['thread']:33} {r['model']:6} {hhmm(r['start'])}  {dur(r['work']):>8} {dur(r['wall']):>8} "
+                  f"{st:>5} {'':>8}{mark}")
+    if full:
+        print(f"\nMedians over {med['runs']} finished run{'s' if med['runs'] > 1 else ''}: work {dur(med['work'])}, "
+              f"wall {dur(med['wall'])}, {med['steps']:g} steps, "
+              + (f"{med['per_step']:.1f} min of work per step" if med["per_step"] is not None else "? min per step"))
+    elif done:
+        print("\nNo finished run with a logged start yet, so no medians.")
+    if names:
+        for r in done + open_runs:
+            print(f"\n{r['thread']} ({r['model']}), from {hhmm(r['start'])}"
+                  + (f" to {hhmm(r['end'])}" if r["finished"] else ", still open") + ":")
+            print("  each line: when the step was recorded, and the time since the line before it")
+            for s in r["step_list"]:
+                print(f"  {hhmm(s['at'])}  {s['done']:>2}/{s['total']:<2} work {dur(s['work']):>8}  wall "
+                      f"{dur(s['wall']):>8}  {s['next'][:70]}")
+
+
 def main():
     a = sys.argv[1:]
     if not a or a[0] in ("-h", "--help", "help"):
@@ -1062,6 +1448,8 @@ def main():
         cmd_signal(rest)
     elif cmd == "watch":
         cmd_watch(rest)
+    elif cmd == "durations":
+        cmd_durations(rest)
     elif cmd == "archive":
         if not rest:
             sys.exit("thread archive <name>...")
