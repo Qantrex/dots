@@ -19,6 +19,9 @@ How it fits together (details in the README, "Themes"):
   theme/themes/<name>/append/      optional: added to the end of a shared template
   theme/themes/<name>/hooks/       optional: `enter` and `leave`, run on a real switch
                                    (never on apply or render) and `enter` at login
+  base = "<other>" in theme.toml   optional: build on another theme. Its palette, templates,
+                                   appends and hooks apply first, and this theme only
+                                   holds what it adds or changes (root-agentic on root)
   theme/generators/                files built in code (the GTK theme from Adwaita)
   theme/current -> build/<name>-…  what the apps read (git-ignored, rendered here)
 
@@ -139,12 +142,32 @@ def expand(value):
     return str(Path(value).expanduser()) if isinstance(value, str) and value.startswith("~") else value
 
 
-def load(name):
+def read_toml(name):
     path = THEMES / name / "theme.toml"
     if not path.is_file():
         sys.exit(f"theme: no theme {name!r} (there are: {', '.join(theme_names()) or 'none'})")
     with path.open("rb") as f:
-        data = tomllib.load(f)
+        return tomllib.load(f)
+
+
+def chain(name):
+    """NAME and the themes it builds on, the base first. A theme with `base = "root"` in its
+    theme.toml takes everything from root and only holds what it adds or changes."""
+    names = [name]
+    while base := read_toml(names[0]).get("base"):
+        if base in names:
+            sys.exit(f"theme: {name}: base goes in a circle ({' -> '.join(reversed(names))} -> {base})")
+        names.insert(0, base)
+    return names
+
+
+def load(name):
+    path = THEMES / name / "theme.toml"
+    data = {}
+    for n in chain(name):
+        for key, value in read_toml(n).items():
+            # Tables ([colors], [look], ...) are merged key by key, plain values replaced.
+            data[key] = {**data.get(key, {}), **value} if isinstance(value, dict) else value
 
     def colours(table, where):
         out = {}
@@ -203,9 +226,10 @@ def render_text(text, ctx, where):
 
 
 def templates(name):
-    """Relative path -> source file, the theme's own templates winning over the shared ones."""
+    """Relative path -> source file, the theme's own templates winning over its base's and
+    those over the shared ones."""
     found = {}
-    for base in (TEMPLATES, THEMES / name / "templates"):
+    for base in (TEMPLATES, *(THEMES / n / "templates" for n in chain(name))):
         for p in sorted(base.rglob("*")):
             if p.is_file():
                 found[p.relative_to(base)] = p
@@ -222,16 +246,16 @@ def generator(stem):
 def render(name, out):
     ctx = load(name)
     out = Path(out)
-    appends = THEMES / name / "append"
+    appends = [THEMES / n / "append" for n in chain(name)]
     for rel, src in templates(name).items():
         dest = out / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         text = render_text(src.read_text(), ctx, src.relative_to(REPO))
         # themes/<name>/append/<rel>: added to the end of the shared template's output,
         # for a theme that only adds to a long file (CSS) instead of copying it.
-        extra = appends / rel
-        if extra.is_file():
-            text += render_text(extra.read_text(), ctx, extra.relative_to(REPO))
+        for extra in (a / rel for a in appends):
+            if extra.is_file():
+                text += render_text(extra.read_text(), ctx, extra.relative_to(REPO))
         dest.write_text(text)
         shutil.copymode(src, dest)
     # The GTK theme is built from the installed GTK's own Adwaita, unless the theme
@@ -281,7 +305,7 @@ def running(proc):
     return run("pgrep", "-x", proc)
 
 
-def reload(ctx, changed):
+def reload(ctx, changed, wallpaper=True):
     """Make running programs pick up theme/current. Every step is best effort."""
     done, later = [], []
     a = ctx["asset"]
@@ -293,12 +317,13 @@ def reload(ctx, changed):
         cursor = getattr(a, "cursor_theme", "")
         if cursor:
             run("hyprctl", "setcursor", cursor, str(getattr(a, "cursor_size", 24)))
-        wallpaper = getattr(a, "wallpaper", "")
-        if changed and wallpaper and Path(wallpaper).is_file():
-            # A new theme brings its wallpaper. `theme apply` keeps the one you picked.
-            if run("hyprctl", "-q", "hyprpaper", "wallpaper", f",{wallpaper}"):
+        picture = getattr(a, "wallpaper", "")
+        if changed and wallpaper and picture and Path(picture).is_file():
+            # A new theme brings its wallpaper. `theme apply` keeps the one you picked, and
+            # so does a switch between themes that share one (root and root-agentic).
+            if run("hyprctl", "-q", "hyprpaper", "wallpaper", f",{picture}"):
                 (HOME / ".cache/wallpaper").mkdir(parents=True, exist_ok=True)
-                (HOME / ".cache/wallpaper/last").write_text(wallpaper + "\n")
+                (HOME / ".cache/wallpaper/last").write_text(picture + "\n")
                 done.append("wallpaper")
 
     if have("qs") and run("qs", "ipc", "call", "theme", "reload"):
@@ -341,19 +366,24 @@ def reload(ctx, changed):
 
 
 def hook(name, which):
-    """Run themes/NAME/hooks/WHICH if it exists. A failing hook never stops a switch."""
-    path = THEMES / name / "hooks" / which
-    if not (name and os.access(path, os.X_OK)):
+    """Run themes/NAME/hooks/WHICH if it exists, and the same hook of the themes NAME builds
+    on: on enter the base first, on leave the base last. A failing hook never stops a switch."""
+    if not (name and (THEMES / name / "theme.toml").is_file()):
         return
-    env = {**os.environ, "THEME": name, "THEME_DIR": str(THEMES / name), "THEME_CURRENT": str(CURRENT)}
-    try:
-        r = subprocess.run([str(path)], env=env, capture_output=True, text=True, timeout=30)
-        if r.returncode != 0:
-            say(f"  {name} {which} hook failed ({r.returncode}): {(r.stderr or r.stdout).strip()[-300:]}")
-        else:
-            say(f"  {name} {which} hook ran")
-    except (OSError, subprocess.TimeoutExpired) as e:
-        say(f"  {name} {which} hook failed: {e}")
+    names = chain(name)
+    for n in names if which == "enter" else reversed(names):
+        path = THEMES / n / "hooks" / which
+        if not os.access(path, os.X_OK):
+            continue
+        env = {**os.environ, "THEME": name, "THEME_DIR": str(THEMES / n), "THEME_CURRENT": str(CURRENT)}
+        try:
+            r = subprocess.run([str(path)], env=env, capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                say(f"  {n} {which} hook failed ({r.returncode}): {(r.stderr or r.stdout).strip()[-300:]}")
+            else:
+                say(f"  {n} {which} hook ran")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            say(f"  {n} {which} hook failed: {e}")
 
 
 def cmd_list():
@@ -362,16 +392,19 @@ def cmd_list():
     for n in theme_names():
         with (THEMES / n / "theme.toml").open("rb") as f:
             desc = tomllib.load(f).get("description", "")
-        print(f"  {'*' if n == cur else ' '} {n:<12} {desc}")
+        print(f"  {'*' if n == cur else ' '} {n:<14} {desc}")
 
 
 def cmd_set(name, changed=True):
     old = current_name()
+    keep_wallpaper = False
     if changed and old and old != name and (THEMES / name / "theme.toml").is_file():
+        if (THEMES / old / "theme.toml").is_file():
+            keep_wallpaper = getattr(load(old)["asset"], "wallpaper", "") == getattr(load(name)["asset"], "wallpaper", None)
         hook(old, "leave")
     ctx = switch(name)
     say(f"theme: {name} rendered into {os.readlink(CURRENT)}")
-    done, later = reload(ctx, changed)
+    done, later = reload(ctx, changed, wallpaper=not keep_wallpaper)
     if done:
         say("  reloaded: " + ", ".join(done))
     if later:
@@ -582,7 +615,8 @@ def preview_key(name):
     """Changes whenever the theme, a template, its wallpaper or the preview code changes."""
     import hashlib
     h = hashlib.sha256()
-    h.update((THEMES / name / "theme.toml").read_bytes())
+    for n in reversed(chain(name)):
+        h.update((THEMES / n / "theme.toml").read_bytes())
     for rel, src in sorted(templates(name).items()):
         h.update(str(rel).encode())
         h.update(src.read_bytes())

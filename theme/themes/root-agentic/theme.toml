@@ -1,0 +1,8 @@
+# root-agentic: root with the agent as part of the desktop.
+#
+# Everything about the look comes from root (base = "root"): palette, fonts, sizes, wallpaper
+# and every template. This theme only adds templates/agentic.json, which switches on the
+# shell's agent panel (services/Agentic.qml), and two hooks. `theme set root` is the way back.
+
+base = "root"
+description = "root plus the agent panel: main chat, threads, inbox and brief on the right edge"
