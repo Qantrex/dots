@@ -8,6 +8,21 @@ Item {
     required property var shell
 
     property date now: new Date()
+
+    // The password field keeps the keyboard. After a lid close and resume it once had to be clicked first
+    // (2026-11-19): take it back whenever this screen's window becomes active again, the field is usable
+    // again, or (checked every second) the window has the keyboard but the field doesn't. The changes go
+    // to the lock's log, to see next time whether the compositor gave the window the keyboard at all.
+    readonly property bool windowActive: Window.active
+    onWindowActiveChanged: {
+        console.info("agentic-lock: window " + (windowActive ? "has" : "lost") + " the keyboard");
+        if (windowActive) input.forceActiveFocus();
+    }
+    Timer {
+        interval: 1000; repeat: true
+        running: view.windowActive && !input.activeFocus && input.enabled
+        onTriggered: { console.info("agentic-lock: field had no focus, taking it back"); input.forceActiveFocus(); }
+    }
     Timer { interval: 1000; running: true; repeat: true; onTriggered: view.now = new Date() }
 
     Column {
@@ -67,6 +82,7 @@ Item {
                 Keys.onEnterPressed: view.shell.submit()
                 Keys.onEscapePressed: view.shell.buffer = ""
                 Component.onCompleted: forceActiveFocus()
+                onEnabledChanged: if (enabled) forceActiveFocus()
             }
             Label {
                 anchors.verticalCenter: parent.verticalCenter
