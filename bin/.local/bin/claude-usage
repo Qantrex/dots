@@ -159,16 +159,25 @@ def calibrate_values(verbose=False):
     result = {}
     for name, ip, ia in (("5h", 1, 2), ("week", 3, 4)):
         ratios = []
-        # Pairs of readings in the same window (same reset time) where the percentage went up.
-        for a, b in zip(log, log[1:]):
-            if a[ia] != b[ia] or b[ip] <= a[ip]:
+        # Every open session writes its own last reading, and idle sessions report stale numbers, so the log
+        # jumps back and forth (31, 19, 31, 27 ...). Only a new highest value in a window (same reset time) is
+        # a real step: dollars spent since the previous highest value was first seen, per point gained.
+        top = {}   # reset time -> (highest value, time first seen)
+        for r in log:
+            key, val, t = r[ia], r[ip], r[0]
+            if key not in top:
+                top[key] = (val, t)
                 continue
-            if b[0] > gen:
-                dollars = sum(r[2] for r in rows if a[0] <= r[0] < b[0] and r[1] != "pi")
+            best, since = top[key]
+            if val <= best:
+                continue
+            if t > gen:
+                dollars = sum(x[2] for x in rows if since <= x[0] < t and x[1] != "pi")
             else:
-                dollars = sum(r[2] for r in rows if a[0] <= r[0] < b[0])
+                dollars = sum(x[2] for x in rows if since <= x[0] < t)
             if dollars > 0:
-                ratios.append(dollars / (b[ip] - a[ip]))
+                ratios.append(dollars / (val - best))
+            top[key] = (val, t)
         if ratios:
             result[name] = statistics.median(ratios)
             if verbose:
