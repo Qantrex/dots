@@ -389,7 +389,10 @@ def snapshot():
         lines.append("layer ?")
     try:
         for b in json.loads(sh(["hyprctl", "binds", "-j"]) or "[]"):
-            lines.append(f"bind {b.get('modmask')} {b.get('key')} {b.get('dispatcher')} {b.get('arg')}")
+            # A lua bind's dispatcher is a pointer and its arg a running number, new on every
+            # Hyprland reload: its description says what it does.
+            what = b.get("description") or re.sub(r"0x[0-9a-f]+", "", f"{b.get('dispatcher')}")
+            lines.append(f"bind {b.get('submap') or '-'} {b.get('modmask')} {b.get('key')} {what}")
     except ValueError:
         lines.append("bind ?")
     try:
