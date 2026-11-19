@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""What the shell's agent panel (theme root-agentic, quickshell/agentic/) reads, as JSON.
+
+  agentic-shell feed <main|thread> [--once] [--strong '#fff'] [--code '#aaa']
+                               the conversation of that session, one JSON object per line, and
+                               then every new message as it is written (until killed)
+  agentic-shell home [--seen]  one JSON object: the brief, the last inbox events and how many
+                               are new since the home tab was last looked at (--seen: now)
+  agentic-shell snapshot       what is running that a theme could have started: user units,
+                               layers, keybinds, windows, the shell's child processes, wallpaper
+  agentic-shell leave-check    from root: switch to root-agentic and back, and compare the
+                               snapshots before and after. Changes the desktop for a few seconds.
+
+The panel never talks to Claude itself. It reads the transcript Claude Code writes for the session
+in a tmux window of "main" (found through the pane, so a /clear or a resume is followed), and it
+sends with `thread send`. Nothing here needs a Claude Code setting, and nothing costs usage.
+
+feed lines: {"op": "reset", "target", "session"}            start, or the session changed
+            {"op": "add", "id", "role", "text", "rich", "at"}  role: user, assistant, tool, ask, note
+            {"op": "set", "id", ...}                         replaces the entry with that id (tool steps)
+            {"op": "ready"}                                  the history is through, live from here
+            {"op": "gone"}                                   no session in that window right now
+"""
+import glob
+import html
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+HOME = os.path.expanduser("~")
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "agentic")
+RECORDS = os.path.join(os.path.dirname(STATE), "claude-sessions")
+THREADS = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share"), "agentic", "threads")
+INBOX = os.path.join(STATE, "inbox.jsonl")
+SEEN = os.path.join(STATE, "panel-seen")
+BIN = os.path.join(HOME, ".local/bin")
+SESSION = "main"
+HISTORY = 150            # entries shown from before the panel opened
+TAIL_BYTES = 12 << 20    # read at most this much from the end of a long transcript
+MAX_TEXT = 12000         # characters of one message
+
+
+def sh(args, timeout=10):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def out(obj):
+    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+# ---- which transcript ---------------------------------------------------------------------
+
+def alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def transcript_of(target):
+    """(session id, transcript path) of the Claude session in tmux window main:TARGET, or (None, None).
+    Session records name their pane; several can (a /clear, a resume, an older session in the same
+    pane), so a live process wins and then the newest."""
+    pane = sh(["tmux", "list-panes", "-t", f"={SESSION}:{target}", "-F", "#{pane_id}"]).strip().splitlines()
+    if not pane:
+        return None, None
+    best = None
+    for f in glob.glob(os.path.join(RECORDS, "*.json")):
+        try:
+            r = json.load(open(f, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if r.get("pane") != pane[0] or not r.get("transcript"):
+            continue
+        key = (alive(r.get("pid")), r.get("started") or 0)
+        if best is None or key > best[0]:
+            best = (key, r)
+    if best and os.path.isfile(best[1]["transcript"]):
+        return best[1].get("id"), best[1]["transcript"]
+    return None, None
+
+
+# ---- one transcript line -> what the panel shows ---------------------------------------------
+
+def clip(s, n):
+    s = " ".join(str(s).split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def tool_line(b):
+    name, i = b.get("name", "tool"), b.get("input") or {}
+    if name == "Bash":
+        return clip(i.get("description") or i.get("command") or "command", 110)
+    if name in ("Read", "Edit", "Write", "NotebookEdit"):
+        return f"{name} {os.path.basename(i.get('file_path') or i.get('notebook_path') or '')}"
+    if name == "SendMessage":
+        return clip(f"to {i.get('to', '?')}: {i.get('message', '')}", 110)
+    if name in ("Agent", "Task"):
+        return clip(f"agent: {i.get('description', '')}", 110)
+    if name == "Skill":
+        return f"skill {i.get('skill', '')}"
+    if name in ("WebSearch", "WebFetch"):
+        return clip(f"{name} {i.get('query') or i.get('url') or ''}", 110)
+    if name.startswith("mcp__"):
+        return name.split("__", 1)[1].replace("__", " ")
+    return name
+
+
+def question(b):
+    qs = (b.get("input") or {}).get("questions") or []
+    return clip(qs[0].get("question", "") if qs else "", 300) or "a question"
+
+
+INLINE = re.compile(r"(`[^`\n]+`)|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\(([^)\s]+)\)")
+
+
+def rich(text, strong, code):
+    """A message as Qt rich text. Everything from the message is escaped first, so the only tags
+    in the result are the ones written here (no images, no links to fetch): bold, headings,
+    code. The rest of Markdown stays as typed."""
+    def inline(line):
+        res, pos = [], 0
+        for m in INLINE.finditer(line):
+            res.append(html.escape(line[pos:m.start()], quote=False))
+            if m.group(1):
+                res.append(f'<span style="color:{code}">{html.escape(m.group(1)[1:-1], quote=False)}</span>')
+            elif m.group(2):
+                res.append(f'<b style="color:{strong}">{html.escape(m.group(2), quote=False)}</b>')
+            else:
+                label, url = m.group(3), m.group(4)
+                res.append(html.escape(label if label == url else f"{label} ({url})", quote=False))
+            pos = m.end()
+        res.append(html.escape(line[pos:], quote=False))
+        return "".join(res)
+
+    lines, fenced = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            lines.append(f'<span style="color:{code}">{html.escape(line, quote=False)}</span>')
+            continue
+        m = re.match(r"\s{0,3}#{1,6}\s+(.*)", line)
+        if m:
+            lines.append(f'<b style="color:{strong}">{inline(m.group(1))}</b>')
+            continue
+        m = re.match(r"(\s*)[-*]\s+(.*)", line)
+        if m:
+            lines.append(f"{m.group(1)}• {inline(m.group(2))}")
+            continue
+        lines.append(inline(line))
+    return '<p style="white-space:pre-wrap;margin:0">' + "\n".join(lines) + "</p>"
+
+
+def when(d):
+    try:
+        return datetime.fromisoformat(d["timestamp"].replace("Z", "+00:00")).astimezone().strftime("%H:%M")
+    except (KeyError, ValueError, AttributeError):
+        return ""
+
+
+TAGS = re.compile(r"<(/?)[a-zA-Z][\w-]*(\s[^>]*)?>")
+
+
+def user_text(text):
+    """(role, text) for something that arrived as a user message, or None to leave it out."""
+    t = text.strip()
+    if not t:
+        return None
+    if t.startswith("This session is being continued from a previous conversation"):
+        return "note", "The conversation got long and was summarized here."
+    if t.startswith("[inbox, from code]"):
+        return "note", t
+    m = re.search(r"<command-name>\s*(/[^<\s]+)", t)
+    if m:
+        return "note", m.group(1)
+    if t.startswith(("<local-command", "<system-reminder", "<bash-", "Caveat:")):
+        return None
+    if t.startswith("<"):
+        # A wrapper Claude Code put around something that wasn't typed (a message from another
+        # session, a finished background task): one dim line, tags dropped.
+        return "note", clip(TAGS.sub(" ", t), 240)
+    return "user", t
+
+
+class Feed:
+    """Turns transcript lines into entries, folding runs of tool steps into one line."""
+
+    def __init__(self, strong, code):
+        self.strong, self.code = strong, code
+        self.n = 0
+        self.steps = None  # the open run of tool steps: {"id", "count"}
+
+    def entry(self, role, text, d):
+        self.steps = None
+        self.n += 1
+        text = text[:MAX_TEXT]
+        e = {"op": "add", "id": d.get("uuid") or f"e{self.n}", "role": role, "text": text, "at": when(d)}
+        e["rich"] = rich(text, self.strong, self.code) if role == "assistant" else ""
+        return e
+
+    def parse(self, line):
+        if '"type":"user"' not in line and '"type":"assistant"' not in line:
+            return []
+        try:
+            d = json.loads(line)
+        except ValueError:
+            return []
+        kind = d.get("type")
+        if kind not in ("user", "assistant") or d.get("isMeta") or d.get("isSidechain"):
+            return []
+        content = (d.get("message") or {}).get("content")
+        blocks = [{"type": "text", "text": content}] if isinstance(content, str) else (content or [])
+        res = []
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            bt = b.get("type")
+            if bt == "text" and kind == "user":
+                got = user_text(b.get("text") or "")
+                if got:
+                    res.append(self.entry(got[0], got[1], d))
+            elif bt == "text" and (b.get("text") or "").strip():
+                res.append(self.entry("assistant", b["text"].strip(), d))
+            elif bt == "tool_use" and b.get("name") == "AskUserQuestion":
+                res.append(self.entry("ask", question(b), d))
+            elif bt == "tool_use":
+                if self.steps is None:
+                    self.n += 1
+                    self.steps = {"id": d.get("uuid") or f"e{self.n}", "count": 0, "new": True}
+                s = self.steps
+                s["count"] += 1
+                text = tool_line(b) if s["count"] == 1 else f"{s['count']} steps, last: {tool_line(b)}"
+                res.append({"op": "add" if s.pop("new", False) else "set", "id": s["id"], "role": "tool",
+                            "text": text, "rich": "", "at": when(d)})
+        return res
+
+
+def fold(entries):
+    """History only: drop the intermediate versions of a tool line and keep the last HISTORY entries."""
+    order, last = [], {}
+    for e in entries:
+        if e["id"] not in last:
+            order.append(e["id"])
+        last[e["id"]] = {**e, "op": "add"}
+    return [last[i] for i in order][-HISTORY:]
+
+
+def cmd_feed(args):
+    once = "--once" in args
+    opt = lambda k, default: args[args.index(k) + 1] if k in args and args.index(k) + 1 < len(args) else default
+    strong, code = opt("--strong", "#ffffff"), opt("--code", "#a0a0a0")
+    names = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] not in ("--strong", "--code"))]
+    if not names:
+        sys.exit("agentic-shell feed <main|thread> [--once]")
+    target = names[0]
+    current, fh, feed = False, None, None  # False: not looked yet (None: looked, no session)
+    buf, checked, gone = "", 0.0, False
+    while True:
+        now = time.monotonic()
+        if fh is None or now - checked > 3:
+            checked = now
+            sid, path = transcript_of(target)
+            if path != current:
+                if fh:
+                    fh.close()
+                current, fh, buf = path, None, ""
+                if path is None:
+                    if not gone:
+                        out({"op": "gone", "target": target})
+                    gone = True
+                else:
+                    gone = False
+                    out({"op": "reset", "target": target, "session": sid})
+                    fh = open(path, "rb")
+                    size = os.fstat(fh.fileno()).st_size
+                    if size > TAIL_BYTES:
+                        fh.seek(size - TAIL_BYTES)
+                        fh.readline()  # the rest of a cut line
+                    feed = Feed(strong, code)
+                    data = fh.read()
+                    cut = data.rfind(b"\n") + 1
+                    fh.seek(fh.tell() - (len(data) - cut))  # a half-written last line is read next time
+                    history = []
+                    for line in data[:cut].decode("utf-8", "replace").splitlines():
+                        history.extend(feed.parse(line))
+                    for e in fold(history):
+                        out(e)
+                    out({"op": "ready"})
+        if once:
+            return
+        if fh:
+            chunk = fh.read()
+            if chunk:
+                buf += chunk.decode("utf-8", "replace")
+                *lines, buf = buf.split("\n")
+                for line in lines:
+                    for e in feed.parse(line):
+                        out(e)
+        time.sleep(0.4)
+
+
+# ---- home tab ---------------------------------------------------------------------------------
+
+def cmd_home(args):
+    if "--seen" in args:
+        os.makedirs(STATE, exist_ok=True)
+        with open(SEEN, "w") as f:
+            f.write(str(int(time.time())))
+    try:
+        seen = int(open(SEEN).read().strip())
+    except (OSError, ValueError):
+        seen = 0
+    events = []
+    try:
+        for line in open(INBOX, encoding="utf-8"):
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                pass
+    except OSError:
+        pass
+    events.sort(key=lambda e: e.get("ts", 0), reverse=True)
+    today = datetime.now().date()
+
+    def stamp(ts):
+        t = datetime.fromtimestamp(ts)
+        return t.strftime("%H:%M") if t.date() == today else t.strftime("%a %H:%M")
+
+    inbox = [{"at": stamp(e.get("ts", 0)), "level": e.get("level", ""), "source": e.get("source", ""),
+              "text": clip(e.get("text", ""), 400), "untrusted": bool(e.get("untrusted")), "new": e.get("ts", 0) > seen}
+             for e in events[:40]]
+    brief = sh([os.path.join(BIN, "agentic"), "brief", "--print"], timeout=20).strip().splitlines()
+    out({"brief": brief, "inbox": inbox, "new": sum(1 for e in events if e.get("ts", 0) > seen)})
+
+
+# ---- what is running (the leave check) --------------------------------------------------------
+
+def qs_pid():
+    return sh(["pgrep", "-x", "-o", "qs"]).strip() or sh(["pgrep", "-x", "-o", "quickshell"]).strip()
+
+
+def snapshot():
+    lines = []
+    for row in sh(["systemctl", "--user", "list-units", "--state=active,activating", "--no-legend", "--plain"]).splitlines():
+        unit = row.split()[0] if row.split() else ""
+        # Scopes and slices come and go with every window opened; services, timers, sockets and paths don't.
+        if unit.endswith((".service", ".timer", ".socket", ".path")) and not unit.startswith("app-"):
+            lines.append(f"unit {unit}")
+    try:
+        layers = json.loads(sh(["hyprctl", "layers", "-j"]) or "{}")
+        for mon, m in layers.items():
+            for level in (m.get("levels") or {}).values():
+                for l in level:
+                    lines.append(f"layer {mon} {l.get('namespace')}")
+    except ValueError:
+        lines.append("layer ?")
+    try:
+        for b in json.loads(sh(["hyprctl", "binds", "-j"]) or "[]"):
+            lines.append(f"bind {b.get('modmask')} {b.get('key')} {b.get('dispatcher')} {b.get('arg')}")
+    except ValueError:
+        lines.append("bind ?")
+    try:
+        for c in json.loads(sh(["hyprctl", "clients", "-j"]) or "[]"):
+            lines.append(f"window {c.get('class')}")
+    except ValueError:
+        lines.append("window ?")
+    pid = qs_pid()
+    for child in sh(["pgrep", "-P", pid]).split() if pid else []:
+        try:
+            cmd = open(f"/proc/{child}/cmdline", "rb").read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+        except OSError:
+            continue
+        lines.append(f"shell-child {cmd}")
+    for row in sh(["hyprctl", "hyprpaper", "listactive"]).splitlines():
+        lines.append(f"wallpaper {row.strip()}")
+    try:
+        lines.append("wallpaper-last " + open(os.path.join(HOME, ".cache/wallpaper/last")).read().strip())
+    except OSError:
+        pass
+    status = sh(["qs", "ipc", "call", "agentic", "status"]).strip()
+    lines.append(f"panel {status if status in ('shown', 'hidden') else 'off'}")
+    return sorted(lines)
+
+
+def stable_snapshot():
+    """The shell starts short-lived helpers (a `claude-usage` read, a volume query) all the time.
+    Keep only what is there in three looks, half a second apart."""
+    looks = []
+    for i in range(3):
+        if i:
+            time.sleep(0.5)
+        looks.append(snapshot())
+    return sorted(l for l in set(looks[0]) if all(l in s for s in looks[1:]) or not l.startswith("shell-child"))
+
+
+def cmd_leave_check():
+    theme = os.path.join(BIN, "theme")
+    cur = sh([theme, "list"]).splitlines()[0].replace("current:", "").strip() if sh([theme, "list"]) else ""
+    if cur != "root":
+        sys.exit(f"agentic-shell leave-check: starts from root (current: {cur or 'unknown'})")
+    before = stable_snapshot()
+    subprocess.run([theme, "set", "root-agentic"], capture_output=True)
+    time.sleep(2.5)
+    during = stable_snapshot()
+    subprocess.run([theme, "set", "root"], capture_output=True)
+    time.sleep(2.5)
+    after = stable_snapshot()
+    print("root-agentic adds:")
+    for l in sorted(set(during) - set(before)):
+        print(f"  + {l}")
+    for l in sorted(set(before) - set(during)):
+        print(f"  - {l}")
+    left = sorted(set(after) - set(before))
+    lost = sorted(set(before) - set(after))
+    if not left and not lost:
+        print("back on root: nothing left over, nothing missing. OK")
+        return
+    print("back on root, DIFFERENT from before:")
+    for l in left:
+        print(f"  left over: {l}")
+    for l in lost:
+        print(f"  missing:   {l}")
+    sys.exit(1)
+
+
+def main():
+    a = sys.argv[1:]
+    cmd = a[0] if a else ""
+    try:
+        if cmd == "feed":
+            cmd_feed(a[1:])
+        elif cmd == "home":
+            cmd_home(a[1:])
+        elif cmd == "snapshot":
+            print("\n".join(stable_snapshot()))
+        elif cmd == "leave-check":
+            cmd_leave_check()
+        else:
+            print(__doc__)
+            sys.exit(0 if cmd in ("-h", "--help", "help") else 1)
+    except KeyboardInterrupt:
+        pass
+    except BrokenPipeError:
+        # The reader went away (the panel closed): nothing more to say, and no traceback at exit.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+
+
+if __name__ == "__main__":
+    main()

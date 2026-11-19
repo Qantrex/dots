@@ -9,6 +9,9 @@
   thread resume <name> | --open              reopen a thread where it was (claude --resume); --open: all
                                              that a shutdown or crash left open (what `cr` did)
   thread model <name> <model>                switch the model (only while it's idle)
+  thread send <name|main> <text...>          type a message into a thread or the main chat and send it, as if
+                                             typed there; refused (exit 3) while a question or dialog is open
+                                             or something is already typed. The shell's agent panel uses this.
   thread progress [--brief]                  what each running thread is doing right now (state, how long, last action)
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread rm <name>                           forget a thread (the transcript stays)
@@ -253,6 +256,32 @@ def input_empty(screen_e):
     rest = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", rest)                  # other colours
     return rest.replace("\u00a0", " ").strip() == ""
 
+
+
+def cmd_send(args):
+    """Type TEXT into a session's input line and press Enter. One way in for everything that
+    sends for me (the agent panel), with one rule: never type into a dialog or over a draft."""
+    if len(args) < 2:
+        sys.exit("thread send <name|main> <text...>")
+    name = "main" if args[0] == "main" else slug(args[0])
+    # One line: a raw newline would send the first half early.
+    text = " ".join(" ".join(args[1:]).split())
+    if not text:
+        sys.exit("thread send: nothing to send")
+    # Only Claude sessions: the main chat and threads with a state file, never a shell window.
+    if name not in windows() or (name != "main" and read(name)[0] is None):
+        print(f"thread send: no running session '{name}' (thread list)", file=sys.stderr)
+        sys.exit(2)
+    target = f"{SESSION}:{name}"
+    if not empty_prompt(target):
+        print(f"thread send: '{name}' is asking something or has text typed already; answer it in its terminal (dock term {name})", file=sys.stderr)
+        sys.exit(3)
+    # -l: literal keys, --: a text starting with a dash is still text.
+    if subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text]).returncode:
+        sys.exit(1)
+    time.sleep(0.15)
+    if subprocess.run(["tmux", "send-keys", "-t", target, "Enter"]).returncode:
+        sys.exit(1)
 
 
 def cmd_start(args):
@@ -513,6 +542,8 @@ def main():
         cmd_model(rest)
     elif cmd == "progress":
         cmd_progress(rest)
+    elif cmd == "send":
+        cmd_send(rest)
     elif cmd == "adopt":
         cmd_adopt(rest)
     elif cmd == "rm":
