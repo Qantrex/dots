@@ -22,8 +22,8 @@
 # runs until I unlock: while locked the screen never went off, the steps that came due meanwhile (screen
 # off, the 15-minute suspend) all ran right after the unlock, and a lock asked for by before-sleep only
 # started after before-sleep had ended, so the laptop went to sleep while the lock was still being built
-# (22:56:27, the lock's window lost the keyboard as it came up). Now the lock runs in the background,
-# and before-sleep starts it itself and waits until it is up. -w stays: it makes swayidle wait for that.
+# and on resume hyprlock took over from it (the "flash", 23:16). Now the lock runs in the background, and
+# before-sleep starts it itself and waits until it is up. -w stays: it makes swayidle wait for that.
 #
 # The old one-liner (`swayidle -w timeout 300 hyprlock ...`) only locked: it
 # had no screen-off step, so the lock screen stayed lit on the OLED panel

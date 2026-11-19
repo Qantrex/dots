@@ -33,16 +33,16 @@ ShellRoot {
     property var brief: []
     property bool done: false
 
-    // The keyboard after a suspend (2026-11-19): a lock started by before-sleep had the keyboard, lost it as
-    // the suspend began, and after resume Hyprland didn't give it back until a click. Hyprland gives a lock
-    // surface the keyboard on pointer motion (and on a new frame, but only when nothing has focus, and a
-    // real lock draws one frame a minute), never on a key press, and the client can't take it. So when no
-    // screen of the lock has had the keyboard for half a second, ask Hyprland for a pointer motion: the
-    // cursor moved to where it already is (`hl.dsp.cursor.move` warps and simulates a movement). Every
-    // 2 s after that, at most 30 times per loss. The preview (tests) only logs it, so a test never moves
-    // the focus of the desktop it runs on.
+    // The keyboard after a suspend (2026-11-19): the lock's window has the keyboard, loses it as the suspend
+    // begins, and after resume typing works only after a click on the field. Not settled yet which side
+    // loses it (LockView logs both). Hyprland gives a lock surface the keyboard on pointer motion, so when
+    // no screen of the lock has had the keyboard for half a second, ask Hyprland for one: the cursor moved
+    // to where it already is (`hl.dsp.cursor.move` warps and simulates a movement). On the 23:23 lid close
+    // twelve of these changed nothing, so LockView also asks Qt to activate the window (focusTry). Every 2 s,
+    // at most 30 times per loss. The preview (tests) only logs, so a test never moves the desktop's focus.
     property int keyboardViews: 0          // LockView windows that have the keyboard
     property int focusTries: 0
+    signal focusTry(int n)
     onKeyboardViewsChanged: if (keyboardViews > 0) focusTries = 0
     Timer {
         interval: root.focusTries === 0 ? 500 : 2000
@@ -53,6 +53,7 @@ ShellRoot {
             console.info("agentic-lock: no screen has the keyboard, asking Hyprland for it (" + root.focusTries + ")"
                          + (root.preview ? " [preview: not sent]" : ""));
             if (!root.preview) refocus.running = true;
+            root.focusTry(root.focusTries);
         }
     }
     Process {
@@ -158,11 +159,14 @@ ShellRoot {
         enabled: root.preview
         function type(text: string): void { root.buffer = text; }
         function submit(): void { root.submit(); }
-        // Saves what the preview shows as a PNG, without the window being on a visible workspace.
-        function shot(path: string): void { previewLoader.item.view.grabToImage(r => r.saveToFile(path)); }
+        // Takes the field's focus away (to the view), to test LockView's refocus while the window isn't active.
+        // (Screenshots of the hidden preview: grim -T with the window's stableId; grabToImage gives nothing there.)
+        function blur(): void { previewLoader.item.view.forceActiveFocus(); }
         function state(): string {
             return JSON.stringify({ status: root.status, failed: root.failed, checking: root.checking, done: root.done,
-                                    left: root.left, brief: root.brief, typed: root.buffer.length });
+                                    left: root.left, brief: root.brief, typed: root.buffer.length,
+                                    windowActive: previewLoader.item.view.windowActive, fieldFocus: previewLoader.item.view.fieldFocus,
+                                    focusItem: previewLoader.item.view.focusItem });
         }
     }
 }
