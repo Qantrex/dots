@@ -51,7 +51,7 @@ ensure() {
     # "main" by name (.zshrc), never to this one.
     setsid -f foot --app-id=agentic-panel --title="claude main" \
         tmux new-session -s "$panel" -t "$session" \; set-option destroy-unattached on \; \
-        select-window -t "$panel:main" >/dev/null 2>&1
+        select-window -t "$panel:$(window_of main)" >/dev/null 2>&1
     for _ in $(seq 1 50); do window_open && tmux has-session -t "=$panel" 2>/dev/null && { status_line; return 0; }; sleep 0.1; done
     return 1
 }
@@ -62,6 +62,14 @@ status_line() {
     tmux set-option -t "$panel" status 2
     tmux set-option -t "$panel" 'status-format[1]' \
         "#[align=left,fg=colour245] #(cat \"${XDG_CACHE_HOME:-$HOME/.cache}/agentic-threads.line\" 2>/dev/null || echo 'no threads')"
+}
+
+# The window called NAME in the main session. tmux names a plain shell after its folder (automatic-rename),
+# so a second window can carry the same name: the one named on purpose wins.
+window_of() {
+    tmux list-windows -t "=$session" -F '#{window_name} #{automatic-rename} #{window_id}' 2>/dev/null |
+        awk -v n="$1" '$1 == n { if ($2 == "0") { print $3; found = 1; exit } if (!first) first = $3 }
+                       END { if (!found && first) print first }'
 }
 
 # --first: the session that has waited longest (bar flag, session-track.sh in claude-config).
@@ -93,7 +101,8 @@ select_target() {
         [[ -n $win ]] && tmux select-window -t "$panel:$win" 2>/dev/null && { tmux select-pane -t "$name"; return 0; }
         notify-send -a Claude "Claude" "That session isn't in the main tmux session."; return 1
     fi
-    tmux select-window -t "$panel:$name" 2>/dev/null || {
+    win=$(window_of "$name")
+    [[ -n $win ]] && tmux select-window -t "$panel:$win" 2>/dev/null || {
         notify-send -a Claude "Claude" "No thread called '$name' is running."; return 1; }
 }
 

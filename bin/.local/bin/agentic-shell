@@ -7,6 +7,20 @@
   agentic-shell home [--seen]  one JSON object: the brief, the last inbox events, how many are
                                new since the home tab was last looked at (--seen: now), and
                                the threads that are open
+  agentic-shell requests       one JSON object: what waits for a yes, a no or an answer (permission
+                               requests and question dialogs of Claude sessions, open question
+                               rounds of threads)
+  agentic-shell answer <id> allow|deny [json]
+                               the panel's answer to one of them; json: {"answers": {question: label
+                               | [labels] | free text}} for questions, {"message": why} for a deny
+  agentic-shell hold [--for SECONDS]
+                               the PermissionRequest hook of Claude Code (hook input on stdin): shows
+                               the request in the panel and waits for its answer. Prints nothing
+                               whenever the panel cannot answer, and the terminal asks as always.
+  agentic-shell release [--all]
+                               hook input on stdin: drops the requests of that session which are
+                               settled (the tool ran, the turn ended). --all: every request, back
+                               to the terminal (the theme's leave hook).
   agentic-shell snapshot       what is running that a theme could have started: user units,
                                layers, keybinds, windows, the shell's child processes, wallpaper
   agentic-shell leave-check    from root: switch to root-agentic and back, and compare the
@@ -14,7 +28,11 @@
 
 The panel never talks to Claude itself. It reads the transcript Claude Code writes for the session
 in a tmux window of "main" (found through the pane, so a /clear or a resume is followed), and it
-sends with `thread send`. Nothing here needs a Claude Code setting, and nothing costs usage.
+sends with `thread send`. Nothing costs usage. One Claude Code setting is used: the PermissionRequest
+hook (~/Projects/claude-config/hooks/permission-panel.sh) that runs `hold`. The terminal's own
+dialog stays up and answerable the whole time; whichever answers first counts. A request is a file
+in ~/.local/state/agentic/requests/, its answer a file next to it, so any process of this user can
+answer one, as it could already type into the session's terminal with tmux.
 
 feed lines: {"op": "reset", "target", "session"}            start, or the session changed
             {"op": "add", "id", "role", "text", "rich", "at"}  role: user, assistant, tool, ask, note
@@ -23,10 +41,13 @@ feed lines: {"op": "reset", "target", "session"}            start, or the sessio
             {"op": "gone"}                                   no session in that window right now
 """
 import glob
+import hashlib
 import html
 import json
 import os
 import re
+import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -38,6 +59,11 @@ RECORDS = os.path.join(os.path.dirname(STATE), "claude-sessions")
 THREADS = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share"), "agentic", "threads")
 INBOX = os.path.join(STATE, "inbox.jsonl")
 SEEN = os.path.join(STATE, "panel-seen")
+REQUESTS = os.path.join(STATE, "requests")
+ANSWERED = os.path.join(STATE, "panel-answers.log")
+QS = shlex.split(os.environ.get("AGENTIC_QS") or "qs")    # the test instance: "qs -p <dir>"
+CONF = os.environ.get("QS_AGENTIC_CONF") or os.path.join(HOME, "dotfiles/theme/current/agentic.json")
+MAX_REQUEST = 20000      # characters of one request shown in the panel
 BIN = os.path.join(HOME, ".local/bin")
 SESSION = "main"
 HISTORY = 150            # entries shown from before the panel opened
@@ -67,11 +93,20 @@ def alive(pid):
         return False
 
 
+def pane_of(target):
+    """The pane of tmux window main:TARGET, or "". tmux names a plain shell after its folder
+    (automatic-rename), so a second window can carry the same name: the one named on purpose wins."""
+    rows = [r.split("\t") for r in sh(["tmux", "list-windows", "-t", f"={SESSION}", "-F",
+                                       "#{window_name}\t#{automatic-rename}\t#{pane_id}"]).splitlines()]
+    rows = sorted((r for r in rows if len(r) == 3 and r[0] == target), key=lambda r: r[1] != "0")
+    return rows[0][2] if rows else ""
+
+
 def transcript_of(target):
     """(session id, transcript path) of the Claude session in tmux window main:TARGET, or (None, None).
     Session records name their pane; several can (a /clear, a resume, an older session in the same
     pane), so a live process wins and then the newest."""
-    pane = sh(["tmux", "list-panes", "-t", f"={SESSION}:{target}", "-F", "#{pane_id}"]).strip().splitlines()
+    pane = pane_of(target)
     if not pane:
         return None, None
     best = None
@@ -80,7 +115,7 @@ def transcript_of(target):
             r = json.load(open(f, encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if r.get("pane") != pane[0] or not r.get("transcript"):
+        if r.get("pane") != pane or not r.get("transcript"):
             continue
         key = (alive(r.get("pid")), r.get("started") or 0)
         if best is None or key > best[0]:
@@ -368,6 +403,254 @@ def cmd_home(args):
 
 # ---- what is running (the leave check) --------------------------------------------------------
 
+# ---- requests: what waits for the owner ---------------------------------------------------
+
+def load(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def stdin_json():
+    """What a hook got on stdin. Read from the open stream: Claude Code passes a socket, and a
+    socket cannot be opened again by its path (/dev/stdin)."""
+    try:
+        return json.loads(sys.stdin.read())
+    except (OSError, ValueError):
+        return None
+
+
+def save(path, obj):
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def drop(*paths):
+    for p in paths:
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+
+
+def panel_status():
+    """off, hidden or shown; off also when the shell does not answer."""
+    return (sh(QS + ["ipc", "call", "agentic", "status"], timeout=3).split() or ["off"])[0]
+
+
+def tell_panel():
+    """True when the shell took the news that the requests changed."""
+    try:
+        return subprocess.run(QS + ["ipc", "call", "agentic", "requests"], capture_output=True, timeout=3).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def request_id(session, tool, tool_input):
+    """The same for the PermissionRequest of a call and for its PostToolUse. A question dialog comes
+    back with its answers added, so only the questions count there."""
+    what = tool_input.get("questions") if tool == "AskUserQuestion" and isinstance(tool_input, dict) else tool_input
+    digest = hashlib.sha1(json.dumps([tool, what], sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+    return f"{session}.{digest}"
+
+
+def request_text(tool, i):
+    """(title, text) of a permission request, as plain text."""
+    if not isinstance(i, dict):
+        return tool, json.dumps(i, ensure_ascii=False, indent=2)
+    path = i.get("file_path") or i.get("notebook_path") or ""
+    if tool == "Bash":
+        return i.get("description") or "Run a command", str(i.get("command") or "")
+    if tool == "Write":
+        return f"Write {path}", str(i.get("content") or "")
+    if tool == "Edit":
+        old = "\n".join("- " + l for l in str(i.get("old_string") or "").splitlines())
+        new = "\n".join("+ " + l for l in str(i.get("new_string") or "").splitlines())
+        return f"Edit {path}" + (" (every occurrence)" if i.get("replace_all") else ""), f"{old}\n{new}"
+    if path:
+        rest = {k: v for k, v in i.items() if k not in ("file_path", "notebook_path")}
+        return f"{tool} {path}", json.dumps(rest, ensure_ascii=False, indent=2) if rest else ""
+    return tool, json.dumps(i, ensure_ascii=False, indent=2)
+
+
+def held():
+    """The requests whose hook still waits, oldest first. Files of hooks that are gone are removed."""
+    reqs = []
+    for path in glob.glob(os.path.join(REQUESTS, "*.json")):
+        r = load(path)
+        if not r or not alive(r.get("pid")):
+            drop(path, path[:-5] + ".answer")
+            continue
+        reqs.append(r)
+    return sorted(reqs, key=lambda r: r.get("at") or 0)
+
+
+def cmd_requests():
+    reqs = []
+    for r in held():
+        tool, i = r.get("tool") or "", r.get("input")
+        e = {"id": r["id"], "tab": r.get("tab") or "", "name": r.get("name") or "", "tool": tool,
+             "at": datetime.fromtimestamp(r.get("at") or 0).strftime("%H:%M"), "cwd": r.get("cwd") or ""}
+        if tool == "AskUserQuestion" and isinstance(i, dict) and isinstance(i.get("questions"), list):
+            e.update(kind="ask", title="A question", text="", questions=i["questions"])
+        else:
+            title, text = request_text(tool, i)
+            if len(text) > MAX_REQUEST:
+                text = text[:MAX_REQUEST] + f"\n... ({len(text) - MAX_REQUEST} more characters, see the terminal)"
+                e["cut"] = True      # not all of it can be read here: the panel offers no yes then
+            e.update(kind="approve", title=clip(title, 200), text=text, questions=[])
+        reqs.append(e)
+    # A thread never opens a dialog: its questions are a stored round (`thread ask`), answered with
+    # `thread answer`. The main chat is told about the same round and may ask it again itself.
+    for path in sorted(glob.glob(os.path.join(THREADS, "*.questions.json"))):
+        r = load(path)
+        if not r or not r.get("questions") or r.get("answers") or not r.get("round"):
+            continue
+        name = os.path.basename(path)[:-len(".questions.json")]
+        if not os.path.exists(os.path.join(THREADS, name + ".md")):
+            continue
+        reqs.append({"id": f"thread:{name}:{r['round']}", "tab": name, "name": name, "tool": "thread ask", "kind": "ask",
+                     "title": "Questions from this thread", "text": "", "questions": r["questions"],
+                     "at": str(r.get("asked") or "")[11:16], "cwd": ""})
+    out({"requests": reqs})
+
+
+def cmd_answer(args):
+    usage = "agentic-shell answer <id> allow|deny [json]"
+    if len(args) < 2 or args[1] not in ("allow", "deny"):
+        sys.exit(usage)
+    rid, behavior = args[0], args[1]
+    try:
+        extra = json.loads(args[2]) if len(args) > 2 and args[2].strip() else {}
+    except ValueError:
+        sys.exit(usage)
+    if not isinstance(extra, dict):
+        sys.exit(usage)
+    m = re.fullmatch(r"thread:([A-Za-z0-9._-]+):([A-Za-z0-9-]+)", rid)
+    if m:
+        if behavior != "allow" or not isinstance(extra.get("answers"), dict):
+            sys.exit("agentic-shell answer: a thread's questions take answers, not a yes or no")
+        r = subprocess.run([os.path.join(BIN, "thread"), "answer", m.group(1)], capture_output=True, text=True, timeout=30,
+                           input=json.dumps({"round": m.group(2), "answers": extra["answers"]}))
+        tell_panel()
+        if r.returncode:
+            sys.exit((r.stderr.strip() or r.stdout.strip() or "thread answer failed").replace("thread answer: ", ""))
+        return
+    if not re.fullmatch(r"[A-Za-z0-9-]+\.[0-9a-f]{12}", rid):
+        sys.exit(usage)
+    path = os.path.join(REQUESTS, rid + ".json")
+    req = load(path)
+    if not req or not alive(req.get("pid")):
+        drop(path)
+        tell_panel()
+        sys.exit("That request is gone: it was answered in the terminal, or its turn ended.")
+    ans = {"behavior": behavior}
+    if req.get("tool") == "AskUserQuestion":
+        if behavior != "allow" or not isinstance(extra.get("answers"), dict) or not extra["answers"]:
+            sys.exit("agentic-shell answer: a question takes answers, not a yes or no")
+        ans["answers"] = extra["answers"]
+    elif behavior == "deny":
+        ans["message"] = str(extra.get("message") or "").strip() or "The owner said no to this in the agent panel."
+    save(path[:-5] + ".answer", ans)
+
+
+def cmd_hold(args):
+    data = stdin_json()
+    if not isinstance(data, dict) or data.get("hook_event_name") != "PermissionRequest":
+        return
+    session, tool = str(data.get("session_id") or ""), str(data.get("tool_name") or "")
+    if not re.fullmatch(r"[A-Za-z0-9-]{8,}", session) or not tool:
+        return
+    try:
+        seconds = float(args[args.index("--for") + 1]) if "--for" in args else 3600
+    except (IndexError, ValueError):
+        seconds = 3600
+    # Only where the panel can show it: this theme, a shell that answers, a session the desktop knows.
+    if not (load(CONF) or {}).get("enabled"):
+        return
+    rec = load(os.path.join(RECORDS, session + ".json"))
+    if not rec or panel_status() not in ("hidden", "shown"):
+        return
+    tab = "main" if rec.get("role") == "main" else (str(rec.get("name") or "") if rec.get("role") == "thread" else "")
+    if not re.fullmatch(r"[A-Za-z0-9._-]*", tab):
+        tab = ""
+    rid = request_id(session, tool, data.get("tool_input"))
+    path = os.path.join(REQUESTS, rid + ".json")
+    answer = path[:-5] + ".answer"
+    parent = os.getppid()
+    drop(answer)
+    save(path, {"id": rid, "session": session, "tab": tab, "tool": tool, "input": data.get("tool_input"),
+                "name": rec.get("name") or os.path.basename(str(data.get("cwd") or "")) or session[:8],
+                "cwd": data.get("cwd") or "", "mode": data.get("permission_mode") or "", "pid": os.getpid(),
+                "at": time.time()})
+
+    def leave(*_):
+        drop(path, answer)
+        tell_panel()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, leave)
+    signal.signal(signal.SIGHUP, leave)
+    if not tell_panel():
+        drop(path)
+        return
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        ans = load(answer) if os.path.exists(answer) else None
+        if ans:
+            break
+        # Settled somewhere else (the terminal, the end of the turn), or Claude itself is gone.
+        if not os.path.exists(path) or os.getppid() != parent:
+            leave()
+        time.sleep(0.25)
+    else:
+        leave()
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    decision = {"behavior": "deny" if ans.get("behavior") == "deny" else "allow"}
+    if decision["behavior"] == "deny":
+        decision["message"] = str(ans.get("message") or "The owner said no to this in the agent panel.")
+    elif tool == "AskUserQuestion":
+        answers = {q: (", ".join(map(str, a)) if isinstance(a, list) else str(a)) for q, a in (ans.get("answers") or {}).items()}
+        decision["updatedInput"] = dict(data.get("tool_input") or {}, answers=answers)
+    try:
+        with open(ANSWERED, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": datetime.now().isoformat(timespec="seconds"), "session": session, "tab": tab,
+                                "tool": tool, "behavior": decision["behavior"]}) + "\n")
+    except OSError:
+        pass
+    out({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}})
+    drop(path, answer)
+    tell_panel()
+
+
+def cmd_release(args):
+    if "--all" in args:
+        paths = glob.glob(os.path.join(REQUESTS, "*.json"))
+    else:
+        data = stdin_json()
+        session = str((data or {}).get("session_id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9-]{8,}", session):
+            return
+        event = data.get("hook_event_name")
+        if event == "PostToolUse":
+            paths = [os.path.join(REQUESTS, request_id(session, str(data.get("tool_name") or ""), data.get("tool_input")) + ".json")]
+        elif event in ("UserPromptSubmit", "Stop", "SessionEnd"):
+            paths = glob.glob(os.path.join(REQUESTS, glob.escape(session) + ".*.json"))
+        else:
+            return
+    paths = [p for p in paths if os.path.exists(p)]
+    if not paths:
+        return
+    drop(*paths, *[p[:-5] + ".answer" for p in paths])
+    if panel_status() != "off":
+        tell_panel()
+
+
 def qs_pid():
     return sh(["pgrep", "-x", "-o", "qs"]).strip() or sh(["pgrep", "-x", "-o", "quickshell"]).strip()
 
@@ -413,6 +696,11 @@ def snapshot():
         lines.append("wallpaper-last " + open(os.path.join(HOME, ".cache/wallpaper/last")).read().strip())
     except OSError:
         pass
+    # What the panel's request cards leave behind while a session asks: a file each, and the hook that waits.
+    for path in glob.glob(os.path.join(REQUESTS, "*")):
+        lines.append(f"request {os.path.basename(path)}")
+    for pid in sh(["pgrep", "-f", "^python3? .*agentic-shell hold"]).split():
+        lines.append(f"hold {pid}")
     # "off", "hidden" or "shown <tab>"; without the service (an older shell) it is off too.
     status = (sh(["qs", "ipc", "call", "agentic", "status"]).split() or ["off"])[0]
     lines.append(f"panel {status if status in ('shown', 'hidden') else 'off'}")
@@ -468,6 +756,14 @@ def main():
             cmd_feed(a[1:])
         elif cmd == "home":
             cmd_home(a[1:])
+        elif cmd == "requests":
+            cmd_requests()
+        elif cmd == "answer":
+            cmd_answer(a[1:])
+        elif cmd == "hold":
+            cmd_hold(a[1:])
+        elif cmd == "release":
+            cmd_release(a[1:])
         elif cmd == "snapshot":
             print("\n".join(stable_snapshot()))
         elif cmd == "leave-check":
