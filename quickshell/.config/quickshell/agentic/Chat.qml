@@ -194,7 +194,7 @@ Item {
                                 verticalAlignment: Text.AlignTop
                             }
                             MouseArea {
-                                visible: entry.index === lines.count - 1
+                                visible: entry.index === lines.count - 1 && waiting.count === 0
                                 width: answer.implicitWidth + 20; height: answer.implicitHeight + 10
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
@@ -240,15 +240,53 @@ Item {
     Item {
         id: foot
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: Theme.pad }
-        height: status.height + box.height
+        height: asks.height + status.height + box.height
 
-        // What the thread is doing, or why a message did not go out.
+        // What waits for a yes, a no or an answer in this conversation.
+        Flickable {
+            id: asks
+            anchors { left: parent.left; right: parent.right; top: parent.top }
+            // As much room as it needs; the conversation above keeps a few lines.
+            height: Math.min(cards.implicitHeight, Math.max(120, chat.height - box.height - status.height - 96))
+            contentHeight: cards.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            Column {
+                id: cards
+                width: asks.width
+                spacing: 8
+                bottomPadding: waiting.count > 0 ? 8 : 0
+                Repeater {
+                    id: waiting
+                    model: ScriptModel { values: Agentic.requestsOf(chat.target); objectProp: "id" }
+                    Request {
+                        required property var modelData
+                        request: modelData
+                        width: cards.width
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            visible: asks.contentHeight > asks.height + 1
+            x: asks.width + 4
+            y: asks.y + asks.visibleArea.yPosition * asks.height
+            width: 3
+            height: asks.visibleArea.heightRatio * asks.height
+            radius: 1.5
+            color: Theme.fgMuted
+        }
+
+        // What the thread is doing, or why a message or an answer did not go out.
         Item {
             id: status
             readonly property string state: chat.target === "main" ? "" : Agentic.stateOf(chat.target)
-            readonly property string line: chat.problem !== "" ? chat.problem
+            readonly property string refused: Agentic.answerTab === chat.target ? Agentic.answerProblem : ""
+            readonly property string line: chat.problem !== "" ? chat.problem : refused !== "" ? refused
                 : (Agentic.sending ? "Sending ..." : (state !== "" ? state + (Agentic.detailOf(chat.target) ? ": " + Agentic.detailOf(chat.target) : "") : ""))
-            anchors { left: parent.left; right: parent.right; top: parent.top }
+            anchors { left: parent.left; right: parent.right; top: asks.bottom }
             height: line !== "" ? Math.max(told.implicitHeight, 22) + 6 : 0
             visible: line !== ""
 
@@ -260,7 +298,7 @@ Item {
                 wrapMode: Text.Wrap
                 maximumLineCount: 3
                 verticalAlignment: Text.AlignTop
-                color: chat.problem !== "" ? Theme.love : (status.state === "needs you" ? Theme.gold : Theme.fgDim)
+                color: chat.problem !== "" || status.refused !== "" ? Theme.love : (status.state === "needs you" ? Theme.gold : Theme.fgDim)
             }
             MouseArea {
                 id: toTerm

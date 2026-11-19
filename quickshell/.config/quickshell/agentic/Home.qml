@@ -1,8 +1,10 @@
 import QtQuick
+import Quickshell
 import qs.services
 import qs.components
 
-// The home tab of the agent panel: the login brief and the inbox (`agentic brief`, `inbox`).
+// The home tab of the agent panel: what waits for me in any session, the login brief and the
+// inbox (`agentic-shell requests`, `agentic brief`, `inbox`).
 // Looking at it marks the inbox as seen, which clears the number on the tab.
 Flickable {
     id: root
@@ -20,6 +22,30 @@ Flickable {
         y: Theme.pad
         width: root.width - 2 * Theme.pad
         spacing: 6
+
+        SectionTitle { visible: pending.count > 0 || refused.visible; width: parent.width; text: "Waiting for you" }
+        Label {
+            id: refused
+            visible: Agentic.answerProblem !== ""
+            width: parent.width
+            leftPadding: 4
+            text: Agentic.answerProblem
+            size: Agentic.fontSmall
+            color: Theme.love
+            wrapMode: Text.Wrap
+            elide: Text.ElideNone
+        }
+        Repeater {
+            id: pending
+            model: ScriptModel { values: Agentic.requests; objectProp: "id" }
+            Request {
+                required property var modelData
+                request: modelData
+                showSource: true
+                width: col.width
+            }
+        }
+        Item { visible: pending.count > 0 || refused.visible; width: 1; height: 10 }
 
         SectionTitle { width: parent.width; text: "Brief" }
         Repeater {

@@ -263,9 +263,8 @@ writes (`agentic-shell feed`), and its input box sends with `thread send`:
 Enter sends, Shift+Enter is a new line. Esc hides the panel, Ctrl+Tab and
 Ctrl+Shift+Tab change the tab, and Ctrl+T (or the button on the top right)
 opens the real Claude Code terminal of that tab, the foot and tmux panel the
-other themes use. Questions Claude asks with its own dialog and permission
-prompts are still answered there. The sessions stay ordinary Claude Code in
-tmux, so the panel costs no usage of its own and nothing breaks without it.
+other themes use. The sessions stay ordinary Claude Code in tmux, so the panel
+costs no usage of its own and nothing breaks without it.
 Its text is as large as the terminal's: the theme passes foot's font size
 (`font.mono_size`, in points) as `termFontPt`, while the rest of the shell keeps
 its own smaller pixel sizes.
@@ -285,12 +284,31 @@ without touching the desktop, run a second instance (`qs -p <copy>`) with
 `QS_AGENTIC_CONF=<an agentic.json>` and `QS_AGENTIC_NOFOCUS=1` (it then never
 takes the keyboard).
 
+What waits for an answer shows as a card above the input box of its tab, and
+all of it under "Waiting for you" on `home`; the tab turns gold. A permission
+request has the whole call as text, Allow and Deny. Allow takes a click, never a
+key, and works only after a long request was scrolled to its end; one that is
+too long to show in full can only be denied here. A question dialog has its
+options as rows and a line for an answer of your own, and a thread's question
+round (`thread ask`) shows the same way. The terminal asks the same at the same
+time and the first answer counts: the cards come from a Claude Code
+`PermissionRequest` hook that waits (`agentic-shell hold`, set up outside this
+repo), and Claude Code keeps its own dialog open next to it. So a card never
+holds anything back, a yes in the terminal makes the card go when the call has
+run, and with another theme or without the shell the hook prints nothing. The
+panel only ever sends allow, deny or the answers for that one call: no
+permission rule, no mode change. In auto mode most calls never ask, so cards
+are rare there. Known rough spots: after a yes in the terminal the card of a
+long-running call stays until the call ends (answering it then does nothing),
+and any program running as you could write the answer file, as it could
+already type into the session's terminal.
+
 **IPC** (`qs ipc show` lists all): the scripts call `qs ipc call bar refresh
 <vault|touchpad|powerprofile|ai>` after a change; keybinds use `launcher toggle
 <mode>`, `bar popout <name>`, `osd brightness`; also `notifs dnd`, `caffeine
 toggle`, `homelab refresh` and, in `root-agentic`, `agentic open
-<main|home|thread>`, `toggle`, `hide`, `refresh` and `status` (`off`, `hidden`
-or `shown <tab>`).
+<main|home|thread>`, `toggle`, `hide`, `refresh`, `requests` (the hook's
+"look again") and `status` (`off`, `hidden` or `shown <tab>`).
 
 Every bar icon has a tooltip (what it is, what the clicks do).
 
@@ -453,11 +471,12 @@ There are three themes:
   palette of its own (`base = "root"`), so it looks exactly like root. It adds
   one rendered file, `agentic.json`, which switches on the shell's agent panel
   (see [Shell](#shell-quickshell)), and two hooks: `enter` hides the terminal
-  panel and tells the shell to look, `leave` closes the agent panel. It starts
+  panel and tells the shell to look, `leave` gives every request that waits in
+  the panel back to its terminal and closes the agent panel. It starts
   no units and adds no keybinds. `theme set root` is the way back at any time,
   and `agentic-shell leave-check` (run from root) switches there and back and
-  compares what is running before and after: units, layers, keybinds, windows
-  and the shell's processes. The tag `pre-agentic-os` marks the repo before any
+  compares what is running before and after: units, layers, keybinds, windows,
+  the shell's processes, and requests or hooks still waiting for the panel. The tag `pre-agentic-os` marks the repo before any
   of this.
 - **nekosec**: neon catgirl opsec. Purple-black (`#0b0710`), hot pink for
   everything that marks "this one", mint and lavender for the rest, and no blue
@@ -734,6 +753,7 @@ hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
 | `thread start/list/show/stop/resume/model/adopt` | threads (at most 5 run); `cr` reopens what a shutdown left open |
 | `thread send <name\|main> <text>` | type a message into a thread or the main chat and send it; refuses when that session is asking something or has a draft typed |
 | `agentic-shell feed/home/snapshot/leave-check` | what the agent panel reads, as JSON (a conversation, the brief and inbox), and the check that leaving `root-agentic` leaves nothing running |
+| `agentic-shell requests/answer/hold/release` | the panel's request cards: what waits (JSON), answer one (`answer <id> allow\|deny [json]`), the waiting side of the `PermissionRequest` hook, and dropping cards whose call ran or whose turn ended (`release --all`: every card, used when leaving the theme) |
 | `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |
 | `claude-usage report/calibrate/estimate` | Claude usage from the local transcripts, priced at API rates |
 | `run-logged <cmd>` | run a command as usual and keep a clean log for Claude to read |

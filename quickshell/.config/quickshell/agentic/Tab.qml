@@ -3,14 +3,17 @@ import qs.services
 import qs.components
 
 // One tab of the agent panel: the main chat, a thread (with a mark for what it is doing) or
-// the home tab (with the number of new inbox events).
+// the home tab (with the number of new inbox events). Gold while something of that tab waits
+// for me; the home tab stands in for sessions that have no tab.
 MouseArea {
     id: root
     property string name: ""
     readonly property bool current: Agentic.target === name
     readonly property bool isHome: name === "home"
     readonly property string state: isHome || name === "main" ? "" : Agentic.stateOf(name)
-    readonly property bool needsMe: state === "needs you"
+    readonly property bool asked: isHome ? Agentic.requests.some(r => Agentic.tabs.indexOf(r.tab) < 0)
+                                         : Agentic.requestsOf(name).length > 0
+    readonly property bool needsMe: state === "needs you" || asked
 
     implicitWidth: row.implicitWidth + 20
     hoverEnabled: true
@@ -31,11 +34,11 @@ MouseArea {
             anchors.verticalCenter: parent.verticalCenter
             text: "󰋜"
             size: 14
-            color: root.current ? Theme.fg : Theme.fgMuted
+            color: root.needsMe ? Theme.gold : (root.current ? Theme.fg : Theme.fgMuted)
         }
-        // A thread: gold when it waits for me, a quiet dot while it works.
+        // Gold when it waits for me, a quiet dot while it works.
         Rectangle {
-            visible: root.state === "working" || root.needsMe
+            visible: !root.isHome && (root.state === "working" || root.needsMe)
             anchors.verticalCenter: parent.verticalCenter
             width: 6; height: 6; radius: 3
             color: root.needsMe ? Theme.gold : Theme.fgDim

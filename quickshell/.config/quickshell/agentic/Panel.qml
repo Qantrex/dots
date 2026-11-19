@@ -61,27 +61,35 @@ PanelWindow {
             Keys.onPressed: e => Agentic.key(e)
 
 
-            // Tabs on the left, the terminal and close buttons on the right.
+            // The main chat and the threads on the left (they scroll when there are many); the home
+            // tab, the terminal and the close button stay on the right.
             Item {
                 id: head
                 anchors { top: parent.top; left: parent.left; right: parent.right; margins: Theme.pad - 4 }
                 height: 32
 
                 Flickable {
+                    id: strip
                     anchors { left: parent.left; right: tools.left; rightMargin: 8; top: parent.top; bottom: parent.bottom }
                     contentWidth: tabRow.implicitWidth
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    function reveal(from, width) {
+                        if (from < contentX) contentX = from;
+                        else if (from + width > contentX + strip.width) contentX = Math.min(from, from + width - strip.width);
+                    }
                     Row {
                         id: tabRow
                         height: parent.height
                         spacing: 4
                         Repeater {
-                            model: Agentic.tabs
+                            model: Agentic.tabs.filter(t => t !== "home")
                             Tab {
                                 required property string modelData
                                 name: modelData
                                 height: tabRow.height
+                                onCurrentChanged: if (current) strip.reveal(x, width)
+                                Component.onCompleted: if (current) strip.reveal(x, width)
                             }
                         }
                     }
@@ -90,13 +98,19 @@ PanelWindow {
                     id: tools
                     anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                     spacing: 2
+                    Tab {
+                        name: "home"
+                        height: head.height
+                    }
                     IconButton {
                         id: term
+                        anchors.verticalCenter: parent.verticalCenter
                         icon: "󰆍"
                         onClicked: Agentic.terminal()
                         Tooltip { target: term; show: term.containsMouse; text: "The Claude Code terminal of this tab (Ctrl+T)" }
                     }
                     IconButton {
+                        anchors.verticalCenter: parent.verticalCenter
                         icon: "󰅖"
                         onClicked: Agentic.hide()
                     }

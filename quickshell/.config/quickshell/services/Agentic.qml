@@ -15,6 +15,11 @@ import Quickshell.Io
 // The panel never talks to Claude itself. It reads what `agentic-shell` prints (the transcript
 // Claude Code writes, the inbox, the brief) and sends through `thread send`, which types into
 // the session's own terminal in tmux. The sessions stay normal interactive Claude Code.
+//
+// What waits for me (a tool call that needs a yes or a no, a question dialog, a thread's
+// questions) comes from `agentic-shell requests` and is answered with `agentic-shell answer`.
+// A session's PermissionRequest hook holds such a request and tells this shell through
+// `qs ipc call agentic requests`; the terminal asks the same and the first answer counts.
 Singleton {
     id: root
 
@@ -40,6 +45,13 @@ Singleton {
     property var inbox: []            // [{at, level, source, text, untrusted, new}], newest first
     property int newCount: 0          // inbox events since the home tab was last looked at
 
+    // From `agentic-shell requests`: [{id, tab, name, tool, at, cwd, kind, title, text, cut, questions}].
+    // tab is "main", a thread's name, or "" for a session that has no tab.
+    property var requests: []
+    property string answering: ""     // the id of the request whose answer is on its way
+    property string answerProblem: "" // why the last answer did not go through
+    property string answerTab: ""     // and the tab it was for
+
     // What is typed but not sent yet, per tab, so a tab change loses nothing.
     property var drafts: ({})
 
@@ -57,6 +69,25 @@ Singleton {
     function detailOf(name) {
         const t = ClaudeThreads.list.find(x => x.name === name) || threads.find(x => x.name === name);
         return t ? t.detail || "" : "";
+    }
+
+    function requestsOf(tab) { return requests.filter(r => r.tab === tab); }
+
+    // Read the requests again; a call during a read makes one more read after it.
+    function ask() {
+        if (!enabled) return;
+        if (asked.running) asked.again = true;
+        else asked.running = true;
+    }
+
+    // behavior: "allow" or "deny". what: {answers: {question: label | [labels] | text}} for questions.
+    function answer(id, tab, behavior, what) {
+        if (answerer.running) return;
+        answering = id;
+        answerProblem = "";
+        answerTab = tab;
+        answerer.command = [bin + "/agentic-shell", "answer", id, behavior, JSON.stringify(what || {})];
+        answerer.running = true;
     }
 
     function show(to) {
@@ -89,8 +120,8 @@ Singleton {
     }
 
     // The real Claude Code terminal of what the panel shows (the foot panel `dock` always had).
-    function terminal() {
-        Quickshell.execDetached([bin + "/dock", "term", target === "home" ? "main" : target]);
+    function terminal(of) {
+        Quickshell.execDetached([bin + "/dock", "term", of || (target === "home" ? "main" : target)]);
     }
 
     function send(to, text) {
@@ -101,8 +132,15 @@ Singleton {
         sender.running = true;
     }
 
-    onEnabledChanged: if (!enabled) open = false
-    onOpenChanged: if (open) refresh()
+    onEnabledChanged: if (!enabled) { open = false; requests = []; asked.last = ""; }
+    onOpenChanged: {
+        if (open) { refresh(); ask(); }
+        else answerProblem = "";
+    }
+
+    // A thread that stops with questions changes its mark: look for its round at once.
+    readonly property string marks: ClaudeThreads.list.map(t => t.name + " " + t.state).join(",")
+    onMarksChanged: if (open) ask()
     onTargetChanged: if (open && target === "home") refresh()
 
     // root and root-agentic share every colour, so nothing else tells a theme change.
@@ -152,7 +190,35 @@ Singleton {
         interval: 10000
         running: root.open
         repeat: true
-        onTriggered: root.refresh()
+        onTriggered: { root.refresh(); root.ask(); }
+    }
+
+    Process {
+        id: asked
+        property bool again: false
+        property string last: ""
+        command: [root.bin + "/agentic-shell", "requests"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                // The same list again keeps the cards as they are, with what is chosen and typed.
+                if (text === asked.last) return;
+                try {
+                    root.requests = JSON.parse(text).requests || [];
+                    asked.last = text;
+                } catch (e) {}
+            }
+        }
+        onExited: if (again) { again = false; Qt.callLater(root.ask); }
+    }
+
+    Process {
+        id: answerer
+        stderr: StdioCollector { id: refusal }
+        onExited: (code, status) => {
+            root.answering = "";
+            if (code !== 0) root.answerProblem = refusal.text.trim().replace(/^agentic-shell answer: /, "") || "Could not answer.";
+            root.ask();
+        }
     }
 
     // The text goes as one argument, never through a shell.
@@ -174,6 +240,8 @@ Singleton {
         function open(to: string): void { root.show(to || "main"); }
         function hide(): void { root.hide(); }
         function refresh(): void { conf.reload(); root.refresh(); }
+        // The requests changed (`agentic-shell hold`, `release`, `answer`). A closed panel reads them when it opens.
+        function requests(): void { if (root.open) root.ask(); }
         // off: this theme has no panel. `dock` and `agentic-shell snapshot` read this.
         function status(): string { return !root.enabled ? "off" : (root.open ? "shown " + root.target : "hidden"); }
     }
