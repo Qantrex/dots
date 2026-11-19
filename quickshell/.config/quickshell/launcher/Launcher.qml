@@ -6,7 +6,8 @@ import qs.services
 import qs.components
 
 // The launcher (replaces wofi): apps, clipboard history, emoji, screenshot,
-// wallpaper, theme and power, one search field for all. Tab / Shift+Tab switch modes,
+// wallpaper, theme and power, one search field for all; in theme root-agentic also
+// a Claude mode (the typed line to the main chat or a thread, or a tab of the agent panel). Tab / Shift+Tab switch modes,
 // arrows or Ctrl+J/K move, Enter runs, Esc closes. Apps are ranked by how
 // often they were started (~/.local/state/quickshell/.../launcher.json).
 PanelWindow {
@@ -16,13 +17,14 @@ PanelWindow {
     readonly property string mode: Shell.launcherMode
     readonly property var modes: [
         { id: "apps", icon: "󰀻", label: "Apps" },
+        { id: "agent", icon: "󰚩", label: "Claude" },
         { id: "clipboard", icon: "󰅍", label: "Clipboard" },
         { id: "emoji", icon: "󰞅", label: "Emoji" },
         { id: "screenshot", icon: "󰄀", label: "Screenshot" },
         { id: "wallpaper", icon: "󰸉", label: "Wallpaper" },
         { id: "theme", icon: "󰏘", label: "Theme" },
         { id: "power", icon: "󰐥", label: "Power" }
-    ]
+    ].filter(m => m.id !== "agent" || Agentic.enabled)
     property int selected: 0
 
     // The mouse only picks an entry when it really moves. Qt also reports hover
@@ -146,9 +148,45 @@ PanelWindow {
         return i === q.length ? 20 : 0;
     }
 
+    // Claude mode. Only Enter in this mode reaches Claude (about 0.07 % of the week a message); searching
+    // in the other modes never does. A typed line: to the main chat through its inbox (typed in when it's
+    // idle, queued while it's busy), to the main chat as a thread to start, or straight into a running
+    // thread (`thread send`, which refuses while that thread has a question open or text typed). Below
+    // that, and alone with nothing typed: the agent panel's tabs, Enter opens one.
+    // AGENTIC_BIN: a folder with stand-ins for both, for tests.
+    readonly property string agentBin: Quickshell.env("AGENTIC_BIN") || Host.home + "/.local/bin"
+    readonly property string inboxBin: agentBin + "/inbox"
+    readonly property string threadBin: agentBin + "/thread"
+    function agentItems(typed) {
+        const t = typed.trim(), q = t.toLowerCase(), out = [];
+        const toInbox = text => () => Quickshell.execDetached([win.inboxBin, "add", "--wake", "needs", "launcher", text]);
+        if (t !== "") {
+            out.push({ icon: "󰭹", title: "Send to the main chat", subtitle: t, run: toInbox(t) });
+            out.push({ icon: "󰑮", title: "Main chat: start a thread for this", subtitle: t,
+                       run: toInbox("Start a thread for this: " + t) });
+            ClaudeThreads.live.forEach(th => out.push({
+                icon: "󰒊", title: "Send to " + th.name, subtitle: th.state + (th.detail ? " · " + th.detail.slice(0, 60) : ""),
+                run: () => Quickshell.execDetached(["sh", "-c",
+                    '"$0" send "$1" "$2" || notify-send -a Claude "Not sent to $1" "It has a question open or text typed. Try the panel."',
+                    win.threadBin, th.name, t])
+            }));
+        }
+        // The panel's tabs, plus threads at work the panel hasn't listed yet (it reads them when it opens).
+        const tabs = Agentic.tabs.filter(n => n !== "home")
+            .concat(ClaudeThreads.live.map(th => th.name).filter(n => Agentic.tabs.indexOf(n) < 0), ["home"]);
+        tabs.filter(n => !q || score(q, n) > 0).forEach(n => {
+            const st = n === "home" ? "" : Agentic.stateOf(n);
+            out.push({ icon: n === "home" ? "󰋜" : (n === "main" ? "󰭹" : "󰒊"),
+                       title: n === "home" ? "Open the panel: home" : "Open the panel: " + n,
+                       subtitle: st, run: () => Agentic.show(n) });
+        });
+        return out;
+    }
+
     // Each item: { icon (glyph) | image (path), title, subtitle, run() }
     readonly property var items: {
         const q = search.text.trim().toLowerCase();
+        if (mode === "agent") return agentItems(search.text);
         if (mode === "apps") {
             const apps = DesktopEntries.applications.values.filter(a => !a.noDisplay);
             return apps.map(a => {
@@ -308,6 +346,7 @@ PanelWindow {
                         visible: !search.text
                         anchors.verticalCenter: parent.verticalCenter
                         text: (Neko.enabled ? "(=^･ω･^=) " : "") + (({ apps: "Run an app", clipboard: "Search the clipboard", emoji: "Find an emoji",
+                                 agent: "Ask Claude, or open a tab of the panel",
                                  screenshot: "Take a screenshot", wallpaper: "Pick a wallpaper", theme: "Pick a theme", power: "Session" })[win.mode] ?? "") + (Neko.enabled ? ", nya~" : "")
                         dim: true
                         size: Theme.fontLarge
@@ -514,7 +553,8 @@ PanelWindow {
                 leftPadding: 4
                 text: win.mode === "emoji" ? (win.items[win.selected]?.title ?? "") + "  ·  Enter copies"
                     : (win.mode === "clipboard" ? "Enter copies  ·  Shift+Del removes"
-                    : (win.mode === "theme" ? "Enter switches the desktop to this theme  ·  Tab switches mode" : "Tab switches mode  ·  Esc closes"))
+                    : (win.mode === "theme" ? "Enter switches the desktop to this theme  ·  Tab switches mode"
+                    : (win.mode === "agent" ? "Enter sends to Claude or opens the panel  ·  Tab switches mode" : "Tab switches mode  ·  Esc closes")))
                 size: 10
                 dim: true
             }

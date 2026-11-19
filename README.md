@@ -251,6 +251,14 @@ popout shows the calendar only.
 (`SUPER+SHIFT+E`), screenshot (`SUPER+SHIFT+S`), wallpaper (`SUPER+SHIFT+W`) and
 session (`SUPER+Escape`). Tab switches mode, Enter runs, Shift+Del removes a
 clipboard entry. The emoji list is generated: `python3 -I tools/gen-emoji.py`.
+In theme `root-agentic` a Claude mode sits right after Apps (one Tab, or `qs ipc
+call launcher open agent`). A typed line goes to the main chat through its inbox
+(typed in when it is idle, queued while it is busy), to the main chat as a thread
+to start, or straight into a running thread (`thread send`, which refuses while
+that thread has a question open or text typed, and then says so in a
+notification). Below that, and alone with nothing typed, the agent panel's tabs:
+Enter opens one. Only Enter in this mode reaches Claude; searching never does.
+`AGENTIC_BIN` points the mode at stand-ins for `inbox` and `thread` in tests.
 
 **Notifications:** popups top right, 5 s (critical ones stay, with a love
 border); hover pauses them. Everything stays in the history (`SUPER+N`) until
