@@ -37,6 +37,9 @@ PROGRESS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, "
 RECORDS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "claude-sessions")
 SESSION = "main"
 MAX_RUNNING = 5
+# Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
+# about 90k and it compacted after a few fetched pages. Requests under 250k cost about half of those above it.
+AUTOCOMPACT = "240000"
 CLAUDE = os.path.join(HOME, ".local/bin/claude")
 MODELS = {"fable", "opus", "sonnet", "haiku"}
 CLEAN_ENV = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID",
@@ -264,7 +267,7 @@ def cmd_start(args):
                   "to \"main-chat\".)"]
     # Effort high like my default; the advisor (advisorModel in settings) applies by itself.
     launch(name, folder, prompt + ["-n", name, "--session-id", sid, "--model", model, "--effort", "high",
-                                   "--autocompact", "150000"])
+                                   "--autocompact", AUTOCOMPACT])
     print(f"Thread '{name}' started ({model}) in {folder}: tmux window {SESSION}:{name}, `dock show {name}`.")
 
 
@@ -297,7 +300,7 @@ def cmd_resume(args):
     extra = ["--settings", json.dumps({"permissions": {"additionalDirectories": [HOME]}})] \
         if folder.rstrip("/").endswith("/claude-hub") else []
     launch(name, folder, ["--session-id" if fresh else "--resume", fm["session"], "-n", name,
-                          "--model", fm.get("model", "opus"), "--effort", "high", "--autocompact", "150000"] + extra)
+                          "--model", fm.get("model", "opus"), "--effort", "high", "--autocompact", AUTOCOMPACT] + extra)
     fm["status"] = "running"
     write(name, fm, body)
     print(f"Thread '{name}' resumed in {folder}: `dock show {name}`.")
