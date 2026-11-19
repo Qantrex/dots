@@ -44,6 +44,8 @@ LINKS=(
   ".config/systemd/user/service.d/10-agentic-inbox.conf|agentic"
   ".config/systemd/user/agentic-inbox@.service|agentic"
   ".config/systemd/user/agentic-inbox@.service.d/10-no-onfailure.conf|agentic"
+  ".config/systemd/user/agentic-watch.service|agentic"
+  ".config/systemd/user/agentic-watch.timer|agentic"
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"

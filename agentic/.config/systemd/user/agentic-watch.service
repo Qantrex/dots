@@ -1,0 +1,6 @@
+[Unit]
+Description=Look for threads of the main Claude chat that went quiet (thread watch)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/thread watch

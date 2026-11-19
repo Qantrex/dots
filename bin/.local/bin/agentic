@@ -88,6 +88,8 @@ on)
     has_main_window || start_main
     "$HOME/.local/bin/dock" ensure >/dev/null 2>&1 &
     pgrep -f "$HOME/.local/bin/journal record" >/dev/null || setsid -f "$HOME/.local/bin/journal" record >/dev/null 2>&1
+    # Every 5 minutes `thread watch` looks for threads that went quiet (the only timer of this setup).
+    systemctl --user start agentic-watch.timer 2>/dev/null
     if [[ ${2:-} == --login ]]; then
         (atlas refresh >/dev/null 2>&1; inbox collect >/dev/null 2>&1; "$0" brief) &
     else
@@ -100,6 +102,7 @@ off)
     "$HOME/.local/bin/dock" close >/dev/null 2>&1
     command -v thread >/dev/null && thread stop --all >/dev/null 2>&1   # not the adopted ones: those are mine
     pkill -f "$HOME/.local/bin/journal record" 2>/dev/null
+    systemctl --user stop agentic-watch.timer 2>/dev/null
     if has_main_window; then
         # Gracefully when nothing is typed; otherwise just close the window (nothing gets answered).
         pane=$(main_pane)
@@ -149,6 +152,7 @@ doctor)
         has_main_window || echo "the main chat isn't running (agentic on)"
         "$HOME/.local/bin/dock" status 2>/dev/null | grep -q closed && echo "the side panel isn't open (dock ensure)"
         pgrep -f 'journal record' >/dev/null || echo "the focus recorder for journal isn't running (journal record, started at login)"
+        systemctl --user is-active -q agentic-watch.timer || echo "the stall check timer isn't running (systemctl --user start agentic-watch.timer; agentic on starts it)"
     fi
     idx="${XDG_DATA_HOME:-$HOME/.local/share}/agentic/atlas/index.md"
     if [[ ! -e $idx ]]; then echo "no atlas yet (atlas refresh)"

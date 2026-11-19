@@ -31,6 +31,10 @@
                                              same round is refused (exit 4); stored but not delivered: exit 3
   thread signal <name> [--transcript <file>] for the stop hook: label<TAB>detail<TAB>sent, label one of done,
                                              questions, needs, paused (sent: the last turn messaged main-chat)
+  thread watch                               for the agentic-watch timer (every 5 min): a working thread, or one
+                                             stopped below its last step without waiting for the owner, whose
+                                             pane, transcript and subagents stay unchanged 10 min gives one
+                                             [stalled] inbox line with a wake
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread archive <name>...                   finished thread off the lists; state and transcript stay, and
                                              `thread resume`/`thread show` still work
@@ -41,6 +45,7 @@ starting another stops the oldest idle one, which `thread resume` brings back. S
 ~/.local/share/agentic/threads/<name>.md (facts only).
 """
 import glob
+import hashlib
 import json
 import os
 import re
@@ -880,6 +885,115 @@ def cmd_signal(args):
     print(f"{label}\t{detail}\t{sent}")
 
 
+
+# ---- thread watch: a stuck thread is not silent ----------------------------------------------------------
+
+WATCH = os.path.join(os.path.dirname(PROGRESS), "watch")
+QUIET = 600
+
+
+def last_tool(tpath):
+    """The last tool call in a transcript, short ("Bash: npm test")."""
+    try:
+        with open(tpath, "rb") as f:
+            f.seek(max(0, os.path.getsize(tpath) - 200_000))
+            lines = f.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("type") != "assistant":
+            continue
+        for b in reversed((e.get("message") or {}).get("content") or []):
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                i = b.get("input") or {}
+                what = i.get("description") or i.get("command") or i.get("file_path") or i.get("prompt") or ""
+                return f"{b.get('name')}: {' '.join(str(what).split())[:80]}"
+    return ""
+
+
+def newest_mtime(path):
+    """The newest change of a file, or of anything below a folder (a session's subagents and tool output)."""
+    best = 0.0
+    try:
+        best = os.path.getmtime(path)
+    except OSError:
+        return 0.0
+    if os.path.isdir(path):
+        for root, dirs, files in os.walk(path):
+            for n in files:
+                try:
+                    best = max(best, os.path.getmtime(os.path.join(root, n)))
+                except OSError:
+                    pass
+    return best
+
+
+def cmd_watch(args):
+    """Run by a user timer every 5 minutes (started by `agentic on`). A thread that is working, or that stopped
+    below its last step without waiting for the owner, is quiet when its pane (digits and spinners aside), its
+    transcript and its session folder (subagents) all stayed the same for 10 minutes. Each quiet spell gives
+    one inbox line with a wake. Code only, no Claude call."""
+    if os.path.exists(os.path.join(os.path.dirname(PROGRESS), "off")):
+        return
+    os.makedirs(WATCH, exist_ok=True)
+    ag, wins = agents(), windows()
+    now = time.time()
+    seen = set()
+    for t in all_threads():
+        name = t["name"]
+        st = live_state(t, ag, wins)
+        wf = os.path.join(WATCH, name + ".json")
+        if st in ("stopped", "left open") or name not in wins:
+            continue
+        try:
+            p = json.load(open(os.path.join(PROGRESS, name + ".json")))
+        except (OSError, ValueError):
+            p = {}
+        sp = steps(t)
+        working = st == "working" or p.get("state") == "working"
+        waits = bool(t.get("needs")) or bool(open_round(name)) or st == "waiting" or p.get("state") == "needs you"
+        paused = sp and sp[0] < sp[1] and not waits
+        if waits or not (working or paused):
+            try:
+                os.remove(wf)
+            except OSError:
+                pass
+            continue
+        seen.add(name)
+        screen = subprocess.run(["tmux", "capture-pane", "-p", "-t", wins[name][2]], capture_output=True,
+                                text=True).stdout
+        # The spinner and its timer change while nothing happens; leave them out of the fingerprint.
+        norm = re.sub(r"[0-9]+|[✻✽✶✳✢·*●◐◑◒◓⏺]", "", screen)
+        fp = hashlib.sha1(norm.encode()).hexdigest()
+        tpath = (glob.glob(os.path.join(HOME, ".claude/projects/*", t.get("session", "x") + ".jsonl")) or [""])[0]
+        act = max(newest_mtime(tpath), newest_mtime(tpath[:-6]) if tpath else 0.0)
+        try:
+            w = json.load(open(wf))
+        except (OSError, ValueError):
+            w = {"fp": fp, "fp_at": now}
+        if w.get("fp") != fp:
+            w["fp"], w["fp_at"] = fp, now
+        last = max(w.get("fp_at", now), act)
+        quiet = now - last
+        if quiet >= QUIET and w.get("reported") != last:
+            what = "working" if working else f"stopped at {sp[0]}/{sp[1]}"
+            lt = last_tool(tpath) if tpath else ""
+            text = (f"'{name}': quiet for {int(quiet // 60)} min ({what}, nothing changed on screen, in the "
+                    f"transcript or its subagents)" + (f"; last tool call: {lt}" if lt else ""))
+            subprocess.run([os.path.join(HOME, ".local/bin/inbox"), "add", "--wake", "stalled", "thread", text],
+                           stdin=subprocess.DEVNULL, capture_output=True)
+            w["reported"] = last
+        with open(wf + ".tmp", "w") as f:
+            json.dump(w, f)
+        os.replace(wf + ".tmp", wf)
+    for f in glob.glob(os.path.join(WATCH, "*.json")):
+        if os.path.basename(f)[:-5] not in seen:
+            os.remove(f)
+
 def main():
     a = sys.argv[1:]
     if not a or a[0] in ("-h", "--help", "help"):
@@ -927,6 +1041,8 @@ def main():
         cmd_answer(rest)
     elif cmd == "signal":
         cmd_signal(rest)
+    elif cmd == "watch":
+        cmd_watch(rest)
     elif cmd == "archive":
         if not rest:
             sys.exit("thread archive <name>...")

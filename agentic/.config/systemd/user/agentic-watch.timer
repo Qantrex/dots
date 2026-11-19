@@ -1,0 +1,10 @@
+[Unit]
+Description=Every 5 minutes: thread watch (started by `agentic on`, stopped by `agentic off`)
+
+[Timer]
+OnActiveSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
