@@ -329,6 +329,8 @@ Singleton {
         function toggle(): void { if (root.open) root.hide(); else root.show("main"); }
         // Named open, not show: `qs ipc call agentic show x` is read as the `qs ipc show` subcommand.
         function open(to: string): void { root.show(to || "main"); }
+        // The panel key (`dock toggle`): the thread of the workspace I'm on (ClaudeWorkspaces), else the main chat.
+        function openHere(): void { root.show(ClaudeWorkspaces.here || "main"); }
         function hide(): void { root.hide(); }
         function refresh(): void { conf.reload(); root.refresh(); }
         // The requests changed (`agentic-shell hold`, `release`, `answer`). A closed panel reads them when it opens.

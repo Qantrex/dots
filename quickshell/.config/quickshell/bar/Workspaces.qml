@@ -39,6 +39,8 @@ Island {
                 }
                 return seen.slice(0, 3);
             }
+            // root-agentic: the thread this workspace belongs to (ClaudeWorkspaces), shown as a dot.
+            readonly property var thread: Agentic.enabled ? ClaudeWorkspaces.of(modelData.id) : null
 
             implicitWidth: Math.max(Theme.barHeight - 8, content.implicitWidth + (active ? 22 : 14))
             implicitHeight: Theme.barHeight - 8
@@ -57,6 +59,8 @@ Island {
                 // Each screen counts its own 1–10 (hypr/lua/workspaces.lua): 14 is the side screen's 4.
                 text: "Workspace " + ((ws.modelData.id - 1) % 10 + 1) + "\n"
                       + ws.modelData.toplevels.values.map(t => "· " + (t.title || t.wayland?.appId || "")).join("\n")
+                      + (ws.thread ? "\nThread: " + ws.thread.thread + " (" + ws.thread.state
+                                     + (ws.thread.how === "pin" ? ", pinned" : "") + ")" : "")
             }
 
             Rectangle {
@@ -82,6 +86,15 @@ Island {
                     NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutSine }
                     NumberAnimation { to: 1; duration: 600; easing.type: Easing.InOutSine }
                 }
+            }
+
+            // Gold: the thread needs me. White: it works. Grey: it waits.
+            Rectangle {
+                visible: ws.thread !== null
+                anchors { top: parent.top; right: parent.right; topMargin: 2; rightMargin: 2 }
+                width: 5; height: 5; radius: 2.5
+                color: !ws.thread ? "transparent" : ws.thread.state === "needs you" ? Theme.gold
+                       : ws.thread.state === "working" ? Theme.fg : Theme.fgDim
             }
 
             Row {

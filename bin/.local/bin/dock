@@ -117,11 +117,13 @@ show_terminal() {
 
 case ${1:-toggle} in
 toggle)
-    # Showing a thread: back to the main chat. Showing the main chat: hide. Hidden: show it again.
+    # Showing a thread: back to the main chat. Showing the main chat: hide. Hidden: show it again (in the
+    # shell's panel: the workspace's own thread first).
     if [[ -n $native ]]; then
         # The same three steps in the shell's panel; a terminal panel that is up only goes away.
         if shown; then toggle
-        elif [[ $native == hidden ]]; then panel_call open main
+        # Hidden: the thread of the workspace I'm on (a pin, else its folders), else the main chat.
+        elif [[ $native == hidden ]]; then panel_call openHere
         elif [[ $native == "shown main" ]]; then panel_call hide
         else panel_call open main
         fi

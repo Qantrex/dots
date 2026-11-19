@@ -36,6 +36,11 @@
                                layers, keybinds, windows, the shell's child processes, wallpaper
   agentic-shell leave-check    from root: switch to root-agentic and back, and compare the
                                snapshots before and after. Changes the desktop for a few seconds.
+  agentic-shell workspaces     which thread belongs to which workspace, as JSON: a pin, else the
+                               thread whose folder the workspace's windows work in (their processes'
+                               folders, tmux clients by their pane's folder)
+  agentic-shell pin [<ws>] <thread>|--clear
+                               pin a workspace (default: the focused one) to a thread, or unpin it
 
 The panel never talks to Claude itself. It reads the transcript Claude Code writes for the session
 in a tmux window of "main" (found through the pane, so a /clear or a resume is followed), and it
@@ -908,6 +913,131 @@ def cmd_notify_wait(args):
         subprocess.run([os.path.join(SCRIPTS, "claude-jump.sh"), session], timeout=30)
 
 
+# ---- workspaces that know their thread ----------------------------------------------------------
+
+PINS = os.path.join(STATE, "workspace-pins.json")
+STATE_RANK = {"needs you": 0, "working": 1}
+
+
+def thread_folders(ts):
+    """{name: (folder, thread)} of the threads that have a tmux window, from their state files."""
+    res = {}
+    for t in ts:
+        try:
+            with open(os.path.join(THREADS, t["name"] + ".md"), encoding="utf-8") as f:
+                head = f.read(2000).split("\n---", 1)[0]
+        except OSError:
+            continue
+        for line in head.splitlines():
+            if line.startswith("folder:"):
+                folder = os.path.realpath(os.path.expanduser(line.split(":", 1)[1].strip()))
+                # Home itself would match every terminal.
+                if folder not in (HOME, "/"):
+                    res[t["name"]] = (folder, t)
+    return res
+
+
+def proc_children():
+    kids = {}
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/stat") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        kids.setdefault(ppid, []).append(int(d))
+    return kids
+
+
+def window_folders(pid, kids, tmux_paths):
+    """The folders a window's processes work in: every process under it, a tmux client by its pane."""
+    found, todo, seen = [], [pid], set()
+    while todo and len(seen) < 400:
+        p = todo.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        if p in tmux_paths:
+            found.append(tmux_paths[p])
+        else:
+            try:
+                found.append(os.readlink(f"/proc/{p}/cwd"))
+            except OSError:
+                pass
+        todo.extend(kids.get(p, []))
+    return [os.path.realpath(x) for x in found if x and x not in (HOME, "/")]
+
+
+def workspace_map():
+    try:
+        clients = json.loads(sh(["hyprctl", "clients", "-j"]) or "[]")
+        focused = json.loads(sh(["hyprctl", "activeworkspace", "-j"]) or "{}").get("id")
+    except ValueError:
+        clients, focused = [], None
+    ts = threads()
+    folders = thread_folders(ts)
+    pins = load(PINS) or {}
+    tmux_paths = {}
+    for line in sh(["tmux", "list-clients", "-F", "#{client_pid}\t#{pane_current_path}"]).splitlines():
+        pid, _, path = line.partition("\t")
+        if pid.isdigit():
+            tmux_paths[int(pid)] = path
+    kids = proc_children() if folders else {}
+    hits = {}                                     # workspace -> {thread: processes working in its folder}
+    for c in clients:
+        ws = (c.get("workspace") or {}).get("id") or 0
+        if ws <= 0 or not c.get("pid") or not folders:
+            continue
+        for path in window_folders(c["pid"], kids, tmux_paths):
+            for name, (folder, _) in folders.items():
+                if path == folder or path.startswith(folder + "/"):
+                    # Threads that share a folder (~/Notes): a subfolder named like the thread counts more,
+                    # ~/Notes/Trip for "trip".
+                    sub = path[len(folder) + 1:].split("/", 1)[0].lower()
+                    hint = bool(sub) and (sub == name.lower() or sub in name.lower().split("-"))
+                    n = hits.setdefault(str(ws), {})
+                    n[name] = n.get(name, 0) + (3 if hint else 1)
+    res = {}
+    for ws, n in hits.items():
+        # Most processes first; between threads of one folder the one that needs me, then the busy one.
+        best = sorted(n, key=lambda t: (-n[t], STATE_RANK.get(folders[t][1]["state"], 2), -(folders[t][1].get("since") or 0)))
+        res[ws] = {"thread": best[0], "how": "folder", "others": best[1:]}
+    for ws, name in pins.items():
+        if any(t["name"] == name for t in ts):
+            res[str(ws)] = {"thread": name, "how": "pin", "others": []}
+    states = {t["name"]: t["state"] for t in ts}
+    for v in res.values():
+        v["state"] = states.get(v["thread"], "idle")
+    return {"focused": focused, "workspaces": res}
+
+
+def cmd_workspaces(args):
+    out(workspace_map())
+
+
+def cmd_pin(args):
+    if not args or len(args) > 2:
+        sys.exit("agentic-shell pin [<workspace>] <thread>|--clear")
+    if len(args) == 2:
+        ws, what = args
+    else:
+        ws = str(json.loads(sh(["hyprctl", "activeworkspace", "-j"]) or "{}").get("id") or "")
+        what = args[0]
+    if not ws.isdigit() or ws == "0":
+        sys.exit("agentic-shell pin: no such workspace")
+    pins = load(PINS) or {}
+    if what == "--clear":
+        pins.pop(ws, None)
+    elif re.fullmatch(r"[A-Za-z0-9._-]+", what) and os.path.isfile(os.path.join(THREADS, what + ".md")):
+        pins[ws] = what
+    else:
+        sys.exit(f"agentic-shell pin: no thread '{what}'")
+    save(PINS, pins)
+    print(f"workspace {ws}: " + (pins.get(ws) or "no pin"))
+
+
 def main():
     a = sys.argv[1:]
     cmd = a[0] if a else ""
@@ -934,6 +1064,10 @@ def main():
             print("\n".join(stable_snapshot()))
         elif cmd == "leave-check":
             cmd_leave_check()
+        elif cmd == "workspaces":
+            cmd_workspaces(a[1:])
+        elif cmd == "pin":
+            cmd_pin(a[1:])
         else:
             print(__doc__)
             sys.exit(0 if cmd in ("-h", "--help", "help") else 1)

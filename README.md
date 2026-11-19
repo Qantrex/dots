@@ -260,6 +260,18 @@ notification). Below that, and alone with nothing typed, the agent panel's tabs:
 Enter opens one. Only Enter in this mode reaches Claude; searching never does.
 `AGENTIC_BIN` points the mode at stand-ins for `inbox` and `thread` in tests.
 
+Workspaces know their thread in `root-agentic`. A workspace belongs to the
+thread whose folder its windows work in: the folders of every process under
+each window, and for a tmux client the folder of its pane
+(`agentic-shell workspaces`, which reads `/proc` and tmux every 5 seconds and
+uses no Claude). When threads share a folder, a subfolder named like a thread
+decides (`~/Notes/Trip` for a thread `trip`). Typing `pin` in the Claude mode
+pins the workspace to a thread instead, or unpins it (`agentic-shell pin`,
+kept in `~/.local/state/agentic/workspace-pins.json`). Such a workspace gets a
+small dot in the bar (gold: the thread needs you, white: it works, grey: it
+waits). `SUPER+SHIFT+A` opens its thread instead of the main chat, and the
+Claude mode lists it first.
+
 **Notifications:** popups top right, 5 s (critical ones stay, with a love
 border); hover pauses them. Everything stays in the history (`SUPER+N`) until
 dismissed. Do Not Disturb keeps critical ones only.
@@ -812,6 +824,7 @@ hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
 | `agentic-shell feed/home/snapshot/leave-check` | what the agent panel reads, as JSON (a conversation, the brief and inbox), and the check that leaving `root-agentic` leaves nothing running |
 | `agentic-shell notify <session> <event> <title> <why> [pane]` | the session hook's notification in `root-agentic` (exit 1: not on, the hook notifies itself): inbox line, nothing while the panel is shown, else buttons that close once settled. `AGENTIC_BIN`/`AGENTIC_SCRIPTS` point it at stand-ins in tests |
 | `agentic-lock [--trial [N]]` | the lock screen of `root-agentic`, with hyprlock as the fallback (see above); `--trial` unlocks by itself after N seconds. Its log: `~/.cache/agentic/lock.log` |
+| `agentic-shell workspaces` / `pin [<ws>] <thread>\|--clear` | which thread belongs to which workspace (JSON: a pin, else the folders of its windows' processes), and pinning one |
 | `agentic-shell grab window\|clipboard` | the panel's desk row: a screenshot of the focused window, or the clipboard, as text for the input box (JSON) |
 | `agentic-shell requests/answer/hold/release` | the panel's request cards: what waits (JSON), answer one (`answer <id> allow\|deny [json]`), the waiting side of the `PermissionRequest` hook, and dropping cards whose call ran or whose turn ended (`release --all`: every card, used when leaving the theme) |
 | `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |

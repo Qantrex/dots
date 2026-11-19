@@ -160,24 +160,45 @@ PanelWindow {
     function agentItems(typed) {
         const t = typed.trim(), q = t.toLowerCase(), out = [];
         const toInbox = text => () => Quickshell.execDetached([win.inboxBin, "add", "--wake", "needs", "launcher", text]);
+        // The thread of the workspace I'm on (ClaudeWorkspaces: a pin, else the folders) comes first.
+        const here = ClaudeWorkspaces.here;
+        const wsNo = (ClaudeWorkspaces.focusedId - 1) % 10 + 1;
+        const sendTo = (name, sub) => ({
+            icon: "󰒊", title: "Send to " + name + (name === here ? " (this workspace)" : ""), subtitle: sub,
+            run: () => Quickshell.execDetached(["sh", "-c",
+                '"$0" send "$1" "$2" || notify-send -a Claude "Not sent to $1" "It has a question open or text typed. Try the panel."',
+                win.threadBin, name, t])
+        });
+        // The panel's tabs, plus threads at work the panel hasn't listed yet (it reads them when it opens).
+        const threadNames = Agentic.tabs.filter(n => n !== "home" && n !== "main")
+            .concat(ClaudeThreads.live.map(th => th.name).filter(n => Agentic.tabs.indexOf(n) < 0));
+        if (here && threadNames.indexOf(here) < 0) threadNames.unshift(here);
+
+        // "pin <thread>": this workspace belongs to that thread from now on, whatever its folders say.
+        if (/^pin\b/.test(q)) {
+            const rest = q.slice(3).trim();
+            threadNames.filter(n => n !== here || !ClaudeWorkspaces.herePinned).filter(n => !rest || score(rest, n) > 0)
+                .forEach(n => out.push({ icon: "󰐃", title: "Pin workspace " + wsNo + " to " + n,
+                                         subtitle: "The panel key and this list open it first here",
+                                         run: () => ClaudeWorkspaces.pin(n) }));
+            if (ClaudeWorkspaces.herePinned)
+                out.push({ icon: "󰤱", title: "Unpin workspace " + wsNo, subtitle: "Pinned to " + here + "; back to its folders",
+                           run: () => ClaudeWorkspaces.unpin() });
+            if (out.length) return out;
+        }
         if (t !== "") {
+            if (here) out.push(sendTo(here, Agentic.stateOf(here)));
             out.push({ icon: "󰭹", title: "Send to the main chat", subtitle: t, run: toInbox(t) });
             out.push({ icon: "󰑮", title: "Main chat: start a thread for this", subtitle: t,
                        run: toInbox("Start a thread for this: " + t) });
-            ClaudeThreads.live.forEach(th => out.push({
-                icon: "󰒊", title: "Send to " + th.name, subtitle: th.state + (th.detail ? " · " + th.detail.slice(0, 60) : ""),
-                run: () => Quickshell.execDetached(["sh", "-c",
-                    '"$0" send "$1" "$2" || notify-send -a Claude "Not sent to $1" "It has a question open or text typed. Try the panel."',
-                    win.threadBin, th.name, t])
-            }));
+            ClaudeThreads.live.filter(th => th.name !== here).forEach(th =>
+                out.push(sendTo(th.name, th.state + (th.detail ? " · " + th.detail.slice(0, 60) : ""))));
         }
-        // The panel's tabs, plus threads at work the panel hasn't listed yet (it reads them when it opens).
-        const tabs = Agentic.tabs.filter(n => n !== "home")
-            .concat(ClaudeThreads.live.map(th => th.name).filter(n => Agentic.tabs.indexOf(n) < 0), ["home"]);
+        const tabs = (here ? [here] : []).concat(["main"], threadNames.filter(n => n !== here), ["home"]);
         tabs.filter(n => !q || score(q, n) > 0).forEach(n => {
             const st = n === "home" ? "" : Agentic.stateOf(n);
             out.push({ icon: n === "home" ? "󰋜" : (n === "main" ? "󰭹" : "󰒊"),
-                       title: n === "home" ? "Open the panel: home" : "Open the panel: " + n,
+                       title: "Open the panel: " + n + (n === here ? " (this workspace)" : ""),
                        subtitle: st, run: () => Agentic.show(n) });
         });
         return out;
@@ -346,7 +367,7 @@ PanelWindow {
                         visible: !search.text
                         anchors.verticalCenter: parent.verticalCenter
                         text: (Neko.enabled ? "(=^･ω･^=) " : "") + (({ apps: "Run an app", clipboard: "Search the clipboard", emoji: "Find an emoji",
-                                 agent: "Ask Claude, or open a tab of the panel",
+                                 agent: "Ask Claude, open a tab of the panel, or type pin",
                                  screenshot: "Take a screenshot", wallpaper: "Pick a wallpaper", theme: "Pick a theme", power: "Session" })[win.mode] ?? "") + (Neko.enabled ? ", nya~" : "")
                         dim: true
                         size: Theme.fontLarge
