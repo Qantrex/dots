@@ -43,6 +43,7 @@ MouseArea {
         Label {
             anchors.verticalCenter: parent.verticalCenter
             text: root.name
+            size: Agentic.fontSize
             color: root.needsMe ? Theme.gold : (root.current ? Theme.fg : Theme.fgMuted)
             bold: root.current
         }

@@ -129,14 +129,14 @@ Item {
                                 selectionColor: Theme.pressed
                                 selectedTextColor: Theme.fg
                                 font.family: Theme.font
-                                font.pixelSize: Theme.fontSize
+                                font.pointSize: Agentic.fontPt
                             }
                             Label {
                                 id: when
                                 anchors { right: parent.right; rightMargin: 10; top: parent.top; topMargin: 9 }
                                 text: entry.at
                                 dim: true
-                                size: Theme.fontSmall
+                                size: Agentic.fontSmall
                             }
                         }
                     }
@@ -153,7 +153,7 @@ Item {
                             selectionColor: Theme.pressed
                             selectedTextColor: Theme.fg
                             font.family: Theme.font
-                            font.pixelSize: Theme.fontSize
+                            font.pointSize: Agentic.fontPt
                         }
                     }
                     Component {
@@ -162,7 +162,7 @@ Item {
                             leftPadding: 2
                             text: entry.body
                             dim: true
-                            size: Theme.fontSmall
+                            size: Agentic.fontSmall
                             maximumLineCount: 1
                         }
                     }
@@ -172,7 +172,7 @@ Item {
                             leftPadding: 2
                             text: entry.body
                             dim: true
-                            size: Theme.fontSmall
+                            size: Agentic.fontSmall
                             wrapMode: Text.Wrap
                             maximumLineCount: 3
                             verticalAlignment: Text.AlignTop
@@ -187,6 +187,7 @@ Item {
                                 width: parent.width
                                 leftPadding: 2
                                 text: entry.body
+                                size: Agentic.fontSize
                                 color: Theme.gold
                                 wrapMode: Text.Wrap
                                 elide: Text.ElideNone
@@ -194,7 +195,7 @@ Item {
                             }
                             MouseArea {
                                 visible: entry.index === lines.count - 1
-                                width: answer.implicitWidth + 20; height: 26
+                                width: answer.implicitWidth + 20; height: answer.implicitHeight + 10
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: Agentic.terminal()
@@ -205,7 +206,7 @@ Item {
                                     border.width: 1
                                     border.color: Theme.gold
                                 }
-                                Label { id: answer; anchors.centerIn: parent; text: "Answer in the terminal"; color: Theme.gold; size: Theme.fontSmall }
+                                Label { id: answer; anchors.centerIn: parent; text: "Answer in the terminal"; color: Theme.gold; size: Agentic.fontSmall }
                             }
                         }
                     }
@@ -222,6 +223,7 @@ Item {
         wrapMode: Text.Wrap
         elide: Text.ElideNone
         dim: true
+        size: Agentic.fontSize
         text: chat.gone ? "No Claude session is running in '" + chat.target + "' right now."
                         : (chat.ready ? "Nothing here yet." : "Reading the conversation ...")
     }
@@ -254,7 +256,7 @@ Item {
                 id: told
                 anchors { left: parent.left; leftMargin: 4; right: toTerm.visible ? toTerm.left : parent.right; rightMargin: 8; top: parent.top }
                 text: status.line
-                size: Theme.fontSmall
+                size: Agentic.fontSmall
                 wrapMode: Text.Wrap
                 maximumLineCount: 3
                 verticalAlignment: Text.AlignTop
@@ -264,11 +266,11 @@ Item {
                 id: toTerm
                 visible: chat.problem !== ""
                 anchors { right: parent.right; top: parent.top }
-                width: toTermLabel.implicitWidth + 12; height: 18
+                width: toTermLabel.implicitWidth + 12; height: toTermLabel.implicitHeight + 2
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: Agentic.terminal()
-                Label { id: toTermLabel; anchors.centerIn: parent; text: "Open terminal"; size: Theme.fontSmall; color: toTerm.containsMouse ? Theme.fg : Theme.fgMuted }
+                Label { id: toTermLabel; anchors.centerIn: parent; text: "Open terminal"; size: Agentic.fontSmall; color: toTerm.containsMouse ? Theme.fg : Theme.fgMuted }
             }
         }
 
@@ -281,7 +283,7 @@ Item {
             border.width: 1
             border.color: input.activeFocus ? Theme.borderStrong : Theme.border
 
-            readonly property real lineHeight: Math.ceil(Theme.fontSize * 1.45)
+            readonly property real lineHeight: Math.ceil(Agentic.fontSize * 1.45)
 
             Flickable {
                 id: typed
@@ -303,7 +305,7 @@ Item {
                     selectionColor: Theme.pressed
                     selectedTextColor: Theme.fg
                     font.family: Theme.font
-                    font.pixelSize: Theme.fontSize
+                    font.pointSize: Agentic.fontPt
 
                     onCursorRectangleChanged: {
                         const r = cursorRectangle;
@@ -327,6 +329,7 @@ Item {
                         visible: input.text === "" && input.preeditText === ""
                         text: chat.gone ? "No session to write to" : "Message " + chat.target
                         dim: true
+                        size: Agentic.fontSize
                     }
                 }
             }

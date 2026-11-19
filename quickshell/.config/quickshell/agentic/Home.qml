@@ -29,12 +29,13 @@ Flickable {
                 width: col.width
                 leftPadding: 4
                 text: modelData
+                size: Agentic.fontSize
                 wrapMode: Text.Wrap
                 elide: Text.ElideNone
                 lineHeight: 1.25
             }
         }
-        Label { visible: Agentic.brief.length === 0; leftPadding: 4; text: "Nothing to report."; dim: true }
+        Label { visible: Agentic.brief.length === 0; leftPadding: 4; text: "Nothing to report."; dim: true; size: Agentic.fontSize }
 
         Item { width: 1; height: 10 }
         SectionTitle { width: parent.width; text: "Inbox" }
@@ -55,23 +56,24 @@ Flickable {
                 Label {
                     id: when
                     anchors { left: parent.left; leftMargin: 12; top: parent.top; topMargin: 4 }
-                    width: 44
+                    width: Math.round(44 * Agentic.fontSmall / Theme.fontSmall)
                     text: row.modelData.at || ""
                     dim: true
-                    size: Theme.fontSmall
+                    size: Agentic.fontSmall
                 }
                 Label {
                     id: who
                     anchors { left: when.right; top: parent.top; topMargin: 4 }
-                    width: 76
+                    width: Math.round(76 * Agentic.fontSmall / Theme.fontSmall)
                     text: row.modelData.source || ""
-                    size: Theme.fontSmall
+                    size: Agentic.fontSmall
                     color: root.tint(row.modelData.level)
                 }
                 Label {
                     id: what
                     anchors { left: who.right; leftMargin: 6; right: parent.right; top: parent.top; topMargin: 3 }
                     text: row.modelData.text || ""
+                    size: Agentic.fontSize
                     wrapMode: Text.Wrap
                     elide: Text.ElideNone
                     verticalAlignment: Text.AlignTop
@@ -79,6 +81,6 @@ Flickable {
                 }
             }
         }
-        Label { visible: Agentic.inbox.length === 0; leftPadding: 4; text: "The inbox is empty."; dim: true }
+        Label { visible: Agentic.inbox.length === 0; leftPadding: 4; text: "The inbox is empty."; dim: true; size: Agentic.fontSize }
     }
 }

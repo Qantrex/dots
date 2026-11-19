@@ -266,6 +266,9 @@ opens the real Claude Code terminal of that tab, the foot and tmux panel the
 other themes use. Questions Claude asks with its own dialog and permission
 prompts are still answered there. The sessions stay ordinary Claude Code in
 tmux, so the panel costs no usage of its own and nothing breaks without it.
+Its text is as large as the terminal's: the theme passes foot's font size
+(`font.mono_size`, in points) as `termFontPt`, while the rest of the shell keeps
+its own smaller pixel sizes.
 
 The panel exists only while the theme renders `agentic.json`; in every other
 theme `Agentic.enabled` is false and nothing of it is loaded. It is a layer
@@ -274,7 +277,10 @@ then. `shell.qml` loads it with an inline `LazyLoader { active: Agentic.enabled;
 Panel {} }` on purpose: loaded by `source:`, Quickshell 0.3.2 crashed when the
 process ended within about two seconds of a config reload. The price: a syntax
 error in a panel file fails the config load like one in any other shell file, in
-every theme, so read the Quickshell log after editing one. To try a change
+every theme, so read the Quickshell log after editing one. Saving several
+shell files one after the other can leave the running shell half reloaded (its
+IPC then answers "Not ready to accept queries yet"); `shell.sh restart` a few
+seconds later puts that right. To try a change
 without touching the desktop, run a second instance (`qs -p <copy>`) with
 `QS_AGENTIC_CONF=<an agentic.json>` and `QS_AGENTIC_NOFOCUS=1` (it then never
 takes the keyboard).

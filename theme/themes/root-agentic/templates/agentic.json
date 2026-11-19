@@ -3,5 +3,6 @@
   "enabled": true,
   "width": 0.4,
   "minWidth": 560,
+  "termFontPt": {{ font.mono_size }},
   "bin": "{{ home }}/.local/bin"
 }

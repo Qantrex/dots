@@ -24,6 +24,13 @@ Singleton {
     readonly property int minWidth: cfg.minWidth > 0 ? cfg.minWidth : 560
     readonly property string bin: cfg.bin || Host.home + "/.local/bin"
 
+    // The panel's text is as large as the terminal's: the theme passes foot's font size, which
+    // is in points (1 pt = 96/72 px here, as foot counts it). The shell's own sizes are pixels
+    // and smaller, right for the bar but not for reading a conversation.
+    readonly property real fontPt: cfg.termFontPt > 0 ? cfg.termFontPt : Theme.fontSize * 72 / 96
+    readonly property int fontSize: Math.round(fontPt * 96 / 72)
+    readonly property int fontSmall: Math.round(fontSize * Theme.fontSmall / Theme.fontSize)
+
     property bool open: false
     property string target: "main"    // "main", a thread's name, or "home" (brief and inbox)
 
@@ -118,6 +125,7 @@ Singleton {
             property real width: 0
             property int minWidth: 0
             property string bin: ""
+            property real termFontPt: 0
         }
     }
 
