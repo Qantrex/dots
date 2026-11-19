@@ -1,0 +1,7 @@
+#!/bin/sh
+# root-agentic enter (on `theme set root-agentic` and at login): the shell's own panel takes over
+# from the terminal panel, which keeps running and is one `dock term` (Ctrl+T) away. The shell
+# switches the panel on by itself when it reads the theme; this only tidies up and makes sure.
+"$HOME/.local/bin/dock" hide >/dev/null 2>&1
+qs ipc call agentic refresh >/dev/null 2>&1
+exit 0

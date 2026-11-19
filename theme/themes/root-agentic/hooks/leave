@@ -1,0 +1,5 @@
+#!/bin/sh
+# root-agentic leave (on switching to another theme): close the panel. The shell drops it for
+# good when it reads the next theme, which has no agentic.json; this theme starts nothing else.
+qs ipc call agentic hide >/dev/null 2>&1
+exit 0

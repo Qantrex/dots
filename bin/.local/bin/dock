@@ -4,6 +4,8 @@
 #                        chat; from the main chat hide it
 #   dock show [target]   show the panel with the main chat ("main", the default), a thread by name, a tmux
 #                        pane (%12) or --first (the session that has waited longest)
+#   dock term [target]   the same, but always as the real Claude Code terminal (theme root-agentic: Ctrl+T
+#                        in the shell's panel)
 #   dock hide            hide it
 #   dock ensure          start the panel window hidden, so it opens instantly later
 #   dock close           close the panel window (agentic off)
@@ -12,6 +14,10 @@
 # window rule "agentic-panel" in rules.lua). It shows tmux session "panel", grouped with session "main":
 # the same windows, but its own current window, so the terminals on your workspaces keep what they show.
 # tmux sizes a window to the client used last, and Claude Code redraws cleanly at the new width.
+#
+# In the theme root-agentic the Quickshell shell has its own panel in the same place (agentic/Panel.qml,
+# services/Agentic.qml). While it is on, toggle and show open that one for the main chat and the threads,
+# and the terminal stays one `dock term` away. Every other theme and the desktop PC work as described above.
 
 set -u
 session=main
@@ -29,6 +35,12 @@ else
     toggle() { hyprctl dispatch 'hl.dsp.workspace.toggle_special("agentic")' >/dev/null; }
 fi
 focus() { hyprctl dispatch 'hl.dsp.focus({ window = "class:^(agentic-panel)$" })' >/dev/null; }
+
+# The shell's own panel: "hidden" or "shown <tab>" while the theme has one, else empty (also when no
+# shell runs, or an older one that doesn't know the call).
+native=$(qs ipc call agentic status 2>/dev/null)
+[[ $native == hidden || $native == "shown "* ]] || native=""
+panel_call() { qs ipc call agentic "$@" >/dev/null 2>&1; }
 
 ensure() {
     tmux has-session -t "=$session" 2>/dev/null || { echo "No tmux session '$session' (agentic on)." >&2; return 1; }
@@ -52,13 +64,29 @@ status_line() {
         "#[align=left,fg=colour245] #(cat \"${XDG_CACHE_HOME:-$HOME/.cache}/agentic-threads.line\" 2>/dev/null || echo 'no threads')"
 }
 
+# --first: the session that has waited longest (bar flag, session-track.sh in claude-config).
+first_waiting() {
+    local pane
+    pane=$(jq -r '.[0].pane // empty' "${XDG_CACHE_HOME:-$HOME/.cache}/claude-waiting.json" 2>/dev/null)
+    echo "${pane:-main}"
+}
+
+# What the shell's panel can show: the main chat and the threads (a window in tmux "main" with a state
+# file). Prints that name for main, a thread, a pane (%12) or --first; nothing for any other session.
+native_target() {
+    local name=${1:-main}
+    [[ $name == --first ]] && name=$(first_waiting)
+    if [[ $name == %* ]]; then
+        name=$(tmux list-panes -s -t "=$session" -F '#{pane_id} #{window_name}' 2>/dev/null |
+            awk -v pane="$name" '$1 == pane { print $2; exit }')
+    fi
+    [[ $name == main || ( -n $name && -f "${XDG_DATA_HOME:-$HOME/.local/share}/agentic/threads/$name.md" ) ]] || return 1
+    tmux list-windows -t "=$session" -F '#{window_name}' 2>/dev/null | grep -qxF -- "$name" && echo "$name"
+}
+
 select_target() {
     local name=${1:-main} win
-    if [[ $name == --first ]]; then
-        # The session that has waited longest (bar flag, session-track.sh in claude-config).
-        name=$(jq -r '.[0].pane // empty' "${XDG_CACHE_HOME:-$HOME/.cache}/claude-waiting.json" 2>/dev/null)
-        [[ -n $name ]] || name=main
-    fi
+    [[ $name == --first ]] && name=$(first_waiting)
     if [[ $name == %* ]]; then
         # A tmux pane: show its window if it belongs to the main session's group.
         win=$(tmux display -p -t "$name" '#{window_id}' 2>/dev/null)
@@ -69,9 +97,27 @@ select_target() {
         notify-send -a Claude "Claude" "No thread called '$name' is running."; return 1; }
 }
 
+# The terminal panel with that session, in front of the shell's panel if there is one.
+show_terminal() {
+    [[ -n $native ]] && panel_call hide
+    ensure || return 1
+    select_target "${1:-main}" || return 1
+    shown || toggle
+    focus
+}
+
 case ${1:-toggle} in
 toggle)
     # Showing a thread: back to the main chat. Showing the main chat: hide. Hidden: show it again.
+    if [[ -n $native ]]; then
+        # The same three steps in the shell's panel; a terminal panel that is up only goes away.
+        if shown; then toggle
+        elif [[ $native == hidden ]]; then panel_call open main
+        elif [[ $native == "shown main" ]]; then panel_call hide
+        else panel_call open main
+        fi
+        exit 0
+    fi
     if shown; then
         if [[ $(tmux display -p -t "$panel:" '#{window_name}' 2>/dev/null) != main ]]; then
             select_target main; focus
@@ -85,23 +131,34 @@ toggle)
     select_target main
     toggle; focus ;;
 show)
-    ensure || exit 1
-    select_target "${2:-main}" || exit 1
-    shown || toggle
-    focus ;;
+    if [[ -n $native ]] && name=$(native_target "${2:-main}"); then
+        shown && toggle
+        panel_call open "$name"
+        exit 0
+    fi
+    show_terminal "${2:-main}" || exit 1 ;;
+term)
+    show_terminal "${2:-main}" || exit 1 ;;
 hide)
+    [[ -n $native ]] && panel_call hide
     shown && toggle ;;
 ensure)
     ensure ;;
 close)
+    [[ -n $native ]] && panel_call hide
     shown && toggle
     hyprctl clients -j | jq -r '.[] | select(.class == "agentic-panel") | .pid' | xargs -r kill
     tmux kill-session -t "=$panel" 2>/dev/null ;;
 status)
+    if [[ -n $native ]]; then
+        term="not started"; window_open && { shown && term=shown || term=hidden; }
+        echo "panel: ${native/ /, showing } (the shell's panel); its terminal: $term"
+        exit 0
+    fi
     if ! window_open; then echo "panel: closed"; exit 0; fi
     w=$(tmux display -p -t "$panel:" '#{window_name}' 2>/dev/null)
     echo "panel: $(shown && echo shown || echo hidden), showing ${w:-?}" ;;
 *)
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
     exit 1 ;;
 esac
