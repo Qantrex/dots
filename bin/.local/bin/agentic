@@ -54,7 +54,7 @@ start_main() {
     # --remote-control: the same conversation continues in the Claude app on the phone.
     local loop='while :; do
         env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-            AGENTIC_ROLE=main SSH_AUTH_SOCK="'"$SSH_AUTH_SOCK"'" "'"$claude"'" -n main-chat --model opus --effort high --autocompact 100000 --remote-control main-chat \
+            AGENTIC_ROLE=main SSH_AUTH_SOCK="'"$SSH_AUTH_SOCK"'" "'"$claude"'" -n main-chat --model opus --effort high --autocompact 150000 --remote-control main-chat \
             --settings "{\"permissions\":{\"additionalDirectories\":[\"$HOME\"]}}"
         sleep 2
     done'
