@@ -136,26 +136,30 @@ def running(ag, wins, include_adopted=False):
             and (include_adopted or t.get("origin") != "adopted")]
 
 
-def trusted(folder):
-    """Whether Claude Code trusts <folder> (itself or a parent), so the session doesn't stop at its trust question."""
-    try:
-        projects = json.load(open(os.path.join(HOME, ".claude.json"))).get("projects", {})
-    except (OSError, ValueError):
-        return True  # can't tell: don't warn
+def trust(folder):
+    """Mark <folder> as trusted in Claude Code's config, so the thread doesn't stop at its trust question.
+    The owner chose to trust every folder a thread runs in (2026-11-19). Trust of a parent folder doesn't
+    carry over to its subfolders (checked: ~/Projects trusted, ~/Projects/wh still asked), so it's per folder."""
+    path = os.path.join(HOME, ".claude.json")
     d = os.path.realpath(folder)
-    while True:
-        if projects.get(d, {}).get("hasTrustDialogAccepted"):
-            return True
-        if d == "/":
-            return False
-        d = os.path.dirname(d)
+    try:
+        conf = json.load(open(path))
+    except (OSError, ValueError):
+        return
+    entry = conf.setdefault("projects", {}).setdefault(d, {})
+    if entry.get("hasTrustDialogAccepted"):
+        return
+    entry["hasTrustDialogAccepted"] = True
+    tmp = f"{path}.thread-{os.getpid()}"
+    with open(tmp, "w") as f:
+        json.dump(conf, f, indent=2)
+    os.replace(tmp, path)
+    print(f"Marked {d} as trusted in Claude Code, so '{os.path.basename(d)}' starts without the trust question.")
 
 
 def launch(name, folder, cmd_args):
     """Open a tmux window <name> in <folder> running claude with the given arguments."""
-    if not trusted(folder):
-        print(f"Note: Claude Code doesn't trust {folder} yet, so '{name}' waits at its trust question "
-              f"(the brief and messages wait too). The owner answers it: `dock show {name}`, pick Yes.")
+    trust(folder)
     os.makedirs(RUN, exist_ok=True)
     script = os.path.join(RUN, name + ".sh")
     unset = " ".join(f"-u {v}" for v in CLEAN_ENV)
