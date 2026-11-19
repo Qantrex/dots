@@ -7,7 +7,8 @@
 #                          Stays off across logins until `agentic on`.
 #   agentic status         what runs right now
 #   agentic restart        fresh main chat (same as /exit inside it)
-#   agentic brief [--print] what needs me (deadlines, left-open threads, failures, inbox, usage); at login
+#   agentic brief [--print] what needs me (school from `atlas queue`, waiting and left-open threads, failures,
+#                           inbox, usage); at login
 #   agentic doctor         check the setup; prints one line per problem, nothing when all is well
 # The chat runs in ~/.local/share/agentic/main; its rules are that folder's CLAUDE.md. Threads: `thread`.
 # Panel: `dock`. Map: `atlas`. Undo everything: `agentic off`, then revert the commits.
@@ -112,8 +113,13 @@ brief)
     # One notification with what needs me, from data (no AI): deadlines in 3 days, threads left open,
     # failed units, new inbox events, weekly Claude usage. Shown at login.
     lines=()
-    dl=$(atlas deadlines 2>/dev/null | awk -F'|' 'NR > 3 && $2 ~ /(overdue|in [0-3] d)/ {gsub(/^ +| +$/, "", $3); gsub(/^ +| +$/, "", $4); gsub(/^ +| +$/, "", $2); print $3 " " $4 " (" $2 ")"}' | head -4)
+    q=$(atlas queue --json 2>/dev/null)
+    late=$(jq -r '[.items[] | select(.source == "school" and .level == "late")] | length' <<<"$q" 2>/dev/null)
+    dl=$(jq -r '.items[] | select(.source == "school" and .level == "due") | "\(.text) (\(.detail))"' <<<"$q" 2>/dev/null | head -3)
+    (( ${late:-0} > 0 )) && lines+=("$late late school task(s) (atlas queue)")
     [[ -n $dl ]] && lines+=("Due: ${dl//$'\n'/, }")
+    waiting=$(jq -r '[.items[] | select(.source == "thread")] | length' <<<"$q" 2>/dev/null)
+    (( ${waiting:-0} > 0 )) && lines+=("$waiting thread(s) wait for you")
     left=$(thread list --json 2>/dev/null | jq '[.[] | select(.state == "left open")] | length')
     (( ${left:-0} > 0 )) && lines+=("$left thread(s) left open (cr)")
     failed=$( (systemctl --failed --no-legend --plain; systemctl --user --failed --no-legend --plain) 2>/dev/null | awk '{print $1}' | paste -sd, -)

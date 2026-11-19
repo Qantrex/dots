@@ -6,6 +6,11 @@
   atlas <topic>         print one detail file: repos, deadlines, keybinds, tools, packages,
                         services, recent, sessions, homelab
   atlas topics          list the topics
+  atlas queue [--json]  what waits on the owner, in one list: late school work and work due within 3 days
+                        (Moodle, cached for 6 hours and refreshed in the background together with `moodle
+                        sync`; tracker notes marked done or dropped are left out), threads with a `needs:`
+                        line or open questions, homelab reports at ALERT or WARN, the open items of a plan
+                        note, and blocked sessions. With a warm cache it answers in about a second.
 
 Output: ~/.local/share/agentic/atlas/. Settings: ~/.config/agentic/atlas.conf (areas, where repos,
 deadline notes, the homelab note and the homelab agent's host are). A topic whose collector fails is marked "stale" instead
@@ -28,6 +33,9 @@ DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".loca
 OUT = os.path.join(DATA, "atlas")
 THREADS = os.path.join(DATA, "threads")
 CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "agentic", "atlas.conf")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "agentic")
+SCHOOL_CACHE = os.path.join(CACHE, "queue-school.json")
+SCHOOL_MAX_AGE = 6 * 3600
 TOPICS = ["repos", "deadlines", "keybinds", "tools", "packages", "services", "recent", "sessions", "homelab"]
 
 
@@ -450,6 +458,298 @@ def refresh():
     write("index", "\n".join(lines))
 
 
+# ---- atlas queue: what waits on the owner ---------------------------------------------------------------
+
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def days_text(d):
+    return "today" if d == 0 else "tomorrow" if d == 1 else f"in {d} days"
+
+
+def school_refresh():
+    """Moodle's open and late work into the cache, then `moodle sync` so the tracker notes are current.
+    Slow (list --all takes about 15 s), so `atlas queue` runs it in the background."""
+    exe = shutil.which("moodle")
+    if not exe:
+        return
+    keep = ("cmid", "name", "course", "subject", "year", "due", "state", "graded", "grade", "url")
+    try:
+        raw = json.loads(sh([exe, "list", "--all", "--json"], timeout=90) or "null")
+        due = json.loads(sh([exe, "due", "--json"], timeout=60) or "null")
+    except ValueError:
+        raw = due = None
+    if not isinstance(raw, list) or not isinstance(due, dict):
+        return   # Moodle didn't answer: the old cache stays
+    data = {"ts": time.time(), "all": [{k: x.get(k) for k in keep} for x in raw],
+            "due": [{k: x.get(k) for k in ("cmid", "name", "course", "subject", "due_ts", "overdue", "url")}
+                    for x in due.get("items") or []]}
+    os.makedirs(CACHE, exist_ok=True)
+    with open(SCHOOL_CACHE + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(SCHOOL_CACHE + ".tmp", SCHOOL_CACHE)
+    sh([exe, "sync"], timeout=180)
+
+
+def school_cache():
+    """The cached Moodle data; starts a background refresh when it is missing or older than 6 hours."""
+    try:
+        data = json.load(open(SCHOOL_CACHE, encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not data or time.time() - data.get("ts", 0) > SCHOOL_MAX_AGE:
+        lock = SCHOOL_CACHE + ".lock"
+        try:
+            fresh_lock = time.time() - os.path.getmtime(lock) < 600
+        except OSError:
+            fresh_lock = False
+        if not fresh_lock and shutil.which("moodle"):
+            os.makedirs(CACHE, exist_ok=True)
+            open(lock, "w").close()
+            subprocess.Popen(["bash", "-c", f'"$0" queue --refresh-school; rm -f "{lock}"', os.path.realpath(__file__)],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+    return data
+
+
+def trackers(c):
+    """School tracker notes: {cmid: (status, path)} and the notes without a Moodle id."""
+    by_id, other = {}, []
+    for root in paths(c.get("deadlines", "notes", fallback="")):
+        for f in glob.glob(os.path.join(root, "**", "*.md"), recursive=True):
+            fm = frontmatter(f)
+            if fm.get("type") not in ("assignment", "test", "project", "exam"):
+                continue
+            cmid = fm.get("cmid") or fm.get("moodle") or ""
+            if cmid.isdigit():
+                by_id[int(cmid)] = (fm.get("status", ""), f)
+            else:
+                other.append((fm, f))
+    return by_id, other
+
+
+def school_items(c):
+    items = []
+    by_id, other = trackers(c)
+    closed = ("done", "dropped")
+    data = school_cache()
+    now = time.time()
+    today = date.today()
+    if data:
+        alls = data.get("all") or []
+        # My class: the most common class in course names ("AM 5BHIT 26/27"); entries for the parallel
+        # classes ("... 5AHIT") are left out.
+        classes = {}
+        for x in alls:
+            for k in re.findall(r"\b(\d[A-Z]HIT)\b", x.get("course") or ""):
+                if k[1] != "X":
+                    classes[k] = classes.get(k, 0) + 1
+        mine = max(classes, key=classes.get) if classes else ""
+
+        def other_class(x):
+            return mine and any(k != mine for k in re.findall(r"\b(\d[A-Z]HIT)\b", x.get("name") or ""))
+
+        def closed_in_tracker(cmid):
+            return by_id.get(cmid, ("",))[0] in closed
+
+        year = max((x.get("year") or "" for x in alls), default="")
+        timeline = {x["cmid"] for x in data.get("due") or []}
+        late, untracked = [], 0
+        for x in alls:
+            if x.get("year") != year or not x.get("due") or x["due"] >= now or not x.get("subject"):
+                continue
+            if x.get("state") != "new" or (x.get("graded") and x.get("grade")) or other_class(x):
+                continue
+            if closed_in_tracker(x["cmid"]):
+                continue
+            if x["cmid"] in by_id or x["cmid"] in timeline:
+                late.append(x)
+            else:
+                untracked += 1
+        for x in sorted(late, key=lambda x: x["due"]):
+            d = (today - date.fromtimestamp(x["due"])).days
+            items.append({"source": "school", "level": "late", "text": subject_name(x['subject'], x['name']),
+                          "detail": f"{d} day{'s' if d != 1 else ''} late (due {date.fromtimestamp(x['due']):%m-%d})",
+                          "url": x.get("url"), "tracker": short(by_id[x["cmid"]][1]) if x["cmid"] in by_id else None})
+        for x in sorted(data.get("due") or [], key=lambda x: x.get("due_ts") or 0):
+            if x.get("overdue") or not x.get("due_ts") or other_class(x) or closed_in_tracker(x["cmid"]):
+                continue
+            dd = datetime.fromtimestamp(x["due_ts"])
+            d = (dd.date() - today).days
+            if d > 3 or x["due_ts"] < now:
+                continue
+            items.append({"source": "school", "level": "due", "text": subject_name(x['subject'], x['name']),
+                          "detail": f"due {days_text(d)} {dd:%H:%M}", "url": x.get("url"),
+                          "tracker": short(by_id[x["cmid"]][1]) if x["cmid"] in by_id else None})
+        if untracked:
+            items.append({"source": "school", "level": "info", "text": f"{untracked} more late in Moodle without a "
+                          "tracker note or a place in Moodle's timeline", "detail": "moodle list --all"})
+        age = now - data.get("ts", 0)
+        if age > SCHOOL_MAX_AGE:
+            items.append({"source": "school", "level": "info", "text": f"Moodle data is {ago(data.get('ts', 0))} old",
+                          "detail": "refreshing in the background"})
+    # Tracker notes that Moodle doesn't know (or all of them while there is no Moodle data yet).
+    for fm, f in other + ([] if data else [(frontmatter(p), p) for _, p in by_id.values()]):
+        if fm.get("status") in closed:
+            continue
+        try:
+            d = (date.fromisoformat(fm.get("due", "")) - today).days
+        except ValueError:
+            continue
+        if d > 3:
+            continue
+        name = os.path.splitext(os.path.basename(f))[0]
+        items.append({"source": "school", "level": "late" if d < 0 else "due", "text": subject_name(fm.get('subject', ''), name),
+                      "detail": (f"{-d} days late (due {fm['due'][5:]})" if d < 0 else f"due {days_text(d)}")
+                      + (", tracker note only" if data else ", from the tracker note (no Moodle data yet)"),
+                      "tracker": short(f)})
+    # Notes about the data itself go last.
+    return [i for i in items if i["level"] != "info"] + [i for i in items if i["level"] == "info"]
+
+
+def subject_name(subject, name):
+    return name if not subject or name.lower().startswith(subject.lower()) else f"{subject} {name}"
+
+
+def thread_items():
+    items = []
+    for f in sorted(glob.glob(os.path.join(THREADS, "*.md"))):
+        fm = frontmatter(f)
+        name = fm.get("name") or os.path.basename(f)[:-3]
+        if fm.get("status") == "archived":
+            continue
+        q = None
+        try:
+            q = json.load(open(f[:-3] + ".questions.json", encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        if q and q.get("questions") and not q.get("answers"):
+            n = len(q["questions"])
+            items.append({"source": "thread", "level": "questions", "text": f"{name}: {n} question{'s' if n > 1 else ''}",
+                          "detail": f"thread questions {name}", "since": q.get("asked")})
+        elif fm.get("needs"):
+            items.append({"source": "thread", "level": "needs", "text": f"{name}: {fm['needs']}",
+                          "detail": f"thread status {fm.get('status', '?')}"})
+    return items
+
+
+def since_text(text, at):
+    """"since Tue 09:50" or "since 2026-11-17" in a report, as "for N days"."""
+    m = re.search(r"since (?:(\d{4}-\d\d-\d\d)|(mon|tue|wed|thu|fri|sat|sun)\w*\.?(?: (\d\d?:\d\d))?)", text, re.I)
+    if not m:
+        return ""
+    try:
+        if m.group(1):
+            start = datetime.fromisoformat(m.group(1))
+        else:
+            wd = WEEKDAYS.index(m.group(2).lower()[:3])
+            back = (at.weekday() - wd) % 7
+            hh, mm = (m.group(3) or "00:00").split(":")
+            start = (at - __import__("datetime").timedelta(days=back)).replace(hour=int(hh), minute=int(mm))
+    except ValueError:
+        return ""
+    hours = (datetime.now() - start).total_seconds() / 3600
+    return f"for {hours / 24:.0f} days" if hours >= 36 else f"for {hours:.0f} h"
+
+
+def homelab_items():
+    exe = os.path.join(os.path.dirname(os.path.realpath(__file__)), "homelab-agent")
+    if not os.access(exe, os.X_OK):
+        exe = shutil.which("homelab-agent")
+    if not exe:
+        return []
+    try:
+        d = json.loads(sh([exe, "json"], timeout=4) or "{}")
+    except ValueError:
+        return []
+    items = []
+    for r in sorted((r for r in d.get("reports") or [] if isinstance(r, dict)),
+                    key=lambda r: (r.get("status") != "ALERT", str(r.get("time", "")))):
+        if r.get("status") not in ("ALERT", "WARN"):
+            continue
+        try:
+            at = datetime.fromisoformat(str(r.get("time")))
+        except ValueError:
+            continue
+        if r.get("status") == "WARN" and (datetime.now() - at).days >= 3:
+            continue   # an old warning of a weekly job: `atlas homelab` has it
+        job = str(r.get("job"))[:30]
+        if r["status"] == "WARN":
+            # A warning sits somewhere in a longer report (the morning one starts with the weather): name it only.
+            items.append({"source": "homelab", "level": "warn", "text": job,
+                          "detail": f"report {at:%a %H:%M}, `homelab-agent report {job}`"})
+            continue
+        para = " ".join(str(r.get("text") or "").split("\n\n")[0].split())
+        first = re.split(r"(?<=[.!?])\s", para, maxsplit=1)[0][:140]
+        dur = since_text(para, at)
+        items.append({"source": "homelab", "level": "alert", "text": f"{job}: {first}",
+                      "detail": ", ".join(x for x in (dur, f"report {at:%a %H:%M}") if x)})
+    return items
+
+
+def plan_items(c):
+    note = os.path.expanduser(c.get("queue", "plan", fallback=""))
+    head = c.get("queue", "plan_section", fallback="Waiting on me")
+    if not note or not os.path.exists(note):
+        return []
+    items, on = [], False
+    for line in open(note, encoding="utf-8", errors="ignore"):
+        s = line.strip()
+        if head.lower() in s.lower() and (s.startswith("#") or s.startswith("**")):
+            on = True
+            continue
+        if on and (s.startswith("#") or (s.startswith("**") and not s.startswith("- "))):
+            break
+        if on and re.match(r"[-*] (\[ \] )?", s) and not re.match(r"[-*] \[[xX]\]", s) and not s.startswith("- ~~"):
+            items.append({"source": "plan", "level": "todo", "text": re.sub(r"^[-*] (\[ \] )?", "", s)[:160],
+                          "detail": short(note)})
+    return items
+
+
+def session_items():
+    claude = shutil.which("claude") or os.path.join(HOME, ".local/bin/claude")
+    try:
+        j = json.loads(sh([claude, "agents", "--json"], timeout=10) or "[]")
+    except ValueError:
+        j = []
+    return [{"source": "session", "level": "blocked", "text": f"{s.get('name', '?')} ({s.get('kind', '')})",
+             "detail": f"blocked in `{short(s.get('cwd', ''))}`"}
+            for s in j if (s.get("state") or s.get("status")) == "blocked"]
+
+
+def queue(as_json=False):
+    c = conf()
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futs = [pool.submit(f, *a) for f, a in ((school_items, (c,)), (thread_items, ()), (homelab_items, ()),
+                                                 (plan_items, (c,)), (session_items, ()))]
+        groups = []
+        for f in futs:
+            try:
+                groups.append(f.result())
+            except Exception as e:
+                groups.append([{"source": "atlas", "level": "info", "text": f"a queue source failed ({type(e).__name__})",
+                                "detail": ""}])
+    items = [i for g in groups for i in g]
+    if as_json:
+        print(json.dumps({"generated": datetime.now().isoformat(timespec="seconds"), "items": items},
+                         ensure_ascii=False))
+        return
+    titles = {"school": "School", "thread": "Threads", "homelab": "Homelab", "plan": "Plan (waiting on me)",
+              "session": "Sessions"}
+    print(f"What waits on the owner ({datetime.now():%a %H:%M}, `atlas queue`):" if items
+          else "Nothing waits on the owner (`atlas queue`).")
+    for src in ("school", "thread", "homelab", "plan", "session", "atlas"):
+        g = [i for i in items if i["source"] == src]
+        if not g:
+            continue
+        print(f"{titles.get(src, src)}:")
+        for i in g:
+            lvl = {"late": "LATE ", "due": "", "questions": "", "needs": "", "alert": "ALERT ", "warn": "WARN ",
+                   "todo": "", "blocked": "", "info": ""}.get(i["level"], "")
+            print(f"- {lvl}{i['text']}" + (f" ({i['detail']})" if i.get("detail") and src != "plan" else ""))
+
+
 def main():
     a = sys.argv[1:] or ["index"]
     if a[0] in ("-h", "--help", "help"):
@@ -458,6 +758,11 @@ def main():
         t = time.time()
         refresh()
         print(f"atlas refreshed in {time.time() - t:.1f} s: {short(OUT)}")
+    elif a[0] == "queue":
+        if "--refresh-school" in a:
+            school_refresh()
+        else:
+            queue("--json" in a)
     elif a[0] == "topics":
         print(" ".join(TOPICS))
     else:
