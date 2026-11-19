@@ -21,5 +21,6 @@
   "gap": {{ look.bar_gap }},
   "radius": {{ look.radius }},
   "radiusSmall": {{ look.radius_small }},
-  "pad": {{ look.pad }}
+  "pad": {{ look.pad }},
+  "wallpaper": "{{ asset.wallpaper }}"
 }

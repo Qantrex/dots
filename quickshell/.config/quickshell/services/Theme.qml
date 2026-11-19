@@ -68,6 +68,9 @@ Singleton {
     readonly property int radius: t.radius
     readonly property int radiusSmall: t.radiusSmall
     readonly property int pad: t.pad
+    // The theme's own picture (asset.wallpaper, the one hyprlock is laid out on), not the one picked in the
+    // launcher: the lock screen sits on it.
+    readonly property string wallpaper: t.wallpaper
 
     readonly property int animFast: 140
     readonly property int anim: 220
@@ -103,6 +106,7 @@ Singleton {
             property int radius: 8
             property int radiusSmall: 4
             property int pad: 12
+            property string wallpaper: ""
         }
     }
 
