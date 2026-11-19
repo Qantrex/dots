@@ -12,6 +12,7 @@ Singleton {
 
     readonly property var list: server.trackedNotifications.values.slice().reverse()   // newest first
     property var popups: []
+    property var shownAt: ({})   // popup id -> ms when shown (or last un-hovered); the Repeater rebuilds every card on each change
     property int unread: 0
     property bool dnd: persist.dnd
 
@@ -23,7 +24,7 @@ Singleton {
 
     function setDnd(on) { persist.dnd = on; }
     function markRead() { unread = 0; }
-    function dismissPopup(n) { popups = popups.filter(p => p !== n); }
+    function dismissPopup(n) { delete shownAt[n.id]; popups = popups.filter(p => p !== n); }
     // Remove an app's notifications from the popups and the history (the battery warnings once plugged in).
     function dismissApp(app) {
         for (const n of server.trackedNotifications.values.slice()) if (n.appName === app) n.dismiss();
@@ -42,6 +43,13 @@ Singleton {
         if (n.expireTimeout > 0) return Math.min(n.expireTimeout, 15000);
         return n.urgency === NotificationUrgency.Low ? 3000 : 5000;
     }
+    // What is left of a popup's timeout, so a rebuilt card doesn't start it over (0 = stays).
+    function remaining(n) {
+        const t = timeoutFor(n);
+        if (t <= 0) return 0;
+        return Math.max(1, t - (Date.now() - (shownAt[n.id] ?? Date.now())));
+    }
+    function touch(n) { shownAt[n.id] = Date.now(); }
     function icon(n) {
         if (n.image) return n.image;
         if (n.appIcon) return n.appIcon.startsWith("/") || n.appIcon.includes("://") ? n.appIcon : Quickshell.iconPath(n.appIcon, true);
@@ -64,6 +72,7 @@ Singleton {
             if (n.transient && root.dnd) return;
             root.unread += 1;
             if (!root.dnd || n.urgency === NotificationUrgency.Critical) {
+                root.shownAt[n.id] = Date.now();
                 root.popups = [n].concat(root.popups.filter(p => p.id !== n.id)).slice(0, 5);
                 Neko.sound("notify");   // nekosec only, and only for popups (so never in DND)
             }

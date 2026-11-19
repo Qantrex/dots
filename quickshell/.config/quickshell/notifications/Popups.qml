@@ -5,7 +5,8 @@ import qs.services
 import qs.components
 
 // Notification popups, top right under the bar, on the focused screen.
-// Hovering one pauses its timer.
+// Hovering one pauses its timer. Timers count from when the popup was shown (Notifs.remaining),
+// because the Repeater rebuilds every card whenever the list changes.
 PanelWindow {
     id: win
 
@@ -51,13 +52,17 @@ PanelWindow {
                     Behavior on opacity { NumberAnimation { duration: Theme.anim } }
                     Behavior on x { NumberAnimation { duration: Theme.anim; easing.type: Easing.OutCubic } }
 
-                    HoverHandler { id: hover }
+                    // Leaving a card gives it its full time again.
+                    HoverHandler {
+                        id: hover
+                        onHoveredChanged: if (!hovered) { Notifs.touch(slot.modelData); timer.interval = Math.max(1, Notifs.timeoutFor(slot.modelData)); }
+                    }
                 }
 
                 Timer {
-                    readonly property int ms: Notifs.timeoutFor(slot.modelData)
-                    interval: ms
-                    running: ms > 0 && !hover.hovered
+                    id: timer
+                    interval: Notifs.remaining(slot.modelData)
+                    running: Notifs.timeoutFor(slot.modelData) > 0 && !hover.hovered
                     onTriggered: Notifs.dismissPopup(slot.modelData)
                 }
             }
