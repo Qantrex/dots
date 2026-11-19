@@ -446,9 +446,10 @@ def cmd_progress(args):
         return
     try:
         lim = json.load(open(os.path.join(HOME, ".cache/claude-usage.json")))
-        fmt = lambda k, f: f"{lim[k]['used']} % (resets {datetime.fromtimestamp(lim[k]['resets_at']).strftime(f)})"
+        fmt = lambda k, f: (f"{lim[k]['used']} % (resets {datetime.fromtimestamp(lim[k]['resets_at']).strftime(f)})"
+                            if (lim.get(k) or {}).get("resets_at") else "0 % (new window)")
         print(f"Limits: 5 h {fmt('five_hour', '%H:%M')}, week {fmt('seven_day', '%a %H:%M')}\n")
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
         pass
     cu = usage_module()
     for at, n, s, since, d, m, t in rows:
