@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Claude Code usage from the local transcripts, priced at API rates as a stand-in for plan usage.
 
-  claude-usage [report] [--days N]     cost per day, model, project and session (default 7 days)
-  claude-usage calibrate               what 1 % of the 5-hour and weekly limit is worth, from the
-                                       status line's history (~/.local/state/agentic/usage.log)
+  claude-usage [report] [--days N]     cost per day, model, project and session, by context size and kind
+                                       of session, and since the weekly reset next to the meter (default 7 days)
+  claude-usage calibrate               what 1 % of the 5-hour and weekly limit is worth: everything spent
+                                       since the window started, divided by the meter's percent (status
+                                       line history in ~/.local/state/agentic/usage.log); from 5 % on,
+                                       below that the last good value, then $13
   claude-usage estimate --agents N [--model opus|sonnet|haiku|fable]
                                        what a fan-out of N agents costs, from past agents' average
   claude-usage session <id-prefix>     cost of one session (with its agents); a full id is fast,
@@ -35,6 +38,7 @@ PRICES = {
 FALLBACK_PER_PERCENT = 13.0   # $ per 1 % of the weekly limit, measured 2026-11-18
 PROJECTS = os.path.expanduser("~/.claude/projects")
 LOG = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "agentic", "usage.log")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "agentic", "claude-usage-calibration.json")
 
 
 def family(model):
@@ -56,7 +60,8 @@ def session_files(sid):
 
 
 def load(since, files=None):
-    """One row per API request since `since`: (time, family, dollars, project, session, agent file or '')."""
+    """One row per API request since `since`:
+    (time, family, dollars, project, session, agent file or '', context tokens of the request)."""
     rows, seen = [], set()
     for f in files if files is not None else glob.glob(os.path.join(PROJECTS, "**", "*.jsonl"), recursive=True):
         try:
@@ -98,14 +103,16 @@ def load(since, files=None):
                     w5 = cc.get("ephemeral_5m_input_tokens") or (0 if cc else u.get("cache_creation_input_tokens") or 0)
                     d = price(fam, u.get("input_tokens") or 0, u.get("output_tokens") or 0,
                               u.get("cache_read_input_tokens") or 0, w5, w1)
-                    rows.append((t, fam, d, project, session, agent))
+                    ctx = ((u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0)
+                           + (u.get("cache_creation_input_tokens") or 0))
+                    rows.append((t, fam, d, project, session, agent, ctx))
                 # The advisor runs as a separate model inside the same request.
                 for it in u.get("iterations") or []:
                     if it.get("type") == "advisor_message" and family(it.get("model")):
                         fa = family(it.get("model"))
                         d = price(fa, it.get("input_tokens") or 0, it.get("output_tokens") or 0,
                                   it.get("cache_read_input_tokens") or 0, it.get("cache_creation_input_tokens") or 0, 0)
-                        rows.append((t, fa + " (advisor)", d, project, session, agent))
+                        rows.append((t, fa + " (advisor)", d, project, session, agent, 0))
     return rows
 
 
@@ -137,10 +144,31 @@ def pi_usage():
     return _PI
 
 
-def per_percent():
-    """$ per 1 % of the weekly limit, from calibrate, else the fallback."""
-    cal = calibrate_values()
-    return cal.get("week", FALLBACK_PER_PERCENT)
+def per_percent(which="week"):
+    """$ per 1 % of the weekly (or 5-hour) limit: the window measurement, else its last good value, else the
+    fallback. Cached for 15 minutes, so `thread progress` stays fast."""
+    c = load_cache()
+    if time.time() - c.get("checked", 0) > 900:
+        calibrate_values()
+        c = load_cache()
+    return c.get(which) or (FALLBACK_PER_PERCENT if which == "week" else FALLBACK_PER_PERCENT / 7)
+
+
+def load_cache():
+    try:
+        return json.load(open(CACHE))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_cache(c):
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        tmp = CACHE + ".tmp"
+        json.dump(c, open(tmp, "w"))
+        os.replace(tmp, CACHE)
+    except OSError:
+        pass
 
 
 def read_log():
@@ -155,21 +183,79 @@ def read_log():
     return out
 
 
+def window_reading(log, ip, ia):
+    """The current window of one meter: (start-independent reset time, highest value, time it applied).
+    Idle sessions keep writing stale readings (lower values, or the previous window's reset time), so the
+    newest reset time and the highest value in it are the real state. The time is the middle of the span in
+    which that highest value was seen, since the meter shows whole percent."""
+    resets = [r[ia] for r in log if r[ia]]
+    if not resets:
+        return None
+    reset = max(resets)
+    vals = [r for r in log if r[ia] == reset]
+    top = max(r[ip] for r in vals)
+    seen = [r[0] for r in vals if r[ip] == top]
+    return reset, top, (min(seen) + max(seen)) / 2
+
+
 def calibrate_values(verbose=False):
+    """$ per 1 % from the window itself: everything spent since the window started (laptop transcripts plus
+    the homelab agent) divided by the meter's percent. Used when the meter shows 5 % or more; below that the
+    last good value stays (cache), then the fallback. The old step median is printed only as a cross-check."""
     log = read_log()
+    cache = load_cache()
+    result = {}
+    if log:
+        pi, _, gen = pi_usage()
+        for name, ip, ia, length in (("5h", 1, 2, 5 * 3600), ("week", 3, 4, 7 * 86400)):
+            w = window_reading(log, ip, ia)
+            if not w:
+                continue
+            reset, top, at = w
+            start = reset - length
+            if top < 5:
+                if verbose:
+                    print(f"{name:5} meter at {top:.0f} %, too low to measure; keeping "
+                          f"{'$%.2f' % cache[name] if cache.get(name) else 'the fallback'}")
+                continue
+            laptop = sum(r[2] for r in load(start) if r[0] <= at)
+            home = sum(d for t, m, d, j in pi if start <= t <= at)
+            result[name] = (laptop + home) / top
+            if verbose:
+                print(f"{name:5} 1 % ≈ ${result[name]:.2f}  (${laptop + home:.0f} since "
+                      f"{datetime.fromtimestamp(start):%a %m-%d %H:%M}, of which homelab agent ${home:.2f}, "
+                      f"meter {top:.0f} % at {datetime.fromtimestamp(at):%m-%d %H:%M}; whole percent, so ±{50 / top:.0f} % of this value)")
+        if verbose:
+            if gen:
+                print(f"Homelab agent counted up to its export of {datetime.fromtimestamp(gen):%m-%d %H:%M}.")
+            else:
+                print("Without the homelab agent (no data from `homelab-agent`), so 1 % is a floor.")
+    cache.update(result)
+    cache["checked"] = time.time()
+    if result:
+        cache["measured"] = time.time()
+    save_cache(cache)
+    if verbose:
+        steps = step_values(log)
+        if steps:
+            print("Cross-check, old step method: " + "  ".join(
+                f"{k} ${v[0]:.2f} (median of {v[1]} steps)" for k, v in steps.items()))
+        for name in ("5h", "week"):
+            if name not in result and cache.get(name):
+                print(f"{name:5} using the last good value ${cache[name]:.2f}")
+    return {k: cache[k] for k in ("5h", "week") if cache.get(k)}
+
+
+def step_values(log):
+    """The old method: dollars per whole-percent step of the meter, median. Rough; only a cross-check."""
     if len(log) < 2:
         return {}
     rows = load(log[0][0] - 1)
-    # The homelab agent uses the same plan. Its runs count only in windows its export covers.
     pi, _, gen = pi_usage()
-    rows += [(t, "pi", d, "pi-agent", "", "") for t, m, d, j in pi if t >= log[0][0] - 1]
+    rows += [(t, "pi", d, "pi-agent", "", "", 0) for t, m, d, j in pi if t >= log[0][0] - 1]
     result = {}
     for name, ip, ia in (("5h", 1, 2), ("week", 3, 4)):
-        ratios = []
-        # Every open session writes its own last reading, and idle sessions report stale numbers, so the log
-        # jumps back and forth (31, 19, 31, 27 ...). Only a new highest value in a window (same reset time) is
-        # a real step: dollars spent since the previous highest value was first seen, per point gained.
-        top = {}   # reset time -> (highest value, time first seen)
+        ratios, top = [], {}
         for r in log:
             key, val, t = r[ia], r[ip], r[0]
             if key not in top:
@@ -178,23 +264,12 @@ def calibrate_values(verbose=False):
             best, since = top[key]
             if val <= best:
                 continue
-            if t > gen:
-                dollars = sum(x[2] for x in rows if since <= x[0] < t and x[1] != "pi")
-            else:
-                dollars = sum(x[2] for x in rows if since <= x[0] < t)
+            dollars = sum(x[2] for x in rows if since <= x[0] < t and (t <= gen or x[1] != "pi"))
             if dollars > 0:
                 ratios.append(dollars / (val - best))
             top[key] = (val, t)
         if ratios:
-            result[name] = statistics.median(ratios)
-            if verbose:
-                print(f"{name:5} 1 % ≈ ${result[name]:.2f}  (median of {len(ratios)} steps, "
-                      f"range ${min(ratios):.2f}-${max(ratios):.2f}; whole-percent steps, so single steps are rough)")
-    if verbose:
-        if gen:
-            print(f"Includes the homelab agent's runs up to its export of {datetime.fromtimestamp(gen):%m-%d %H:%M}.")
-        else:
-            print("Without the homelab agent (no data from `homelab-agent`), so 1 % is a floor.")
+            result[name] = (statistics.median(ratios), len(ratios))
     return result
 
 
@@ -211,7 +286,7 @@ def cmd_report(days):
           f"(1 % ≈ ${ppp:.2f}{'' if os.path.exists(LOG) and len(read_log()) > 5 else ', not calibrated yet'})")
     day, model, proj, sess = defaultdict(float), defaultdict(float), defaultdict(float), defaultdict(float)
     agents = 0.0
-    for t, fam, d, project, session, agent in rows:
+    for t, fam, d, project, session, agent, _ctx in rows:
         day[datetime.fromtimestamp(t).strftime("%a %m-%d")] += d
         model[fam] += d
         proj[project.replace("-home-" + os.environ.get("USER", ""), "~")] += d
@@ -228,7 +303,71 @@ def cmd_report(days):
     titles = session_titles()
     for k, v in sorted(sess.items(), key=lambda x: -x[1])[:8]:
         print(f"  {v / ppp:5.1f} %  {k}  {titles.get(k, '')[:60]}")
+    report_context(rows, ppp)
     report_pi(since, days, total, ppp)
+    report_window(ppp)
+
+
+def thread_sessions():
+    """Session id prefixes (8 chars) of every thread, from the thread state files."""
+    out = set()
+    base = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "agentic", "threads")
+    for f in glob.glob(os.path.join(base, "*.md")):
+        try:
+            for line in open(f):
+                if line.startswith("session:"):
+                    out.add(line.split(":", 1)[1].strip()[:8])
+                    break
+        except OSError:
+            pass
+    return out
+
+
+def main_chat_project():
+    """The transcript folder of the main chat (Claude Code names it after the working folder)."""
+    d = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "agentic", "main")
+    return "".join(c if c.isalnum() else "-" for c in d)
+
+
+def report_context(rows, ppp):
+    """Cost by context size of the request (main sessions; agents and the advisor apart) and by kind of session."""
+    total = sum(r[2] for r in rows) or 1
+    buckets = (("under 100k", 0, 100e3), ("100-240k", 100e3, 240e3), ("240-500k", 240e3, 500e3), ("over 500k", 500e3, 1e12))
+    size = defaultdict(lambda: [0, 0.0])
+    for t, fam, d, project, session, agent, ctx in rows:
+        if agent:
+            key = "agents"
+        elif "advisor" in fam:
+            key = "advisor"
+        else:
+            key = next(b[0] for b in buckets if b[1] <= ctx < b[2])
+        size[key][0] += 1
+        size[key][1] += d
+    print("\nBy context size of the request (main sessions; agents and advisor apart):")
+    for key in [b[0] for b in buckets] + ["agents", "advisor"]:
+        n, d = size.get(key, (0, 0.0))
+        if n:
+            print(f"  {key:11} {n:6} requests  ${d:7.2f}  {100 * d / total:3.0f} %  ${d / n:.3f} each")
+    threads, main = thread_sessions(), main_chat_project()
+    kind = defaultdict(float)
+    for t, fam, d, project, session, agent, ctx in rows:
+        kind["main chat" if project == main else "threads" if session in threads else "plain"] += d
+    print("By kind of session (with their agents): " + "  ".join(
+        f"{k} {100 * v / total:.0f} % ({v / ppp:.1f} % of a week)" for k, v in sorted(kind.items(), key=lambda x: -x[1])))
+
+
+def report_window(ppp):
+    """Since the weekly reset: what the transcripts add up to, next to what the meter says."""
+    w = window_reading(read_log(), 3, 4)
+    if not w:
+        return
+    reset, top, at = w
+    start = reset - 7 * 86400
+    laptop = sum(r[2] for r in load(start))
+    pi, _, _ = pi_usage()
+    home = sum(d for t, m, d, j in pi if t >= start)
+    print(f"\nSince the weekly reset ({datetime.fromtimestamp(start):%a %m-%d %H:%M}): ${laptop + home:.0f} "
+          f"≈ {(laptop + home) / ppp:.1f} % of a week; the meter said {top:.0f} % at {datetime.fromtimestamp(at):%H:%M}")
 
 
 def report_pi(since, days, laptop, ppp):
@@ -282,7 +421,7 @@ def cmd_estimate(n, model):
     rows = load(time.time() - 30 * 86400)
     per_agent = defaultdict(float)
     fam_of = {}
-    for t, fam, d, project, session, agent in rows:
+    for t, fam, d, project, session, agent, _ctx in rows:
         if agent:
             per_agent[agent] += d
             fam_of[agent] = fam
