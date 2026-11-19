@@ -316,6 +316,19 @@ long-running call stays until the call ends (answering it then does nothing),
 and any program running as you could write the answer file, as it could
 already type into the session's terminal.
 
+Notifications from the session hook (a session that finished or needs you,
+while its terminal isn't on screen) go through `agentic-shell notify` in this
+theme. While the panel is shown there is no popup at all, since the panel shows
+the card and the tab's state. Otherwise a permission request gets real buttons:
+Allow (only when the whole request fits on the card, 400 characters), Deny and
+Open; a question or a finished turn gets Open and Terminal. The notification
+closes by itself once the request is answered somewhere else or the session goes
+on. Sessions other than the main chat also leave a line in the main chat's inbox
+(queued without a wake, marked untrusted, because a session's text can quote
+anything it read). Threads never notify; they report to the main chat as before.
+In `root`, and whenever the shell doesn't answer, the hook's own notification
+shows as always.
+
 Next to the send button sits a microphone, push to talk like `SUPER+CTRL+D`: hold
 it while you speak and let go to send what was said straight to the main chat
 through the inbox, from whichever tab is open (`voice press`, `voice release`). A
@@ -783,6 +796,7 @@ hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
 | `thread start/list/show/stop/resume/model/adopt` | threads (at most 5 run); `cr` reopens what a shutdown left open |
 | `thread send <name\|main> <text>` | type a message into a thread or the main chat and send it; refuses when that session is asking something or has a draft typed |
 | `agentic-shell feed/home/snapshot/leave-check` | what the agent panel reads, as JSON (a conversation, the brief and inbox), and the check that leaving `root-agentic` leaves nothing running |
+| `agentic-shell notify <session> <event> <title> <why> [pane]` | the session hook's notification in `root-agentic` (exit 1: not on, the hook notifies itself): inbox line, nothing while the panel is shown, else buttons that close once settled. `AGENTIC_BIN`/`AGENTIC_SCRIPTS` point it at stand-ins in tests |
 | `agentic-shell grab window\|clipboard` | the panel's desk row: a screenshot of the focused window, or the clipboard, as text for the input box (JSON) |
 | `agentic-shell requests/answer/hold/release` | the panel's request cards: what waits (JSON), answer one (`answer <id> allow\|deny [json]`), the waiting side of the `PermissionRequest` hook, and dropping cards whose call ran or whose turn ended (`release --all`: every card, used when leaving the theme) |
 | `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |

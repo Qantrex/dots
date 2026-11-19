@@ -26,6 +26,12 @@
                                {"error": why}. window: a screenshot of the focused window (the
                                panel hides itself first), saved under ~/.cache/agentic/shots;
                                clipboard: its text, or the path of the image it holds
+  agentic-shell notify <session> <event> <title> <why> [pane]
+                               the session hook's notification in this theme (exit 1: not on, the
+                               hook notifies as before): an inbox line for sessions other than the
+                               main chat, nothing on screen while the panel is shown, else a
+                               notification with real buttons (Allow, Deny, Open on a permission
+                               request; Open, Terminal otherwise) that closes once it is settled
   agentic-shell snapshot       what is running that a theme could have started: user units,
                                layers, keybinds, windows, the shell's child processes, wallpaper
   agentic-shell leave-check    from root: switch to root-agentic and back, and compare the
@@ -69,7 +75,9 @@ ANSWERED = os.path.join(STATE, "panel-answers.log")
 QS = shlex.split(os.environ.get("AGENTIC_QS") or "qs")    # the test instance: "qs -p <dir>"
 CONF = os.environ.get("QS_AGENTIC_CONF") or os.path.join(HOME, "dotfiles/theme/current/agentic.json")
 MAX_REQUEST = 20000      # characters of one request shown in the panel
-BIN = os.path.join(HOME, ".local/bin")
+BIN = os.environ.get("AGENTIC_BIN") or os.path.join(HOME, ".local/bin")       # stand-ins in tests
+SCRIPTS = os.environ.get("AGENTIC_SCRIPTS") or os.path.join(HOME, ".config/scripts")
+NOTE_FIT = 400           # Allow is offered on a notification only when the whole request fits in it
 SESSION = "main"
 HISTORY = 150            # entries shown from before the panel opened
 TAIL_BYTES = 12 << 20    # read at most this much from the end of a long transcript
@@ -817,6 +825,89 @@ def cmd_grab(args):
     sys.exit(1)
 
 
+def cmd_notify(args):
+    """Called by the session hook instead of its own notification while root-agentic is on."""
+    if len(args) < 4:
+        sys.exit("agentic-shell notify <session> <event> <title> <why> [pane]")
+    session, event, title, why = args[:4]
+    pane = args[4] if len(args) > 4 else ""
+    if not (load(CONF) or {}).get("enabled"):
+        sys.exit(1)
+    status = panel_status()
+    if status not in ("hidden", "shown"):
+        sys.exit(1)
+    rec = load(os.path.join(RECORDS, session + ".json")) or {}
+    # The main chat hears about other sessions through its inbox (queued, no wake: it isn't a question for
+    # it). Their text is a session's output, which can quote anything it read, so it is marked untrusted.
+    if rec.get("role") != "main":
+        name = clip(str(rec.get("name") or title), 60)
+        try:
+            subprocess.run([os.path.join(BIN, "inbox"), "add", "--untrusted", "needs" if event == "Notification" else "info",
+                            "session", f"'{name}': {why}"], capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if status == "shown":
+        return              # the panel shows it already: its card, the tab's state, "Waiting for you"
+    req = next((r for r in reversed(held()) if r.get("session") == session), None)
+    subprocess.Popen([os.path.abspath(__file__), "_notify-wait", session, title, why, pane, req["id"] if req else ""],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def close_note(nid):
+    if nid.isdigit():
+        sh(["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications", "--object-path",
+            "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.CloseNotification", nid], timeout=3)
+
+
+def cmd_notify_wait(args):
+    """The notification itself, waiting up to 15 min for a button; it goes away once the request is
+    answered elsewhere (panel, terminal) or the session went on."""
+    session, title, why, pane, rid = (list(args) + [""] * 5)[:5]
+    path = os.path.join(REQUESTS, rid + ".json") if rid else ""
+    req = load(path) if path else None
+    body, actions = why, [("default", "Open"), ("open", "Open"), ("term", "Terminal")]
+    if req and req.get("tool") == "AskUserQuestion":
+        body = "A question waits for you in the panel."
+    elif req:
+        head, text = request_text(req.get("tool") or "", req.get("input"))
+        whole = head if not text or text == head else head + "\n" + text
+        body = whole if len(whole) <= NOTE_FIT else whole[:NOTE_FIT - 1] + "…"
+        actions = [("default", "Open")] + ([("allow", "Allow")] if len(whole) <= NOTE_FIT else []) + \
+                  [("deny", "Deny"), ("open", "Open")]
+    # The card shows the body as styled text: escape it, keep the command's line breaks.
+    body = html.escape(body).replace("\n", "<br>")
+    cmd = ["notify-send", "-a", "Claude", "-p", "--wait"] + [f"--action={k}={l}" for k, l in actions] + ["--", title, body]
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return
+    lines = []
+    import threading
+    threading.Thread(target=lambda: lines.extend(l.strip() for l in p.stdout), daemon=True).start()
+    rpath = os.path.join(RECORDS, session + ".json")
+    end = time.time() + 900
+    while p.poll() is None:
+        time.sleep(0.5)
+        settled = (path and not (os.path.exists(path) and alive((load(path) or {}).get("pid")))) or \
+                  (not path and "waiting" not in (load(rpath) or {"waiting": 1}))
+        if settled or time.time() > end:
+            close_note(lines[0] if lines else "")
+            p.terminate()
+            return
+    time.sleep(0.2)
+    act = lines[1] if len(lines) > 1 else ""
+    target = pane or "main"
+    if act in ("allow", "deny") and rid:
+        r = subprocess.run([os.path.abspath(__file__), "answer", rid, act], capture_output=True, text=True, timeout=30)
+        if r.returncode:
+            sh(["notify-send", "-a", "Claude", "-t", "4000", "Not answered", (r.stderr.strip() or "That request is gone.")[:200]])
+    elif act in ("default", "open"):
+        subprocess.run([os.path.join(BIN, "dock"), "show", target], timeout=30)
+    elif act == "term":
+        subprocess.run([os.path.join(SCRIPTS, "claude-jump.sh"), session], timeout=30)
+
+
 def main():
     a = sys.argv[1:]
     cmd = a[0] if a else ""
@@ -835,6 +926,10 @@ def main():
             cmd_release(a[1:])
         elif cmd == "grab":
             cmd_grab(a[1:])
+        elif cmd == "notify":
+            cmd_notify(a[1:])
+        elif cmd == "_notify-wait":
+            cmd_notify_wait(a[1:])
         elif cmd == "snapshot":
             print("\n".join(stable_snapshot()))
         elif cmd == "leave-check":
