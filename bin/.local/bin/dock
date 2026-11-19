@@ -32,7 +32,7 @@ focus() { hyprctl dispatch 'hl.dsp.focus({ window = "class:^(agentic-panel)$" })
 
 ensure() {
     tmux has-session -t "=$session" 2>/dev/null || { echo "No tmux session '$session' (agentic on)." >&2; return 1; }
-    if window_open && tmux has-session -t "=$panel" 2>/dev/null; then return 0; fi
+    if window_open && tmux has-session -t "=$panel" 2>/dev/null; then status_line; return 0; fi
     hyprctl clients -j | jq -r '.[] | select(.class == "agentic-panel") | .pid' | xargs -r kill
     tmux kill-session -t "=$panel" 2>/dev/null
     # destroy-unattached: the grouped session goes away with the window, and new terminals attach to
@@ -40,8 +40,16 @@ ensure() {
     setsid -f foot --app-id=agentic-panel --title="claude main" \
         tmux new-session -s "$panel" -t "$session" \; set-option destroy-unattached on \; \
         select-window -t "$panel:main" >/dev/null 2>&1
-    for _ in $(seq 1 50); do window_open && tmux has-session -t "=$panel" 2>/dev/null && return 0; sleep 0.1; done
+    for _ in $(seq 1 50); do window_open && tmux has-session -t "=$panel" 2>/dev/null && { status_line; return 0; }; sleep 0.1; done
     return 1
+}
+
+# A second status line in the panel: every thread, its state, since when and its last action, written by the
+# session hook (code only); tmux redraws it with its normal status interval.
+status_line() {
+    tmux set-option -t "$panel" status 2
+    tmux set-option -t "$panel" 'status-format[1]' \
+        "#[align=left,fg=colour245] #(cat \"${XDG_CACHE_HOME:-$HOME/.cache}/agentic-threads.line\" 2>/dev/null || echo 'no threads')"
 }
 
 select_target() {

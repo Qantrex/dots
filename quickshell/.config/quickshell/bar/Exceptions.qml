@@ -111,6 +111,17 @@ Island {
         onRightClicked: Quickshell.execDetached([Host.home + "/.config/scripts/claude-jump.sh", "--clear"])
     }
 
+    // Threads of the main Claude chat at work (`thread`): how many, gold when one needs me. Tooltip: what each
+    // one does right now. Click: show it in the side panel.
+    Flag {
+        visible: ClaudeThreads.live.length > 0
+        icon: "󰑮"
+        tint: ClaudeThreads.needsMe ? Theme.gold : Theme.fg
+        label: ClaudeThreads.working > 0 ? String(ClaudeThreads.working) : ""
+        tip: "Claude threads\n" + ClaudeThreads.tooltip + "\nClick: show in the side panel"
+        onLeftClicked: Quickshell.execDetached([Host.home + "/.local/bin/dock", "show", ClaudeThreads.first])
+    }
+
     // Claude plan usage: only from 70 % of the 5-hour or the weekly window.
     Flag {
         visible: ClaudeUsage.high

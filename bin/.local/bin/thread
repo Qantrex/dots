@@ -9,6 +9,7 @@
   thread resume <name> | --open              reopen a thread where it was (claude --resume); --open: all
                                              that a shutdown or crash left open (what `cr` did)
   thread model <name> <model>                switch the model (only while it's idle)
+  thread progress [--brief]                  what each running thread is doing right now (state, how long, last action)
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread rm <name>                           forget a thread (the transcript stays)
 
@@ -32,6 +33,7 @@ HOME = os.path.expanduser("~")
 DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share"), "agentic")
 DIR = os.path.join(DATA, "threads")
 RUN = os.path.join(DIR, ".run")
+PROGRESS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "agentic", "progress")
 RECORDS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local/state"), "claude-sessions")
 SESSION = "main"
 MAX_RUNNING = 5
@@ -182,7 +184,30 @@ def stop(name):
         return
     fm["status"] = "stopped"
     write(name, fm, body)
+    clear_progress(name)
     return True
+
+
+def clear_progress(name):
+    """Drop a stopped thread from the progress files (panel line, bar), rebuilt like the session hook does."""
+    try:
+        os.remove(os.path.join(PROGRESS, name + ".json"))
+    except OSError:
+        pass
+    items = []
+    for f in glob.glob(os.path.join(PROGRESS, "*.json")):
+        try:
+            items.append(json.load(open(f)))
+        except (OSError, ValueError):
+            pass
+    items.sort(key=lambda p: -p.get("at", 0))
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache")
+    with open(os.path.join(cache, "agentic-threads.json"), "w") as f:
+        json.dump(items, f)
+    mark = {"working": "● ", "needs you": "! "}
+    with open(os.path.join(cache, "agentic-threads.line"), "w") as f:
+        f.write("   ".join(mark.get(p.get("state"), "○ ") + p["name"] + " " + time.strftime("%H:%M", time.localtime(p.get("since", 0)))
+                           + (": " + p.get("detail", "")[:70] if p.get("detail") else "") for p in items) + "\n")
 
 
 def empty_prompt(target):
@@ -291,6 +316,43 @@ def cmd_list(args):
         st = live_state(t, ag, wins)
         where = t.get("folder", "").replace(HOME, "~", 1)
         print(f"{t['name']:33} {st:10} {t.get('model', ''):7} {where:40} {t.get('updated', '')}")
+
+
+def ago(t):
+    d = int(time.time() - t)
+    return f"{d // 60} min" if d < 3600 else f"{d // 3600} h {d % 3600 // 60} min"
+
+
+def cmd_progress(args):
+    """What every running thread is doing, from the progress the session hook writes (code, no tokens)."""
+    ag, wins = agents(), windows()
+    rows = []
+    for t in all_threads():
+        st = live_state(t, ag, wins)
+        if st in ("stopped", "left open"):
+            continue
+        try:
+            p = json.load(open(os.path.join(PROGRESS, t["name"] + ".json")))
+        except (OSError, ValueError):
+            p = {}
+        state = p.get("state") or st
+        if st == "waiting":
+            state = "needs you"
+        rows.append((p.get("at", 0), t["name"], state, p.get("since"), p.get("detail", ""), t.get("model", "")))
+    if not rows:
+        print("No thread is running." if "--brief" not in args else "")
+        return
+    rows.sort(reverse=True)
+    if "--brief" in args:
+        rows = [r for r in rows if r[2] != "idle" or (r[0] and time.time() - r[0] < 3600)]
+        if not rows:
+            return
+        print("Threads right now (from code): " + "; ".join(
+            f"{n} {s}" + (f" for {ago(since)}" if since else "") + (f", last: {d[:80]}" if d else "")
+            for at, n, s, since, d, m in rows))
+        return
+    for at, n, s, since, d, m in rows:
+        print(f"{n:33} {s:10} {('for ' + ago(since)) if since else '':14} {m:7} {d[:90]}")
 
 
 def cmd_model(args):
@@ -424,6 +486,8 @@ def main():
         cmd_resume(rest)
     elif cmd == "model":
         cmd_model(rest)
+    elif cmd == "progress":
+        cmd_progress(rest)
     elif cmd == "adopt":
         cmd_adopt(rest)
     elif cmd == "rm":
