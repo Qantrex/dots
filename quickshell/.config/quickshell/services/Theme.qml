@@ -18,6 +18,9 @@ Singleton {
 
     function withAlpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a); }
 
+    // After `theme set`: for what depends on more than the colours (services/Agentic.qml).
+    signal reloaded()
+
     // Surfaces. Translucent, so Hyprland's layer blur has something to blur.
     // bg for panels over the desktop (bar islands, popouts, OSD, notification popups),
     // bgSolid where text must stay readable over anything (launcher, tooltips).
@@ -106,6 +109,6 @@ Singleton {
     IpcHandler {
         target: "theme"
         // `theme set` calls this after it swapped theme/current.
-        function reload(): void { file.reload(); }
+        function reload(): void { file.reload(); root.reloaded(); }
     }
 }

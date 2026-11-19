@@ -9,6 +9,7 @@ import qs.osd
 import qs.launcher
 import qs.services
 import qs.neko
+import qs.agentic
 
 // Entry point. Per screen: a bar and its popouts. Once (on the focused
 // screen): notification popups, the OSD and the launcher.
@@ -42,4 +43,7 @@ ShellRoot {
     Osd {}
     Launcher {}
     LazyLoader { active: Neko.enabled; StonePanel {} }
+    // The agent panel (theme root-agentic). Inline, not `source:`: a panel loaded by path made
+    // Quickshell crash when it quit just after a reload.
+    LazyLoader { active: Agentic.enabled; Panel {} }
 }
