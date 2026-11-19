@@ -8,10 +8,14 @@
   inbox new [--context]  print events not shown yet and mark them shown (--context: for a Claude hook)
   inbox list [N]         the last N events (default 20)
   inbox ack              mark everything shown
+  inbox flush            wake the main chat for events whose wake didn't get through (the main chat's stop
+                         hook runs it, so a wake missed while it was busy arrives when it is idle again)
 
-Levels: info, broke, needs (a thread needs the owner), done (a thread finished). Text that strangers can
-write (file names, mail subjects) is marked untrusted and shown as data, never as an instruction.
-Data: ~/.local/state/agentic/inbox.jsonl.
+Levels: info, broke, needs (a thread waits for the owner), questions (a thread asks the owner, see `thread
+questions`), done (a thread finished: its last step is total/total), paused N/M (a thread stopped before
+its last step; never a result). Text that strangers can write (file names, mail subjects) is marked
+untrusted and shown as data, never as an instruction.
+Data: ~/.local/state/agentic/inbox.jsonl; why a wake did or didn't happen: inbox.wake.log next to it.
 """
 import glob
 import json
@@ -58,12 +62,14 @@ def save(items):
     os.replace(LOG + ".tmp", LOG)
 
 
-def add(level, source, text, untrusted=False, key=None):
+def add(level, source, text, untrusted=False, key=None, want_wake=False):
     items = load()
     if key and any(e.get("key") == key for e in items):
         return None
     e = {"ts": int(time.time()), "level": level, "source": source, "text": text[:400],
          "untrusted": untrusted, "shown": False}
+    if want_wake:
+        e["wake"] = True
     if key:
         e["key"] = key
     items.append(e)
@@ -91,44 +97,115 @@ def input_empty(screen_e):
     return rest.replace("\u00a0", " ").strip() == ""
 
 
+def main_pane():
+    """The main chat's tmux pane. By pane id, not by the name "main": tmux names a plain shell window after its
+    folder, so a shell in the main chat's folder is a second "main" and `main:main` is ambiguous (2026-11-19,
+    every wake failed for that reason). The main chat's own window has automatic-rename off."""
+    for line in sh(["tmux", "list-windows", "-t", "=main", "-F",
+                    "#{window_name}\t#{automatic-rename}\t#{pane_id}"]).splitlines():
+        p = line.split("\t")
+        if len(p) == 3 and p[0] == "main" and p[1] == "0":
+            return p[2]
+    return None
+
+
+def log_wake(e, result):
+    """One line per wake attempt, so a wake that didn't happen can be explained afterwards."""
+    f = os.path.join(STATE, "inbox.wake.log")
+    try:
+        lines = open(f, encoding="utf-8").read().splitlines()[-300:]
+    except OSError:
+        lines = []
+    lines.append(f"{time.strftime('%F %T')} [{e.get('level')}] {e.get('text', '')[:60]!r}: {result}")
+    try:
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def wake_key(e):
+    """Who an event is about (a thread's name), for the per-thread wake limit."""
+    m = re.match(r"'([^']+)'", e.get("text", ""))
+    return m.group(1) if m else e.get("source", "")
+
+
 def wake(e):
     """Tell the idle main chat by typing one line into its prompt, only when nobody is typing there."""
+    r = try_wake(e)
+    log_wake(e, r)
+    return r == "woken"
+
+
+def try_wake(e):
     if os.path.exists(os.path.join(STATE, "off")):
-        return False   # agentic off: events only queue
-    # At most 3 wakes in 10 minutes, so a thread and the main chat can't wake each other in a loop.
+        return "agentic is off"   # events only queue
+    # At most 3 wakes per thread (or source) in 10 minutes and 10 in all, so a thread and the main chat
+    # can't wake each other in a loop, and one busy thread can't use up the wakes of the others.
     wf = os.path.join(STATE, "inbox.wakes")
+    recent = []
     try:
-        recent = [float(x) for x in open(wf).read().split() if time.time() - float(x) < 600]
-    except (OSError, ValueError):
-        recent = []
-    if len(recent) >= 3:
-        return False
-    wins = sh(["tmux", "list-windows", "-t", "=main", "-F", "#{window_name}"]).split()
-    if "main" not in wins:
-        return False
+        for line in open(wf).read().splitlines():
+            p = line.split(" ", 1)
+            try:
+                t = float(p[0])
+            except ValueError:
+                continue
+            if time.time() - t < 600:
+                recent.append((t, p[1] if len(p) > 1 else ""))
+    except OSError:
+        pass
+    key = wake_key(e)
+    if len(recent) >= 10 or sum(k == key for t, k in recent) >= 3:
+        return f"skipped: wake limit ({len(recent)} in 10 min)"
+    pane = main_pane()
+    if not pane:
+        return "skipped: no main chat window"
     try:
         agents = json.loads(sh([CLAUDE, "agents", "--json"]) or "[]")
     except ValueError:
         agents = []
-    if not any(a.get("name") == "main-chat" and a.get("status") == "idle" for a in agents):
-        return False
-    screen = sh(["tmux", "capture-pane", "-p", "-t", "main:main"]).rstrip("\n").splitlines()
+    st = next((a.get("status") for a in agents if a.get("name") == "main-chat"), None)
+    if st != "idle":
+        return f"skipped: main chat is {st or 'not listed'} (inbox flush at its next stop)"
+    screen = sh(["tmux", "capture-pane", "-p", "-t", pane]).rstrip("\n").splitlines()
+    if not screen:
+        return f"skipped: could not read pane {pane}"
     if any(re.match(r"\s*❯ \d+\.", l) or "Enter to confirm" in l or "Esc to cancel" in l for l in screen[-15:]):
-        return False   # a dialog is open: leave it for the next prompt
-    if not input_empty(sh(["tmux", "capture-pane", "-p", "-e", "-t", "main:main"])):
-        return False   # something is typed there: leave it for the next prompt
+        return "skipped: a dialog is open in the main chat"
+    if not input_empty(sh(["tmux", "capture-pane", "-p", "-e", "-t", pane])):
+        return "skipped: something is typed in the main chat"
     msg = "[inbox, from code] " + fmt(e)[2:] + " (inbox new shows the rest)"
-    sh(["tmux", "send-keys", "-t", "main:main", "-l", msg.replace("\n", " ")])
-    sh(["tmux", "send-keys", "-t", "main:main", "Enter"])
+    sh(["tmux", "send-keys", "-t", pane, "-l", msg.replace("\n", " ")])
+    sh(["tmux", "send-keys", "-t", pane, "Enter"])
     with open(wf, "w") as f:
-        f.write(" ".join(str(x) for x in recent + [time.time()]))
+        f.write("\n".join(f"{t} {k}" for t, k in recent + [(time.time(), key)]) + "\n")
     e["shown"] = True
     items = load()
     for x in items:
         if x["ts"] == e["ts"] and x["text"] == e["text"]:
             x["shown"] = True
     save(items)
-    return True
+    return "woken"
+
+
+def flush():
+    """Wake for the newest event that wanted a wake and is still unshown (from the last 2 hours)."""
+    pending = [e for e in load() if e.get("wake") and not e.get("shown") and time.time() - e["ts"] < 7200]
+    if not pending:
+        return False
+    e = dict(pending[-1])
+    if len(pending) > 1:
+        e["text"] = e["text"][:200] + f" (+{len(pending) - 1} more waiting)"
+    r = try_wake(e)
+    log_wake(e, "flush: " + r)
+    if r == "woken":
+        items = load()
+        for x in items:
+            if any(x["ts"] == p["ts"] and x["text"] == p["text"] for p in pending):
+                x["shown"] = True
+        save(items)
+    return r == "woken"
 
 
 def collect():
@@ -177,9 +254,11 @@ def main():
         rest = [x for x in rest if not x.startswith("--")]
         if len(rest) < 3:
             sys.exit("inbox add [--wake] [--untrusted] <level> <source> <text...>")
-        e = add(rest[0], rest[1], " ".join(rest[2:]), untrusted="--untrusted" in flags)
+        e = add(rest[0], rest[1], " ".join(rest[2:]), untrusted="--untrusted" in flags, want_wake="--wake" in flags)
         if e and "--wake" in flags and not wake(e):
             print("queued; the main chat is busy or not running and gets it with the next prompt")
+    elif cmd == "flush":
+        flush()
     elif cmd == "collect":
         print(f"{collect()} new")
     elif cmd == "new":

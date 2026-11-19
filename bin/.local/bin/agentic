@@ -23,18 +23,27 @@ claude="$HOME/.local/bin/claude"
 # Started from Hyprland at login there's no SSH_AUTH_SOCK (only shells set it): give it to tmux and the chat.
 export SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-${XDG_RUNTIME_DIR:-/run/user/$UID}/ssh-agent.socket}
 
+# The main chat's pane, by id: tmux names a plain shell window after its folder, so a shell opened in the
+# main chat's folder is also called "main" and "$session:main" is ambiguous. Its own window has
+# automatic-rename off.
+main_pane() {
+    tmux list-windows -t "=$session" -F '#{window_name} #{automatic-rename} #{pane_id}' 2>/dev/null |
+        awk '$1 == "main" && $2 == "0" {print $3; exit}'
+}
+
 # The main chat's input line is empty (nothing typed, no question or dialog): only then type into it.
 main_idle_prompt() {
-    local screen line rest
-    screen=$(tmux capture-pane -p -t "$session:main" 2>/dev/null) || return 1
+    local screen line rest pane
+    pane=$(main_pane); [[ -n $pane ]] || return 1
+    screen=$(tmux capture-pane -p -t "$pane" 2>/dev/null) || return 1
     grep -qE '^\s*❯ [0-9]+\.|Enter to confirm|Esc to cancel' <<<"$(tail -15 <<<"$screen")" && return 1
-    line=$(tmux capture-pane -p -e -t "$session:main" | grep '❯' | tail -1)
+    line=$(tmux capture-pane -p -e -t "$pane" | grep '❯' | tail -1)
     rest=${line#*❯}
     rest=$(sed -E $'s/\x1b\\[2m.*(\x1b\\[0m|\x1b\\[22m|$)//; s/\x1b\\[[0-9;]*[A-Za-z]//g; s/\xc2\xa0/ /g' <<<"$rest")
     [[ -z ${rest// /} ]]
 }
 
-has_main_window() { tmux list-windows -t "$session" -F '#{window_name}' 2>/dev/null | grep -qx main; }
+has_main_window() { [[ -n $(main_pane) ]]; }
 
 ensure_session() {
     tmux has-session -t "=$session" 2>/dev/null && return
@@ -63,9 +72,10 @@ start_main() {
     local first
     first=$(tmux list-windows -t "$session" -F '#{window_index}' | sort -n | head -1)
     # Window 1 belongs to the main chat: insert it before whatever is there now; the others move up one.
-    tmux new-window -d -b -t "$session:$first" -n main -c "$dir" "$loop"
-    tmux set-option -w -t "$session:main" automatic-rename off
-    tmux set-option -w -t "$session:main" allow-rename off
+    local pane
+    pane=$(tmux new-window -d -b -P -F '#{pane_id}' -t "$session:$first" -n main -c "$dir" "$loop")
+    tmux set-option -w -t "$pane" automatic-rename off
+    tmux set-option -w -t "$pane" allow-rename off
 }
 
 case ${1:-status} in
@@ -91,8 +101,9 @@ off)
     pkill -f "$HOME/.local/bin/journal record" 2>/dev/null
     if has_main_window; then
         # Gracefully when nothing is typed; otherwise just close the window (nothing gets answered).
-        main_idle_prompt && { tmux send-keys -t "$session:main" '/exit' Enter; sleep 2; }
-        tmux kill-window -t "$session:main" 2>/dev/null
+        pane=$(main_pane)
+        main_idle_prompt && { tmux send-keys -t "$pane" '/exit' Enter; sleep 2; }
+        tmux kill-window -t "$pane" 2>/dev/null
     fi
     echo "Main chat, panel, its threads and the focus recorder are off; data kept. 'agentic on' brings them back."
     echo "Still on: your own sessions, ssh-unlock at login (independent), failed services still queue to the inbox file."
@@ -149,13 +160,13 @@ doctor)
     done
     ;;
 restart)
-    if has_main_window && main_idle_prompt; then tmux send-keys -t "$session:main" '/exit' Enter
+    if has_main_window && main_idle_prompt; then tmux send-keys -t "$(main_pane)" '/exit' Enter
     else echo "The main chat has something typed or a question open; restart it when it's idle."; exit 1; fi
     ;;
 status)
     if [[ -e $off_flag ]]; then echo "off (agentic on to start)"; exit 0; fi
     if has_main_window; then
-        echo "main chat: running in tmux $session:main ($(tmux display -p -t "$session:main" '#{pane_current_command}'))"
+        echo "main chat: running in tmux $session:main, pane $(main_pane) ($(tmux display -p -t "$(main_pane)" '#{pane_current_command}'))"
     else
         echo "main chat: not running (agentic on)"
     fi
