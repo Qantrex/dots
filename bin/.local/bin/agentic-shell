@@ -21,6 +21,11 @@
                                hook input on stdin: drops the requests of that session which are
                                settled (the tool ran, the turn ended). --all: every request, back
                                to the terminal (the theme's leave hook).
+  agentic-shell grab window|clipboard
+                               the panel's desk row: {"insert": text} for the input box, or
+                               {"error": why}. window: a screenshot of the focused window (the
+                               panel hides itself first), saved under ~/.cache/agentic/shots;
+                               clipboard: its text, or the path of the image it holds
   agentic-shell snapshot       what is running that a theme could have started: user units,
                                layers, keybinds, windows, the shell's child processes, wallpaper
   agentic-shell leave-check    from root: switch to root-agentic and back, and compare the
@@ -749,6 +754,69 @@ def cmd_leave_check():
     sys.exit(1)
 
 
+SHOTS = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "agentic", "shots")
+KEEP_SHOTS = 20
+CLIP_MAX = 20000
+
+
+def shot_path(name):
+    os.makedirs(SHOTS, exist_ok=True)
+    old = sorted((f for f in os.listdir(SHOTS) if f.endswith(".png")),
+                 key=lambda f: os.path.getmtime(os.path.join(SHOTS, f)))
+    for f in old[:max(0, len(old) - KEEP_SHOTS + 1)]:
+        try:
+            os.remove(os.path.join(SHOTS, f))
+        except OSError:
+            pass
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")[:40] or "shot"
+    return os.path.join(SHOTS, f"{safe}-{datetime.now():%Y%m%d-%H%M%S}.png")
+
+
+def cmd_grab(args):
+    what = args[0] if args else ""
+    if what == "window":
+        try:
+            w = json.loads(sh(["hyprctl", "activewindow", "-j"]) or "{}")
+        except ValueError:
+            w = {}
+        if not w.get("address"):
+            return out({"error": "No window has the focus."})
+        # The panel hides itself before it calls this; wait until it has faded out.
+        time.sleep(float(os.environ.get("AGENTIC_GRAB_WAIT", "0.4")))
+        (x, y), (wd, ht) = w["at"], w["size"]
+        f = shot_path(w.get("class") or "window")
+        r = subprocess.run(["grim", "-g", f"{x},{y} {wd}x{ht}", f], capture_output=True, text=True)
+        if r.returncode != 0 or not os.path.exists(f):
+            return out({"error": "The screenshot failed: " + (r.stderr.strip() or "grim")})
+        title = (w.get("title") or "").strip()
+        title = title if len(title) <= 60 else title[:57] + "..."
+        what = w.get("class") or "window"
+        return out({"insert": f"Screenshot of the {what} window" + (f' ("{title}")' if title else "") + f": {f}"})
+    if what == "clipboard":
+        types = sh(["wl-paste", "--list-types"], timeout=3).split()
+        if not types:
+            return out({"error": "The clipboard is empty."})
+        img = next((t for t in types if t == "image/png"), None) or next((t for t in types if t.startswith("image/")), None)
+        if img and not any(t.startswith("text/") or t in ("UTF8_STRING", "STRING", "TEXT") for t in types):
+            f = shot_path("clipboard")
+            try:
+                with open(f, "wb") as fh:
+                    r = subprocess.run(["wl-paste", "--no-newline", "--type", "image/png"], stdout=fh, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                r = None
+            if not r or r.returncode != 0 or os.path.getsize(f) == 0:
+                return out({"error": "Could not read the image in the clipboard."})
+            return out({"insert": f"Image from the clipboard: {f}"})
+        text = sh(["wl-paste", "--no-newline"], timeout=3)
+        if not text.strip():
+            return out({"error": "The clipboard holds nothing to paste."})
+        if len(text) > CLIP_MAX:
+            text = text[:CLIP_MAX] + f"\n[... cut at {CLIP_MAX} characters]"
+        return out({"insert": text})
+    print("agentic-shell grab window|clipboard", file=sys.stderr)
+    sys.exit(1)
+
+
 def main():
     a = sys.argv[1:]
     cmd = a[0] if a else ""
@@ -765,6 +833,8 @@ def main():
             cmd_hold(a[1:])
         elif cmd == "release":
             cmd_release(a[1:])
+        elif cmd == "grab":
+            cmd_grab(a[1:])
         elif cmd == "snapshot":
             print("\n".join(stable_snapshot()))
         elif cmd == "leave-check":

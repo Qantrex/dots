@@ -303,6 +303,16 @@ long-running call stays until the call ends (answering it then does nothing),
 and any program running as you could write the answer file, as it could
 already type into the session's terminal.
 
+Next to the send button sits a microphone: it runs `voice talk`, so one press
+starts listening and the next sends what was said straight to the main chat
+through the inbox, from whichever tab is open, the same as `SUPER+CTRL+D`. It is
+filled while a recording runs (`voice status`, also after the key started it).
+Under the input box, a small row puts things to show Claude into the text where
+the cursor is (`agentic-shell grab`): Window hides the panel, takes a screenshot
+of the focused window into `~/.cache/agentic/shots` (the last 20 are kept),
+brings the panel back and inserts the file's path; Clipboard inserts its text,
+or the path of the image it holds. Nothing is sent until you press Enter.
+
 **IPC** (`qs ipc show` lists all): the scripts call `qs ipc call bar refresh
 <vault|touchpad|powerprofile|ai>` after a change; keybinds use `launcher toggle
 <mode>`, `bar popout <name>`, `osd brightness`; also `notifs dnd`, `caffeine
@@ -753,6 +763,7 @@ hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
 | `thread start/list/show/stop/resume/model/adopt` | threads (at most 5 run); `cr` reopens what a shutdown left open |
 | `thread send <name\|main> <text>` | type a message into a thread or the main chat and send it; refuses when that session is asking something or has a draft typed |
 | `agentic-shell feed/home/snapshot/leave-check` | what the agent panel reads, as JSON (a conversation, the brief and inbox), and the check that leaving `root-agentic` leaves nothing running |
+| `agentic-shell grab window\|clipboard` | the panel's desk row: a screenshot of the focused window, or the clipboard, as text for the input box (JSON) |
 | `agentic-shell requests/answer/hold/release` | the panel's request cards: what waits (JSON), answer one (`answer <id> allow\|deny [json]`), the waiting side of the `PermissionRequest` hook, and dropping cards whose call ran or whose turn ended (`release --all`: every card, used when leaving the theme) |
 | `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |
 | `claude-usage report/calibrate/estimate` | Claude usage from the local transcripts, priced at API rates |

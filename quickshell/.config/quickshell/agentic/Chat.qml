@@ -15,6 +15,7 @@ Item {
     property bool gone: false         // no Claude session in that window right now
     property bool stick: true         // follow new lines; off while scrolled up
     property string problem: ""       // why the last send did not go out
+    property string hint: ""          // why the desk row could not get a screenshot or the clipboard
 
     function takeFocus() { input.forceActiveFocus(); }
 
@@ -57,6 +58,17 @@ Item {
             view.follow();
         }
         function onSendFailed(to, why) { if (to === chat.target) chat.problem = why; }
+        function onGrabbed(tab, text) {
+            if (tab !== chat.target) return;
+            chat.hint = "";
+            const at = input.cursorPosition, before = input.text.slice(0, at), after = input.text.slice(at);
+            const pre = before !== "" && !/\s$/.test(before) ? " " : "";
+            const post = after !== "" && !/^\s/.test(after) ? " " : "";
+            input.insert(at, pre + text + post);
+            input.cursorPosition = at + pre.length + text.length + post.length;
+            input.forceActiveFocus();
+        }
+        function onGrabFailed(tab, why) { if (tab === chat.target) chat.hint = why; }
     }
 
     ListModel { id: lines }
@@ -240,7 +252,7 @@ Item {
     Item {
         id: foot
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; margins: Theme.pad }
-        height: asks.height + status.height + box.height
+        height: asks.height + status.height + box.height + desk.height
 
         // What waits for a yes, a no or an answer in this conversation.
         Flickable {
@@ -284,7 +296,7 @@ Item {
             id: status
             readonly property string state: chat.target === "main" ? "" : Agentic.stateOf(chat.target)
             readonly property string refused: Agentic.answerTab === chat.target ? Agentic.answerProblem : ""
-            readonly property string line: chat.problem !== "" ? chat.problem : refused !== "" ? refused
+            readonly property string line: chat.problem !== "" ? chat.problem : refused !== "" ? refused : chat.hint !== "" ? chat.hint
                 : (Agentic.sending ? "Sending ..." : (state !== "" ? state + (Agentic.detailOf(chat.target) ? ": " + Agentic.detailOf(chat.target) : "") : ""))
             anchors { left: parent.left; right: parent.right; top: asks.bottom }
             height: line !== "" ? Math.max(told.implicitHeight, 22) + 6 : 0
@@ -298,7 +310,7 @@ Item {
                 wrapMode: Text.Wrap
                 maximumLineCount: 3
                 verticalAlignment: Text.AlignTop
-                color: chat.problem !== "" || status.refused !== "" ? Theme.love : (status.state === "needs you" ? Theme.gold : Theme.fgDim)
+                color: chat.problem !== "" || status.refused !== "" || chat.hint !== "" ? Theme.love : (status.state === "needs you" ? Theme.gold : Theme.fgDim)
             }
             MouseArea {
                 id: toTerm
@@ -314,7 +326,7 @@ Item {
 
         Rectangle {
             id: box
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            anchors { left: parent.left; right: parent.right; bottom: desk.top }
             height: Math.min(input.contentHeight, 5 * lineHeight) + 20
             radius: Theme.radius
             color: Theme.surface
@@ -325,7 +337,7 @@ Item {
 
             Flickable {
                 id: typed
-                anchors { left: parent.left; right: go.left; top: parent.top; bottom: parent.bottom; margins: 10; leftMargin: 12; rightMargin: 6 }
+                anchors { left: parent.left; right: mic.left; top: parent.top; bottom: parent.bottom; margins: 10; leftMargin: 12; rightMargin: 6 }
                 contentHeight: input.contentHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
@@ -350,7 +362,7 @@ Item {
                         if (r.y < typed.contentY) typed.contentY = r.y;
                         else if (r.y + r.height > typed.contentY + typed.height) typed.contentY = r.y + r.height - typed.height;
                     }
-                    onTextChanged: if (chat.problem !== "") chat.problem = ""
+                    onTextChanged: { if (chat.problem !== "") chat.problem = ""; if (chat.hint !== "") chat.hint = ""; }
 
                     Keys.onPressed: e => {
                         if (Agentic.key(e)) return;
@@ -371,6 +383,15 @@ Item {
                     }
                 }
             }
+            // Speak to the main chat, from any tab: press, talk, press again (voice talk).
+            IconButton {
+                id: mic
+                anchors { right: go.left; rightMargin: 2; bottom: parent.bottom; bottomMargin: 5 }
+                icon: "󰍬"
+                filled: Agentic.recording
+                opacity: Agentic.recording || containsMouse ? 1 : 0.6
+                onClicked: Agentic.voice()
+            }
             IconButton {
                 id: go
                 anchors { right: parent.right; rightMargin: 6; bottom: parent.bottom; bottomMargin: 5 }
@@ -378,6 +399,44 @@ Item {
                 filled: input.text.trim() !== "" && !Agentic.sending
                 opacity: input.text.trim() !== "" ? 1 : 0.4
                 onClicked: chat.submit()
+            }
+        }
+
+        // Things to show Claude: a screenshot of the window under the panel, or the clipboard,
+        // put into the input box where the cursor is.
+        Row {
+            id: desk
+            anchors { left: parent.left; leftMargin: 4; bottom: parent.bottom }
+            height: 30
+            spacing: 14
+
+            Repeater {
+                model: [{ kind: "window", icon: "󰹑", label: "Window" },
+                        { kind: "clipboard", icon: "󰆒", label: "Clipboard" }]
+                MouseArea {
+                    id: deskButton
+                    required property var modelData
+                    width: deskRow.implicitWidth + 8
+                    height: desk.height
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: Agentic.grabbing === ""
+                    onClicked: { chat.hint = ""; Agentic.grab(chat.target, modelData.kind); }
+                    Row {
+                        id: deskRow
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 4
+                        spacing: 6
+                        readonly property color tint: deskButton.containsMouse ? Theme.fg : Theme.fgMuted
+                        Glyph { anchors.verticalCenter: parent.verticalCenter; text: deskButton.modelData.icon; size: Agentic.fontSmall + 2; color: deskRow.tint }
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: Agentic.grabbing === deskButton.modelData.kind ? deskButton.modelData.label + " ..." : deskButton.modelData.label
+                            size: Agentic.fontSmall
+                            color: deskRow.tint
+                        }
+                    }
+                }
             }
         }
     }

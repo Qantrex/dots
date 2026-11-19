@@ -5,6 +5,7 @@
 #   voice say <text>     read text out: the HTTP voice service first, local piper when it can't be reached
 #   voice reply <text>   used by the session hook: reads the main chat's answer when the question was spoken
 #   voice setup          what's missing
+#   voice status         "recording" while it listens, else "idle" (the agent panel's mic button)
 # Settings: ~/.config/agentic/voice.conf (shell syntax):
 #   WHISPER_MODEL=~/.local/share/whisper/ggml-base.bin    model file for whisper-cli
 #   TTS_URL=https://host:port/speak                       POST {"text","pacing"} -> audio/wav, bearer token
@@ -74,6 +75,8 @@ talk)
     fi ;;
 say)
     shift; speak "$*" ;;
+status)
+    if [[ -f $pidf ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; then echo recording; else echo idle; fi ;;
 reply)
     # The main chat answered; read it out only if the question was spoken.
     [[ -f $flag ]] || exit 0

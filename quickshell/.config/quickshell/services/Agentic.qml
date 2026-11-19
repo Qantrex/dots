@@ -56,6 +56,15 @@ Singleton {
     property var drafts: ({})
 
     property bool sending: false
+
+    // The voice button: `voice talk` starts listening, the next press sends what was said to the
+    // main chat through the inbox (as SUPER+CTRL+D does). recording follows `voice status`.
+    property bool recording: false
+
+    // The desk row: `agentic-shell grab window|clipboard` gives text for the input box.
+    property string grabbing: ""      // "window" or "clipboard" while one is on its way
+    signal grabbed(string tab, string text)
+    signal grabFailed(string tab, string why)
     signal sent(string to)
     signal sendFailed(string to, string why)
 
@@ -122,6 +131,22 @@ Singleton {
     // The real Claude Code terminal of what the panel shows (the foot panel `dock` always had).
     function terminal(of) {
         Quickshell.execDetached([bin + "/dock", "term", of || (target === "home" ? "main" : target)]);
+    }
+
+    function voice() {
+        Quickshell.execDetached([bin + "/voice", "talk"]);
+        recording = !recording;           // at once; voiceCheck confirms it a moment later
+        voiceLater.restart();
+    }
+
+    // A window shot needs the panel out of the way: it hides, and comes back on the same tab.
+    function grab(tab, kind) {
+        if (grabbing !== "" || (kind !== "window" && kind !== "clipboard")) return;
+        grabbing = kind;
+        grabber.tab = tab;
+        if (kind === "window") hide();
+        grabber.command = [bin + "/agentic-shell", "grab", kind];
+        grabber.running = true;
     }
 
     function send(to, text) {
@@ -219,6 +244,36 @@ Singleton {
             if (code !== 0) root.answerProblem = refusal.text.trim().replace(/^agentic-shell answer: /, "") || "Could not answer.";
             root.ask();
         }
+    }
+
+    Process {
+        id: grabber
+        property string tab: ""
+        stdout: StdioCollector { id: grabOut }
+        onExited: (code, status) => {
+            const kind = root.grabbing;
+            root.grabbing = "";
+            if (kind === "window") root.show(tab);
+            let r = {};
+            try { r = JSON.parse(grabOut.text); } catch (e) {}
+            if (r.insert) root.grabbed(tab, r.insert);
+            else root.grabFailed(tab, r.error || "Could not get it.");
+        }
+    }
+
+    Process {
+        id: voiceCheck
+        command: [root.bin + "/voice", "status"]
+        stdout: StdioCollector { onStreamFinished: root.recording = text.trim() === "recording" }
+    }
+    Timer { id: voiceLater; interval: 600; onTriggered: voiceCheck.running = true }
+    // SUPER+CTRL+D toggles it from outside the panel too.
+    Timer {
+        interval: 2000
+        running: root.open
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: if (!voiceCheck.running) voiceCheck.running = true
     }
 
     // The text goes as one argument, never through a shell.
