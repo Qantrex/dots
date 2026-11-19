@@ -4,11 +4,11 @@
   atlas                 print the index (short: what needs attention, areas, threads, pointers)
   atlas refresh         rebuild everything
   atlas <topic>         print one detail file: repos, deadlines, keybinds, tools, packages,
-                        services, recent, sessions
+                        services, recent, sessions, homelab
   atlas topics          list the topics
 
 Output: ~/.local/share/agentic/atlas/. Settings: ~/.config/agentic/atlas.conf (areas, where repos,
-deadline notes and the homelab note are). A topic whose collector fails is marked "stale" instead
+deadline notes, the homelab note and the homelab agent's host are). A topic whose collector fails is marked "stale" instead
 of breaking the rest.
 """
 import configparser
@@ -28,7 +28,7 @@ DATA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".loca
 OUT = os.path.join(DATA, "atlas")
 THREADS = os.path.join(DATA, "threads")
 CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "agentic", "atlas.conf")
-TOPICS = ["repos", "deadlines", "keybinds", "tools", "packages", "services", "recent", "sessions"]
+TOPICS = ["repos", "deadlines", "keybinds", "tools", "packages", "services", "recent", "sessions", "homelab"]
 
 
 def sh(cmd, timeout=20):
@@ -273,6 +273,56 @@ def homelab(c):
     return (m.group(0).replace("**", "")[:220] if m else "") + f" (details: `{short(note)}`)"
 
 
+def homelab_agent():
+    """The homelab agent's reports and usage through `homelab-agent` (ssh with a short timeout and a cache).
+    Returns (topic markdown, index line, attention) or None when it isn't set up."""
+    exe = os.path.join(os.path.dirname(os.path.realpath(__file__)), "homelab-agent")
+    if not os.access(exe, os.X_OK):
+        exe = shutil.which("homelab-agent")
+    if not exe:
+        return None
+    d = json.loads(sh([exe, "json"], timeout=4) or "{}")
+    if not d.get("_host"):
+        return None
+    topic = sh([exe, "--offline"], timeout=4).strip()
+    seen = d.get("_seen") or 0
+    attention = []
+    if not seen:
+        line = f"Agent: no data yet from `{d['_host']}` ({str(d.get('_error') or '')[:120]})"
+    else:
+        reps = sorted((r for r in d.get("reports") or [] if isinstance(r, dict)),
+                      key=lambda r: str(r.get("time", "")), reverse=True)
+        newest = ", ".join(f"{str(r.get('job'))[:30]} {str(r.get('time', ''))[5:16].replace('T', ' ')} "
+                           f"{str(r.get('status') or '?')[:6]}" for r in reps[:6])
+        cost = {"today": 0.0, "week": 0.0}
+        runs = {"today": 0, "week": 0}
+        today = date.today()
+        for u in d.get("usage") or []:
+            try:
+                day = date.fromisoformat(str(u[0])[:10])
+                c = float(u[5] or 0)
+            except (ValueError, TypeError, IndexError):
+                continue
+            for k, n in (("today", 0), ("week", 6)):
+                if (today - day).days <= n:
+                    cost[k] += c
+                    runs[k] += 1
+        def n(k):
+            return f"{runs[k]} run{'' if runs[k] == 1 else 's'} ${cost[k]:.2f}"
+        line = (f"Agent, last seen {ago(seen)} ago: {n('today')} today, {n('week')} in 7 days. Newest: {newest or 'none'} (`atlas homelab`)")
+        for r in reps:
+            try:
+                t = datetime.fromisoformat(str(r.get("time")))
+            except ValueError:
+                continue
+            if r.get("status") == "ALERT" and time.time() - t.timestamp() < 86400:
+                attention.append(f"homelab agent: {str(r.get('job'))[:30]} ALERT at {t:%H:%M} "
+                                 f"(`homelab-agent report {str(r.get('job'))[:30]}`)")
+        if time.time() - seen > 2 * 86400:
+            attention.append(f"homelab agent data is {ago(seen)} old (`homelab-agent --refresh`)")
+    return topic, line, attention
+
+
 def areas(c):
     """The areas: from the "## Areas" list of a CLAUDE.md (areas_from in atlas.conf), so they're kept in one
     place; a [areas] section in atlas.conf (path | description) works too."""
@@ -322,7 +372,7 @@ def refresh():
         ("machine", machine, ()), ("repos", repos, (c,)), ("deadlines", deadlines, (c,)),
         ("keybinds", keybinds, (c,)), ("tools", tools, (c,)), ("packages", packages, ()),
         ("services", services, ()), ("sessions", sessions, ()), ("threads", threads, ()),
-        ("homelab", homelab, (c,)))}
+        ("homelab", homelab, (c,)), ("homelab-agent", homelab_agent, ()))}
     got = {n: f.result() for n, f in fut.items()}
     m = got["machine"]
     if m:
@@ -366,6 +416,10 @@ def refresh():
         facts["sessions"] = se[1]
     th = got["threads"] or []
     hl = got["homelab"] or ""
+    ha = got["homelab-agent"]
+    if ha:
+        write("homelab", ha[0])
+        attention += ha[2]
 
     lines = [f"# Atlas of {socket.gethostname()}", f"Generated {datetime.now():%a %Y-%m-%d %H:%M} by `atlas refresh` "
              f"(code, no AI). Details: `atlas <topic>` with topics {', '.join(TOPICS)}.", ""]
@@ -386,8 +440,8 @@ def refresh():
             md = " (CLAUDE.md)" if os.path.exists(os.path.join(p, "CLAUDE.md")) else ""
             lines.append(f"- `{short(p)}`{md}: {desc}")
         lines += [""]
-    if hl:
-        lines += ["## Homelab", hl, ""]
+    if hl or ha:
+        lines += ["## Homelab", "\n\n".join(x for x in (hl, ha[1] if ha else "") if x), ""]
     lines += ["## Counts",
               f"{facts.get('repos', '?')} repos (`atlas repos`), {facts.get('packages', '?')} explicit packages, "
               f"{facts.get('keybinds', '?')} keybinds, {facts.get('tools', '?')} own commands (`atlas tools`), "
