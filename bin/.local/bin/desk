@@ -60,9 +60,11 @@ brightness)
     echo "brightness $(( $(brightnessctl get) * 100 / $(brightnessctl max) )) %" ;;
 shot)
     a=$(need "${2:?desk shot <match> [file]}")
-    geo=$(hyprctl clients -j | jq -r --arg a "$a" '.[] | select(.address == $a) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
+    # By the window itself (its foreign-toplevel handle), not by screen coordinates: those would capture
+    # whatever covers it, or the screen's content when the window sits on another workspace.
+    id=$(hyprctl clients -j | jq -r --arg a "$a" '.[] | select(.address == $a) | .stableId')
     out=${3:-${XDG_RUNTIME_DIR:-/tmp}/desk-shot-$(date +%H%M%S).png}
-    grim -g "$geo" "$out" && echo "$out" ;;
+    grim -T "$id" "$out" && echo "$out" ;;
 theme)
     if [[ -n ${2:-} ]]; then theme "$2"; else theme list 2>/dev/null || theme; fi ;;
 notify)
