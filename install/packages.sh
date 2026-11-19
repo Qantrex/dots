@@ -5,8 +5,9 @@
 
 # Needed before anything else (git + stow for the repo, pciutils for GPU
 # detection, jq for editing app JSON settings, acl for spicetify's write access,
-# python for `theme`, which renders the configs the links point at).
-PKG_BOOTSTRAP=(git stow base-devel pciutils jq acl python)
+# python for `theme`, which renders the configs the links point at, glib2-devel for
+# its `gresource`, which the GTK theme is built from).
+PKG_BOOTSTRAP=(git stow base-devel pciutils jq acl python glib2-devel)
 
 # The compositor and the pieces its config starts or calls.
 PKG_DESKTOP=(
