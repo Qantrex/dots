@@ -9,13 +9,16 @@
   claude-usage session <id-prefix>     cost of one session (with its agents)
 
 Plan limits are not published in tokens. API prices are only a proxy; `calibrate` checks how
-well it fits. Usage outside these transcripts (another machine, a headless agent) is not seen.
+well it fits. Usage outside these transcripts (another machine) is not seen, except the homelab
+agent: `homelab-agent` reads its usage over ssh (cached), shown as its own block with its own cost
+figure (Claude Code's total_cost_usd), and counted in `calibrate` since it uses the same plan.
 """
 import argparse
 import glob
 import json
 import os
 import statistics
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -99,6 +102,34 @@ def load(since):
     return rows
 
 
+_PI = None
+
+
+def pi_usage():
+    """The homelab agent's runs: (time, model, dollars, job), plus the export's info. Cached per process."""
+    global _PI
+    if _PI is None:
+        exe = os.path.join(os.path.dirname(os.path.realpath(__file__)), "homelab-agent")
+        d = {}
+        try:
+            d = json.loads(subprocess.run([exe, "json"], capture_output=True, text=True, timeout=5).stdout or "{}")
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+        rows = []
+        for r in d.get("usage") or []:
+            try:
+                t = datetime.fromisoformat(str(r[0])).timestamp()
+                rows.append((t, str(r[7] if len(r) > 7 and r[7] else "?")[:20], float(r[5] or 0), str(r[1])[:40]))
+            except (ValueError, TypeError, IndexError):
+                continue
+        try:
+            gen = datetime.fromisoformat(str(d.get("generated"))).timestamp()
+        except (TypeError, ValueError):
+            gen = 0
+        _PI = (rows, d, gen)
+    return _PI
+
+
 def per_percent():
     """$ per 1 % of the weekly limit, from calibrate, else the fallback."""
     cal = calibrate_values()
@@ -122,6 +153,9 @@ def calibrate_values(verbose=False):
     if len(log) < 2:
         return {}
     rows = load(log[0][0] - 1)
+    # The homelab agent uses the same plan. Its runs count only in windows its export covers.
+    pi, _, gen = pi_usage()
+    rows += [(t, "pi", d, "pi-agent", "", "") for t, m, d, j in pi if t >= log[0][0] - 1]
     result = {}
     for name, ip, ia in (("5h", 1, 2), ("week", 3, 4)):
         ratios = []
@@ -129,7 +163,10 @@ def calibrate_values(verbose=False):
         for a, b in zip(log, log[1:]):
             if a[ia] != b[ia] or b[ip] <= a[ip]:
                 continue
-            dollars = sum(r[2] for r in rows if a[0] <= r[0] < b[0])
+            if b[0] > gen:
+                dollars = sum(r[2] for r in rows if a[0] <= r[0] < b[0] and r[1] != "pi")
+            else:
+                dollars = sum(r[2] for r in rows if a[0] <= r[0] < b[0])
             if dollars > 0:
                 ratios.append(dollars / (b[ip] - a[ip]))
         if ratios:
@@ -137,18 +174,24 @@ def calibrate_values(verbose=False):
             if verbose:
                 print(f"{name:5} 1 % ≈ ${result[name]:.2f}  (median of {len(ratios)} steps, "
                       f"range ${min(ratios):.2f}-${max(ratios):.2f}; whole-percent steps, so single steps are rough)")
+    if verbose:
+        if gen:
+            print(f"Includes the homelab agent's runs up to its export of {datetime.fromtimestamp(gen):%m-%d %H:%M}.")
+        else:
+            print("Without the homelab agent (no data from `homelab-agent`), so 1 % is a floor.")
     return result
 
 
 def cmd_report(days):
     since = time.time() - days * 86400
     rows = load(since)
-    if not rows:
-        print("No usage in that period.")
-        return
     ppp = per_percent()
+    if not rows:
+        print("Laptop: no usage in that period.")
+        report_pi(since, days, 0.0, ppp)
+        return
     total = sum(r[2] for r in rows)
-    print(f"Last {days} days: ${total:.2f} API-equivalent ≈ {total / ppp:.1f} % of a week "
+    print(f"Laptop (Claude Code transcripts here), last {days} days: ${total:.2f} API-equivalent ≈ {total / ppp:.1f} % of a week "
           f"(1 % ≈ ${ppp:.2f}{'' if os.path.exists(LOG) and len(read_log()) > 5 else ', not calibrated yet'})")
     day, model, proj, sess = defaultdict(float), defaultdict(float), defaultdict(float), defaultdict(float)
     agents = 0.0
@@ -169,6 +212,36 @@ def cmd_report(days):
     titles = session_titles()
     for k, v in sorted(sess.items(), key=lambda x: -x[1])[:8]:
         print(f"  {v / ppp:5.1f} %  {k}  {titles.get(k, '')[:60]}")
+    report_pi(since, days, total, ppp)
+
+
+def report_pi(since, days, laptop, ppp):
+    pi, d, gen = pi_usage()
+    host = d.get("_host")
+    if not host:
+        return
+    seen = d.get("_seen") or 0
+    when = (f"last seen {datetime.fromtimestamp(seen):%m-%d %H:%M}" if seen else "no data yet") + \
+           (f", last fetch failed: {str(d['_error'])[:100]}" if d.get("_error") else "")
+    print(f"\nHomelab agent on {host} (its own figure: Claude Code's total_cost_usd; {when}):")
+    rows = [r for r in pi if r[0] >= since]
+    if not rows:
+        print("  no runs in that period" if seen else "  nothing to show")
+        return
+    total = sum(r[2] for r in rows)
+    day, model, job = defaultdict(float), defaultdict(float), defaultdict(float)
+    for t, m, c, j in rows:
+        day[datetime.fromtimestamp(t).strftime("%a %m-%d")] += c
+        model[m] += c
+        job[j] += c
+    print(f"  Last {days} days: ${total:.2f} in {len(rows)} runs ≈ {total / ppp:.1f} % of a week")
+    print("  Per day:  " + "  ".join(f"{k} {v / ppp:.2f}%" for k, v in sorted(day.items(), key=lambda x: x[0][4:])))
+    if total:
+        print("  Models:   " + "  ".join(f"{k} {100 * v / total:.0f}%" for k, v in sorted(model.items(), key=lambda x: -x[1])))
+    print("  Jobs:     " + "  ".join(f"{k} ${v:.2f}" for k, v in sorted(job.items(), key=lambda x: -x[1])[:8]))
+    both = laptop + total
+    print(f"\nBoth: ${both:.2f} ≈ {both / ppp:.1f} % of a week (laptop {100 * laptop / both:.0f} %, "
+          f"homelab agent {100 * total / both:.0f} %)" if both else "")
 
 
 def session_titles():
