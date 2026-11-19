@@ -2,7 +2,8 @@
 # Idle handling for Hyprland (swayidle). Started once from autostart.lua.
 #
 #   4:30   dim to 10%                (any input restores the old brightness)
-#   5:00   lock                      (hyprlock)
+#   5:00   lock                      (agentic-lock: the Quickshell lock in root-agentic,
+#                                     hyprlock in every other theme and as its fallback)
 #   5:30   screen off                (OLED: a static lock screen must not stay lit)
 #   15:00  suspend                   only on battery, and not while media plays
 #
@@ -26,7 +27,9 @@
 
 set -uo pipefail
 
-readonly LOCK='pidof hyprlock >/dev/null || hyprlock'
+# swayidle runs with Hyprland's environment, which has no ~/.local/bin on PATH. agentic-lock does
+# nothing when either lock is already up.
+readonly LOCK="$HOME/.local/bin/agentic-lock"
 
 dpms() { printf "hyprctl dispatch 'hl.dsp.dpms({ action = \"%s\" })' >/dev/null" "$1"; }
 

@@ -340,8 +340,8 @@ never task names or subjects. `lock_brief` in the theme's `agentic.json` can be
 compositor doesn't confirm within 3 s) or ends in any other way than an
 unlock, `agentic-lock` starts hyprlock, and `misc.allow_session_lock_restore`
 lets hyprlock take over a session whose lock died. `agentic-lock --trial [N]`
-unlocks by itself after N seconds (default 90) for the first try. idle.sh
-still runs hyprlock until that first try has worked with a real password.
+unlocks by itself after N seconds (default 90) for the first try. idle.sh locks
+with `agentic-lock`, which uses hyprlock in every other theme.
 
 Next to the send button sits a microphone, push to talk like `SUPER+CTRL+D`: hold
 it while you speak and let go to send what was said straight to the main chat

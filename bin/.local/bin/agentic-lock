@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The lock screen of theme root-agentic: its own Quickshell config (~/.config/quickshell/lock), run as its
-# own process like hyprlock, with hyprlock as the fallback. idle.sh keeps hyprlock until the owner has
-# unlocked this one with their own password once.
+# own process like hyprlock, with hyprlock as the fallback and as the lock of every other theme. idle.sh
+# locks with it.
 #   agentic-lock               lock now; hyprlock when the Quickshell lock can't lock or dies
 #   agentic-lock --trial [N]   the first try: the lock unlocks by itself after N seconds (default 90)
 # Under the clock it shows `agentic brief`: "lock_brief" in the rendered agentic.json, full, counts (only
@@ -27,6 +27,8 @@ esac
 pidof hyprlock >/dev/null && exit 0
 pgrep -u "$UID" -f "^qs -p $dir\$" >/dev/null && exit 0
 [[ -f $dir/shell.qml ]] || exec hyprlock
+# Theme root (or the agentic parts switched off): hyprlock, as before.
+[[ $(jq -r '.enabled // false' "$conf" 2>/dev/null) == true ]] || exec hyprlock
 
 brief=$(jq -r '.lock_brief // "counts"' "$conf" 2>/dev/null)
 [[ $brief == full || $brief == counts || $brief == off ]] || brief=counts
