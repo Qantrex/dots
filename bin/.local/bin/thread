@@ -15,7 +15,22 @@
   thread progress [--brief]                  what each running thread is doing right now: state, how long, steps
                                              done (4/7, 57 %), last action, its share of the weekly limit
   thread step [<name>] <done>/<total> [next] a thread records how far it is (inside a thread the name comes
-                                             from $AGENTIC_THREAD), e.g. `thread step 4/7 panel QML`
+                                             from $AGENTIC_THREAD), e.g. `thread step 4/7 panel QML`;
+                                             <total>/<total> is the done signal
+  thread needs [<name>] "<what the owner has to do>" | --clear
+                                             the thread waits for the owner: front matter `needs:` and a line
+                                             under "Open for the owner"
+  thread ask [<name>] [file]                 questions for the owner as JSON (stdin or file), in the shape
+                                             AskUserQuestion takes: {"questions": [{question, header, options:
+                                             [{label, description, preview?}], multiSelect?}]}, at most 4
+  thread questions <name> [--json]           the open question round: {"thread", "round", "questions"}
+                                             (questions empty when none is open)
+  thread answer <name> [--resend]            answers from stdin: {"round"?, "answers": {"<question>": "<label>"
+                                             | ["<label>", ...] | "<free text>"}}; stored beside the questions
+                                             and sent into the thread as one message. A second answer to the
+                                             same round is refused (exit 4); stored but not delivered: exit 3
+  thread signal <name> [--transcript <file>] for the stop hook: label<TAB>detail<TAB>sent, label one of done,
+                                             questions, needs, paused (sent: the last turn messaged main-chat)
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread archive <name>...                   finished thread off the lists; state and transcript stay, and
                                              `thread resume`/`thread show` still work
@@ -88,7 +103,7 @@ def read(name):
 def write(name, fm, body):
     os.makedirs(DIR, exist_ok=True)
     fm["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    keys = ["name", "folder", "model", "status", "origin", "session", "started", "updated", "progress"]
+    keys = ["name", "folder", "model", "status", "origin", "session", "started", "updated", "progress", "needs"]
     head = "\n".join(f"{k}: {fm[k]}" for k in keys if k in fm)
     with open(path(name) + ".tmp", "w", encoding="utf-8") as f:
         f.write(f"---\n{head}\n---\n{body}")
@@ -119,12 +134,27 @@ def agents():
 
 
 def windows():
-    """tmux windows of the main session: {name: (index, pane pid)}."""
+    """tmux windows of the main session that belong to the main chat or a thread: {name: (index, pane pid, pane id)}.
+    Only windows with automatic-rename off: tmux names a plain shell window after its folder, so a shell in
+    ~/.local/share/agentic/main is also called "main" (2026-11-19 that made `main:main` ambiguous and every
+    wake failed). The main chat and threads switch renaming off when they start. Lowest index wins."""
     out = {}
-    for line in sh(["tmux", "list-windows", "-t", "=" + SESSION, "-F", "#{window_name}\t#{window_index}\t#{pane_pid}"]).splitlines():
-        n, i, p = line.split("\t")
-        out[n] = (int(i), int(p))
+    for line in sh(["tmux", "list-windows", "-t", "=" + SESSION, "-F",
+                    "#{window_name}\t#{window_index}\t#{pane_pid}\t#{pane_id}\t#{automatic-rename}"]).splitlines():
+        try:
+            n, i, p, pane, auto = line.split("\t")
+        except ValueError:
+            continue
+        if auto == "1" or n in out:
+            continue
+        out[n] = (int(i), int(p), pane)
     return out
+
+
+def target(name, wins=None):
+    """The tmux pane of the main chat or a thread (a pane id, never a name that a shell window can share)."""
+    w = (wins if wins is not None else windows()).get(name)
+    return w[2] if w else None
 
 
 def live_state(fm, ag, wins):
@@ -179,15 +209,17 @@ def launch(name, folder, cmd_args):
     os.chmod(script, 0o755)
     if subprocess.run(["tmux", "has-session", "-t", "=" + SESSION], capture_output=True).returncode:
         sys.exit("No tmux session 'main' (run `agentic on`).")
-    sh(["tmux", "new-window", "-d", "-t", SESSION + ":", "-n", name, "-c", folder, script], check=True)
-    sh(["tmux", "set-option", "-w", "-t", f"{SESSION}:{name}", "automatic-rename", "off"])
-    sh(["tmux", "set-option", "-w", "-t", f"{SESSION}:{name}", "allow-rename", "off"])
+    pane = sh(["tmux", "new-window", "-d", "-P", "-F", "#{pane_id}", "-t", SESSION + ":", "-n", name, "-c", folder, script],
+              check=True).strip()
+    sh(["tmux", "set-option", "-w", "-t", pane, "automatic-rename", "off"])
+    sh(["tmux", "set-option", "-w", "-t", pane, "allow-rename", "off"])
 
 
 def make_room(ag, wins):
     live = running(ag, wins)
     while len(live) >= MAX_RUNNING:
-        idle = [t for t in live if live_state(t, ag, wins) == "idle" and empty_prompt(f"{SESSION}:{t['name']}")]
+        idle = [t for t in live if live_state(t, ag, wins) == "idle" and target(t["name"], wins)
+                and empty_prompt(target(t["name"], wins))]
         if not idle:
             sys.exit(f"{len(live)} threads are working; none is idle to stop. Stop one first (thread stop <name>).")
         oldest = min(idle, key=lambda t: t.get("updated", ""))
@@ -203,15 +235,17 @@ def stop(name):
         sys.exit(f"No thread '{name}'.")
     wins = windows()
     if name in wins:
-        if not empty_prompt(f"{SESSION}:{name}"):
+        pane = target(name, wins)
+        if not empty_prompt(pane):
             print(f"'{name}' has a question, a dialog or typed text open; not stopping it (answer or close it yourself).")
             return False
-        sh(["tmux", "send-keys", "-t", f"{SESSION}:{name}", "/exit", "Enter"])
+        sh(["tmux", "send-keys", "-t", pane, "/exit", "Enter"])
         for _ in range(30):
             time.sleep(0.2)
-            if name not in windows():
+            if target(name) != pane:
                 break
-        sh(["tmux", "kill-window", "-t", f"{SESSION}:{name}"])
+        if target(name) == pane:
+            sh(["tmux", "kill-window", "-t", pane])
     elif fm.get("session") in agents():
         print(f"'{name}' runs outside tmux; close it there.")
         return
@@ -277,16 +311,26 @@ def cmd_send(args):
     if name not in windows() or (name != "main" and read(name)[0] is None):
         print(f"thread send: no running session '{name}' (thread list)", file=sys.stderr)
         sys.exit(2)
-    target = f"{SESSION}:{name}"
-    if not empty_prompt(target):
-        print(f"thread send: '{name}' is asking something or has text typed already; answer it in its terminal (dock term {name})", file=sys.stderr)
-        sys.exit(3)
+    sys.exit(send_text(name, text, quiet=False))
+
+
+def send_text(name, text, quiet=True):
+    """Type one line into the main chat's or a thread's input and press Enter. 0 sent, 2 no such session,
+    3 a question, dialog or draft is open there, 1 tmux failed."""
+    pane = target(name)
+    if not pane:
+        return 2
+    if not empty_prompt(pane):
+        if not quiet:
+            print(f"thread send: '{name}' is asking something or has text typed already; answer it in its terminal (dock term {name})", file=sys.stderr)
+        return 3
     # -l: literal keys, --: a text starting with a dash is still text.
-    if subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text]).returncode:
-        sys.exit(1)
+    if subprocess.run(["tmux", "send-keys", "-t", pane, "-l", "--", text]).returncode:
+        return 1
     time.sleep(0.15)
-    if subprocess.run(["tmux", "send-keys", "-t", target, "Enter"]).returncode:
-        sys.exit(1)
+    if subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"]).returncode:
+        return 1
+    return 0
 
 
 def cmd_start(args):
@@ -320,10 +364,17 @@ def cmd_start(args):
                   "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. Split the work "
                   "into steps once you know them and record how far you are with `thread step <done>/<total> <next "
                   "step>` (e.g. `thread step 0/6 reading the repo`, then after each finished step; change the total "
-                  "when the plan changes; <total>/<total> only when done and checked). When you "
-                  "stop, the main chat hears it by itself and reads the first line of your answer, so start every "
-                  "final answer with a one-line summary. To pass something longer to the main chat, use SendMessage "
-                  "to \"main-chat\".)"]
+                  "when the plan changes; <total>/<total> only when done and checked: that is the done signal, "
+                  "anything less reaches the main chat as paused). When you stop, the main chat hears it by "
+                  "itself and reads the first line of your answer, so start every final answer with a one-line "
+                  "summary: that line is your report. SendMessage to \"main-chat\" is for questions to the main "
+                  "chat during the work, not for the result. When you need a decision from the owner, do not "
+                  "open AskUserQuestion: write the questions as JSON with `thread ask` (the shape AskUserQuestion "
+                  "takes, at most 4; as the `decide` skill says: check first, each question standing alone, your "
+                  "recommendation first), carry on with whatever does not depend on the answers, and end your "
+                  "turn. The answers arrive as a message starting with \"Answers from the owner:\". When the "
+                  "owner has to do something else (run a script, say promote), `thread needs \"<what>\"`, and "
+                  "`thread needs --clear` once it is done.)"]
     # Effort high like my default; the advisor (advisorModel in settings) applies by itself.
     launch(name, folder, prompt + ["-n", name, "--session-id", sid, "--model", model, "--effort", "high",
                                    "--autocompact", AUTOCOMPACT])
@@ -577,6 +628,258 @@ def cmd_adopt(args):
     print(f"{adopted} sessions adopted." if adopted else "Nothing new to adopt.")
 
 
+# ---- what a thread waits for: needs, questions, answers, and the label of a stop ----------------------
+
+def own_name(args, min_rest=0):
+    """(name, rest): the first argument when it names a thread and enough is left after it, else
+    $AGENTIC_THREAD (inside a thread)."""
+    if len(args) > min_rest and read(slug(args[0]))[0] is not None:
+        return slug(args[0]), args[1:]
+    return os.environ.get("AGENTIC_THREAD", ""), args
+
+
+def set_needs(name, text):
+    """Write or clear the `needs:` line, and the same sentence under "Open for the owner"."""
+    fm, body = read(name)
+    old = fm.get("needs", "")
+    if old:
+        body = body.replace(f"\n- {old}\n", "\n", 1) if f"\n- {old}\n" in body else body
+    if text:
+        fm["needs"] = text
+        if "## Open for the owner" not in body:
+            body = body.rstrip("\n") + "\n\n## Open for the owner\n"
+        head, tail = body.split("## Open for the owner", 1)
+        tail = tail.rstrip("\n")
+        body = head + "## Open for the owner" + (tail + "\n" if tail.strip() else "\n") + f"- {text}\n"
+    else:
+        fm.pop("needs", None)
+    write(name, fm, body)
+
+
+def cmd_needs(args):
+    name, rest = own_name(args, 1)
+    if not name or not rest:
+        sys.exit('thread needs [<name>] "<what the owner has to do>" | --clear')
+    if read(name)[0] is None:
+        sys.exit(f"No thread '{name}'.")
+    if rest == ["--clear"]:
+        set_needs(name, "")
+        print(f"{name}: nothing open for the owner")
+    else:
+        text = " ".join(" ".join(rest).split())[:200]
+        set_needs(name, text)
+        print(f"{name} needs: {text}")
+
+
+def qpath(name):
+    return os.path.join(DIR, name + ".questions.json")
+
+
+def load_round(name):
+    try:
+        return json.load(open(qpath(name), encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def open_round(name):
+    r = load_round(name)
+    return r if r and r.get("questions") and not r.get("answers") else None
+
+
+def check_questions(data):
+    """The AskUserQuestion shape, or exit with what is wrong."""
+    qs = data.get("questions") if isinstance(data, dict) else data
+    errs = []
+    if not isinstance(qs, list) or not 1 <= len(qs) <= 4:
+        sys.exit('thread ask: expected {"questions": [...]} with 1 to 4 questions')
+    seen = set()
+    for i, q in enumerate(qs, 1):
+        if not isinstance(q, dict):
+            errs.append(f"question {i} is not an object")
+            continue
+        if not isinstance(q.get("question"), str) or not q["question"].strip():
+            errs.append(f"question {i}: 'question' text missing")
+        elif q["question"] in seen:
+            errs.append(f"question {i}: same text as an earlier one")
+        else:
+            seen.add(q["question"])
+        if not isinstance(q.get("header"), str) or not q["header"].strip() or len(q["header"]) > 12:
+            errs.append(f"question {i}: 'header' needs a short label, at most 12 characters")
+        opts = q.get("options")
+        if not isinstance(opts, list) or not 2 <= len(opts) <= 4:
+            errs.append(f"question {i}: 2 to 4 'options'")
+        else:
+            for j, o in enumerate(opts, 1):
+                if not isinstance(o, dict) or not isinstance(o.get("label"), str) or not o["label"].strip() \
+                        or not isinstance(o.get("description"), str):
+                    errs.append(f"question {i} option {j}: needs 'label' and 'description'")
+                elif "preview" in o and not isinstance(o["preview"], str):
+                    errs.append(f"question {i} option {j}: 'preview' must be text")
+        if "multiSelect" in q and not isinstance(q["multiSelect"], bool):
+            errs.append(f"question {i}: 'multiSelect' must be true or false")
+        extra = set(q) - {"question", "header", "options", "multiSelect"}
+        if extra:
+            errs.append(f"question {i}: unknown fields {', '.join(sorted(extra))}")
+    if errs:
+        sys.exit("thread ask: " + "; ".join(errs))
+    return [dict(q, multiSelect=bool(q.get("multiSelect"))) for q in qs]
+
+
+def cmd_ask(args):
+    name, rest = own_name(args, 0)
+    if not name or read(name)[0] is None:
+        sys.exit("thread ask [<name>] [file]   (JSON on stdin or in the file; inside a thread the name is known)")
+    raw = open(rest[0], encoding="utf-8").read() if rest else sys.stdin.read()
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        sys.exit(f"thread ask: not valid JSON ({e})")
+    qs = check_questions(data)
+    if open_round(name):
+        sys.exit(f"thread ask: '{name}' already has an open round; wait for its answers (thread questions {name}).")
+    rnd = {"thread": name, "round": "r" + datetime.now().strftime("%m%d-%H%M%S"),
+           "asked": datetime.now().isoformat(timespec="seconds"), "questions": qs}
+    with open(qpath(name) + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(rnd, f, ensure_ascii=False, indent=1)
+    os.replace(qpath(name) + ".tmp", qpath(name))
+    set_needs(name, f"{len(qs)} question{'s' if len(qs) > 1 else ''}")
+    print(f"{name}: {len(qs)} question(s) stored as round {rnd['round']}. End your turn now; the main chat asks "
+          "the owner and the answers arrive as a message.")
+
+
+def cmd_questions(args):
+    if not args:
+        sys.exit("thread questions <name> [--json]")
+    name = slug(args[0])
+    r = open_round(name)
+    if "--json" in args:
+        print(json.dumps({"thread": name, "round": r["round"] if r else None, "asked": r.get("asked") if r else None,
+                          "questions": r["questions"] if r else []}, ensure_ascii=False))
+        return
+    if not r:
+        print(f"'{name}' has no open questions.")
+        return
+    print(f"'{name}', round {r['round']} ({r.get('asked', '')}):")
+    for i, q in enumerate(r["questions"], 1):
+        print(f"\n{i}. [{q['header']}] {q['question']}" + ("  (several allowed)" if q.get("multiSelect") else ""))
+        for o in q["options"]:
+            print(f"   - {o['label']}: {o['description']}")
+
+
+def answer_text(r):
+    parts = []
+    for q in r["questions"]:
+        a = r["answers"].get(q["question"])
+        if a is None:
+            a = "(not answered)"
+        elif isinstance(a, list):
+            a = ", ".join(map(str, a))
+        parts.append(f"{q['question']} -> {a}")
+    return "Answers from the owner: " + " | ".join(parts)
+
+
+def cmd_answer(args):
+    if not args:
+        sys.exit("thread answer <name> [--resend]   (answers as JSON on stdin)")
+    name = slug(args[0])
+    r = load_round(name)
+    if "--resend" in args:
+        if not r or not r.get("answers"):
+            sys.exit(f"'{name}' has no stored answers to send.")
+    else:
+        if not r or not r.get("questions"):
+            print(f"thread answer: '{name}' has no question round.", file=sys.stderr)
+            sys.exit(2)
+        try:
+            data = json.loads(sys.stdin.read())
+        except ValueError as e:
+            sys.exit(f"thread answer: not valid JSON ({e})")
+        if isinstance(data, dict) and data.get("round") and data["round"] != r["round"]:
+            print(f"thread answer: round {data['round']} is not the current one ({r['round']}).", file=sys.stderr)
+            sys.exit(4)
+        if r.get("answers"):
+            print(f"thread answer: round {r['round']} of '{name}' was already answered at {r.get('answered')}; "
+                  "a second answer is refused.", file=sys.stderr)
+            sys.exit(4)
+        ans = data.get("answers", data) if isinstance(data, dict) else None
+        if isinstance(ans, dict):
+            ans = {k: v for k, v in ans.items() if k != "round"}
+        texts = {q["question"] for q in r["questions"]}
+        if not isinstance(ans, dict) or not ans or not set(ans) <= texts or \
+                not all(isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v)) for v in ans.values()):
+            sys.exit('thread answer: expected {"answers": {"<question text>": "<label or free text>" | ["<label>", ...]}} '
+                     "with the exact question texts")
+        r["answers"] = ans
+        r["answered"] = datetime.now().isoformat(timespec="seconds")
+        with open(qpath(name) + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(r, f, ensure_ascii=False, indent=1)
+        os.replace(qpath(name) + ".tmp", qpath(name))
+        fm, _ = read(name)
+        if fm and re.fullmatch(r"\d+ questions?", fm.get("needs", "")):
+            set_needs(name, "")
+    code = send_text(name, answer_text(r))
+    r["delivered"] = code == 0
+    with open(qpath(name) + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(r, f, ensure_ascii=False, indent=1)
+    os.replace(qpath(name) + ".tmp", qpath(name))
+    if code:
+        why = {2: "it isn't running (thread resume, then thread answer --resend)",
+               3: "it has a dialog or typed text open (thread answer --resend later)"}.get(code, "tmux failed")
+        print(f"Answers for '{name}' stored, not delivered: {why}.", file=sys.stderr)
+        sys.exit(3)
+    print(f"Answers sent to '{name}' (round {r['round']}).")
+
+
+def sent_to_main(tpath):
+    """The thread's last turn (since the last real prompt or delivered message) sent SendMessage to main-chat."""
+    try:
+        with open(tpath, encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()[-400:]
+    except OSError:
+        return False
+    sent = False
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("type") == "user" and not e.get("isMeta") and "toolUseResult" not in e:
+            c = (e.get("message") or {}).get("content")
+            if isinstance(c, str) or (isinstance(c, list) and not any(b.get("type") == "tool_result" for b in c)):
+                sent = False
+        elif e.get("type") == "assistant":
+            for b in (e.get("message") or {}).get("content") or []:
+                if b.get("type") == "tool_use" and b.get("name") == "SendMessage" \
+                        and str((b.get("input") or {}).get("to", "")).startswith("main-chat"):
+                    sent = True
+    return sent
+
+
+def cmd_signal(args):
+    """The label of a thread's stop, decided in code (the session hook calls this)."""
+    if not args:
+        sys.exit("thread signal <name> [--transcript <file>]")
+    name = slug(args[0])
+    fm, _ = read(name)
+    if fm is None:
+        sys.exit(f"No thread '{name}'.")
+    tpath = args[args.index("--transcript") + 1] if "--transcript" in args[:-1] else ""
+    sent = "sent" if tpath and sent_to_main(tpath) else ""
+    r = open_round(name)
+    st = steps(fm)
+    if r:
+        n = len(r["questions"])
+        label, detail = "questions", f"{n} question{'s' if n > 1 else ''}"
+    elif fm.get("needs"):
+        label, detail = "needs", fm["needs"]
+    elif st and st[0] == st[1]:
+        label, detail = "done", f"{st[0]}/{st[1]}"
+    else:
+        label, detail = "paused", f"{st[0]}/{st[1]}" if st else ""
+    print(f"{label}\t{detail}\t{sent}")
+
+
 def main():
     a = sys.argv[1:]
     if not a or a[0] in ("-h", "--help", "help"):
@@ -614,6 +917,16 @@ def main():
         cmd_send(rest)
     elif cmd == "adopt":
         cmd_adopt(rest)
+    elif cmd == "needs":
+        cmd_needs(rest)
+    elif cmd == "ask":
+        cmd_ask(rest)
+    elif cmd == "questions":
+        cmd_questions(rest)
+    elif cmd == "answer":
+        cmd_answer(rest)
+    elif cmd == "signal":
+        cmd_signal(rest)
     elif cmd == "archive":
         if not rest:
             sys.exit("thread archive <name>...")
