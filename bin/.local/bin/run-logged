@@ -18,20 +18,29 @@ fi
 name=$(basename -- "${1/#sudo/${2:-sudo}}")
 name=${name//[^A-Za-z0-9._-]/_}
 log="$dir/${name}-$(date +%Y%m%d-%H%M%S).log"
-raw=$(mktemp)
+# The raw output goes straight into the log folder, and the clean log is written however this ends (done,
+# Ctrl+C, terminal closed), so nothing is lost.
+raw="$log.raw"
 start=$(date '+%F %T')
+status=130
+
+finish() {
+    trap - EXIT INT HUP TERM
+    {
+        printf '== %s\n== started %s, finished %s, exit status %d\n\n' "$cmd" "$start" "$(date '+%F %T')" "$status"
+        # Without escape codes, carriage-return redraws and the "Script started" lines.
+        sed -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' -e 's/\x1b[()][A-Za-z0-9]//g' -e 's/\r$//' -e 's/.*\r//' "$raw" 2>/dev/null |
+            grep -v '^Script \(started\|done\) on '
+    } > "$log"
+    rm -f "$raw"
+    ln -sfn "$(basename "$log")" "$dir/latest.log"
+    printf '\n[run-logged] exit status %d, log: %s\n' "$status" "${log/#$HOME/\~}"
+}
+cmd="$*"
+trap finish EXIT
+trap 'exit 130' INT HUP TERM
 
 # `script` keeps the command on a real terminal, so it behaves as if run directly.
 script -q -e -c "$(printf '%q ' "$@")" "$raw"
 status=$?
-
-{
-    printf '== %s\n== started %s, finished %s, exit status %d\n\n' "$*" "$start" "$(date '+%F %T')" "$status"
-    # Without escape codes, carriage-return redraws and the "Script started" lines.
-    sed -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' -e 's/\x1b[()][A-Za-z0-9]//g' -e 's/\r$//' -e 's/.*\r//' "$raw" |
-        grep -v '^Script \(started\|done\) on '
-} > "$log"
-rm -f "$raw"
-ln -sfn "$(basename "$log")" "$dir/latest.log"
-printf '\n[run-logged] exit status %d, log: %s\n' "$status" "${log/#$HOME/\~}"
 exit "$status"
