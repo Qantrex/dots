@@ -329,6 +329,20 @@ anything it read). Threads never notify; they report to the main chat as before.
 In `root`, and whenever the shell doesn't answer, the hook's own notification
 shows as always.
 
+The theme has its own lock screen, `agentic-lock`: a Quickshell config of its
+own (`quickshell/lock/`), run as a separate process like hyprlock, so that a
+reload of the desktop's shell never touches a locked session. It shows the
+clock, the date, the password field (checked through PAM with hyprlock's
+service) and a short brief: by default only the lines of `agentic brief` that
+say how many (late tasks, waiting threads, new inbox events, the week's usage),
+never task names or subjects. `lock_brief` in the theme's `agentic.json` can be
+`full`, `counts` or `off`. When it can't lock (another lock runs, the
+compositor doesn't confirm within 3 s) or ends in any other way than an
+unlock, `agentic-lock` starts hyprlock, and `misc.allow_session_lock_restore`
+lets hyprlock take over a session whose lock died. `agentic-lock --trial [N]`
+unlocks by itself after N seconds (default 90) for the first try. idle.sh
+still runs hyprlock until that first try has worked with a real password.
+
 Next to the send button sits a microphone, push to talk like `SUPER+CTRL+D`: hold
 it while you speak and let go to send what was said straight to the main chat
 through the inbox, from whichever tab is open (`voice press`, `voice release`). A
@@ -797,6 +811,7 @@ hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
 | `thread send <name\|main> <text>` | type a message into a thread or the main chat and send it; refuses when that session is asking something or has a draft typed |
 | `agentic-shell feed/home/snapshot/leave-check` | what the agent panel reads, as JSON (a conversation, the brief and inbox), and the check that leaving `root-agentic` leaves nothing running |
 | `agentic-shell notify <session> <event> <title> <why> [pane]` | the session hook's notification in `root-agentic` (exit 1: not on, the hook notifies itself): inbox line, nothing while the panel is shown, else buttons that close once settled. `AGENTIC_BIN`/`AGENTIC_SCRIPTS` point it at stand-ins in tests |
+| `agentic-lock [--trial [N]]` | the lock screen of `root-agentic`, with hyprlock as the fallback (see above); `--trial` unlocks by itself after N seconds. Its log: `~/.cache/agentic/lock.log` |
 | `agentic-shell grab window\|clipboard` | the panel's desk row: a screenshot of the focused window, or the clipboard, as text for the input box (JSON) |
 | `agentic-shell requests/answer/hold/release` | the panel's request cards: what waits (JSON), answer one (`answer <id> allow\|deny [json]`), the waiting side of the `PermissionRequest` hook, and dropping cards whose call ran or whose turn ended (`release --all`: every card, used when leaving the theme) |
 | `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |

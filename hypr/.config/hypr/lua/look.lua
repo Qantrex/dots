@@ -114,6 +114,9 @@ hl.config({
         -- Any input turns screens back on after `away` switched them off.
         mouse_move_enables_dpms = true,
         key_press_enables_dpms  = true,
+        -- When a lock screen dies (hyprlock or the Quickshell lock of root-agentic), another one may take
+        -- over the locked session (`agentic-lock` starts hyprlock then); without it only a TTY gets back in.
+        allow_session_lock_restore = true,
     },
 })
 
