@@ -6,7 +6,8 @@
                                        status line's history (~/.local/state/agentic/usage.log)
   claude-usage estimate --agents N [--model opus|sonnet|haiku|fable]
                                        what a fan-out of N agents costs, from past agents' average
-  claude-usage session <id-prefix>     cost of one session (with its agents)
+  claude-usage session <id-prefix>     cost of one session (with its agents); a full id is fast,
+                                       and with --json prints {"dollars", "week_percent"}
 
 Plan limits are not published in tokens. API prices are only a proxy; `calibrate` checks how
 well it fits. Usage outside these transcripts (another machine) is not seen, except the homelab
@@ -48,10 +49,16 @@ def price(fam, inp, out, read, w5, w1):
     return (inp * p[0] + out * p[1] + read * p[2] + w5 * p[3] + w1 * p[4]) / 1e6
 
 
-def load(since):
+def session_files(sid):
+    """The transcript of one session and its agents' transcripts, found by the full session id (fast path)."""
+    return (glob.glob(os.path.join(PROJECTS, "*", sid + ".jsonl"))
+            + glob.glob(os.path.join(PROJECTS, "*", sid, "**", "*.jsonl"), recursive=True))
+
+
+def load(since, files=None):
     """One row per API request since `since`: (time, family, dollars, project, session, agent file or '')."""
     rows, seen = [], set()
-    for f in glob.glob(os.path.join(PROJECTS, "**", "*.jsonl"), recursive=True):
+    for f in files if files is not None else glob.glob(os.path.join(PROJECTS, "**", "*.jsonl"), recursive=True):
         try:
             if os.path.getmtime(f) < since:
                 continue
@@ -296,7 +303,18 @@ def cmd_estimate(n, model):
           f"(range {n * lo / ppp:.1f}-{n * hi / ppp:.1f} %), ${n * med:.0f} API-equivalent; {src}")
 
 
+def session_cost(sid):
+    """(dollars, % of the weekly limit) of one session with its agents, from its full id. Used by `thread progress`."""
+    d = sum(r[2] for r in load(0, session_files(sid)))
+    return d, d / per_percent()
+
+
 def cmd_session(prefix):
+    if len(prefix) == 36 and session_files(prefix):
+        d, pct = session_cost(prefix)
+        print(json.dumps({"session": prefix, "dollars": round(d, 2), "week_percent": round(pct, 2)})
+              if "--json" in sys.argv else f"{prefix[:8]}: ${d:.2f} ≈ {pct:.1f} % of a week")
+        return
     rows = [r for r in load(time.time() - 90 * 86400) if r[4].startswith(prefix)]
     if not rows:
         print("No such session in the last 90 days.")
@@ -311,6 +329,7 @@ def main():
     ap.add_argument("cmd", nargs="?", default="report", choices=["report", "calibrate", "estimate", "session"])
     ap.add_argument("arg", nargs="?")
     ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--json", action="store_true")
     ap.add_argument("--agents", type=int, default=10)
     ap.add_argument("--model", default="opus", choices=list(PRICES))
     a = ap.parse_args()
