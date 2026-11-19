@@ -40,7 +40,7 @@ Singleton {
     // Warn once per level per discharge.
     property int warnedAt: 101
     onPercentChanged: check()
-    onOnBatteryChanged: { if (!onBattery) warnedAt = 101; check(); }
+    onOnBatteryChanged: { if (!onBattery) { warnedAt = 101; Notifs.dismissApp("Battery"); } check(); }
 
     function check() {
         if (!present || !onBattery) return;
@@ -53,6 +53,7 @@ Singleton {
         }
     }
     function notify(urgency, summary, body) {
-        Quickshell.execDetached(["notify-send", "-u", urgency, "-a", "Battery", "-i", "battery-caution", summary, body]);
+        // -t 60000: the critical popup goes after 60 s (Notifs.timeoutFor); plugging in closes both at once.
+        Quickshell.execDetached(["notify-send", "-u", urgency, "-t", "60000", "-a", "Battery", "-i", "battery-caution", summary, body]);
     }
 }

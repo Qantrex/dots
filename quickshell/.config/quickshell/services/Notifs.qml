@@ -24,14 +24,22 @@ Singleton {
     function setDnd(on) { persist.dnd = on; }
     function markRead() { unread = 0; }
     function dismissPopup(n) { popups = popups.filter(p => p !== n); }
+    // Remove an app's notifications from the popups and the history (the battery warnings once plugged in).
+    function dismissApp(app) {
+        for (const n of server.trackedNotifications.values.slice()) if (n.appName === app) n.dismiss();
+        popups = popups.filter(p => p.appName !== app);
+    }
     function clearAll() {
         for (const n of server.trackedNotifications.values.slice()) n.dismiss();
         popups = [];
         unread = 0;
     }
+    // expireTimeout is the sender's value in ms (quickshell 0.3.2 passes the D-Bus value through; its docs say seconds).
     function timeoutFor(n) {
-        if (n.urgency === NotificationUrgency.Critical) return 0;   // stays until dismissed
-        if (n.expireTimeout > 0) return Math.min(n.expireTimeout * 1000, 15000);
+        // Critical ones stay until dismissed; the battery warning goes after its own timeout (60 s, Power.qml).
+        if (n.urgency === NotificationUrgency.Critical)
+            return n.appName === "Battery" && n.expireTimeout > 0 ? n.expireTimeout : 0;
+        if (n.expireTimeout > 0) return Math.min(n.expireTimeout, 15000);
         return n.urgency === NotificationUrgency.Low ? 3000 : 5000;
     }
     function icon(n) {
