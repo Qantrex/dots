@@ -57,9 +57,13 @@ Singleton {
 
     property bool sending: false
 
-    // The voice button: `voice talk` starts listening, the next press sends what was said to the
-    // main chat through the inbox (as SUPER+CTRL+D does). recording follows `voice status`.
+    // The voice button, held like SUPER+CTRL+D: `voice press` starts listening, `voice release` sends
+    // what was said to the main chat through the inbox (a quick tap keeps it listening until the next
+    // one). recording follows `voice status`; voiceState and voiceText the words so far
+    // ($XDG_RUNTIME_DIR/voice-live.json: "listening" or "sending", or "" when nothing runs).
     property bool recording: false
+    property string voiceState: ""
+    property string voiceText: ""
 
     // The desk row: `agentic-shell grab window|clipboard` gives text for the input box.
     property string grabbing: ""      // "window" or "clipboard" while one is on its way
@@ -133,9 +137,13 @@ Singleton {
         Quickshell.execDetached([bin + "/dock", "term", of || (target === "home" ? "main" : target)]);
     }
 
-    function voice() {
-        Quickshell.execDetached([bin + "/voice", "talk"]);
+    function voicePress() {
+        Quickshell.execDetached([bin + "/voice", "press"]);
         recording = !recording;           // at once; voiceCheck confirms it a moment later
+        voiceLater.restart();
+    }
+    function voiceRelease() {
+        Quickshell.execDetached([bin + "/voice", "release"]);
         voiceLater.restart();
     }
 
@@ -267,6 +275,25 @@ Singleton {
         stdout: StdioCollector { onStreamFinished: root.recording = text.trim() === "recording" }
     }
     Timer { id: voiceLater; interval: 600; onTriggered: voiceCheck.running = true }
+    FileView {
+        id: voiceLive
+        path: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/voice-live.json"
+        printErrors: false
+        blockLoading: true
+    }
+    // While a take runs (and a little after, for "sending"), read the words so far.
+    Timer {
+        interval: 300
+        running: root.open && (root.recording || root.voiceState !== "")
+        repeat: true
+        onTriggered: {
+            voiceLive.reload();
+            let v = {};
+            try { v = JSON.parse(voiceLive.text()); } catch (e) {}
+            root.voiceState = v.state || "";
+            root.voiceText = v.text || "";
+        }
+    }
     // SUPER+CTRL+D toggles it from outside the panel too.
     Timer {
         interval: 2000

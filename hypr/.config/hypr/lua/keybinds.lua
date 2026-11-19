@@ -22,7 +22,11 @@ hl.bind(mod .. " + L", hl.dsp.exec_cmd(apps.lock),        { description = "Lock 
 hl.bind(mod .. " + H", hl.dsp.exec_cmd(apps.mailHelp),    { description = "Toggle aerc cheatsheet" })
 hl.bind(mod .. " + D", hl.dsp.exec_cmd(apps.ask),         { description = "Quick ask (Claude)" })
 hl.bind(mod .. " + SHIFT + D", hl.dsp.exec_cmd(apps.ask .. " --clip"), { description = "Quick ask about the clipboard" })
-hl.bind(mod .. " + CTRL + D", hl.dsp.exec_cmd("~/.local/bin/voice talk"), { description = "Speak to the main Claude chat (again to send)" })
+-- Push to talk: hold while speaking, release to send. A quick tap keeps it listening until the next tap
+-- (and a release Hyprland misses, e.g. SUPER let go first, falls back to that).
+hl.bind(mod .. " + CTRL + D", hl.dsp.exec_cmd("~/.local/bin/voice press"),
+    { description = "Speak to the main Claude chat (hold, or tap twice)" })
+hl.bind(mod .. " + CTRL + D", hl.dsp.exec_cmd("~/.local/bin/voice release"), { release = true })
 hl.bind(mod .. " + SHIFT + A", hl.dsp.exec_cmd("~/.local/bin/dock toggle"),
     { description = "Main Claude chat (side panel)" })
 

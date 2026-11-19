@@ -303,10 +303,17 @@ long-running call stays until the call ends (answering it then does nothing),
 and any program running as you could write the answer file, as it could
 already type into the session's terminal.
 
-Next to the send button sits a microphone: it runs `voice talk`, so one press
-starts listening and the next sends what was said straight to the main chat
-through the inbox, from whichever tab is open, the same as `SUPER+CTRL+D`. It is
-filled while a recording runs (`voice status`, also after the key started it).
+Next to the send button sits a microphone, push to talk like `SUPER+CTRL+D`: hold
+it while you speak and let go to send what was said straight to the main chat
+through the inbox, from whichever tab is open (`voice press`, `voice release`). A
+quick tap keeps it listening until the next tap, which is also what happens when
+Hyprland misses the key's release. It is filled while a recording runs (`voice
+status`), and the status line shows the words so far, about once a second: during
+a take `voice` runs a `whisper-server` on 127.0.0.1 with the model loaded and a
+15 s audio window (about 0.5 to 1.2 s per pass on this laptop, several cores busy
+while you speak), and writes `$XDG_RUNTIME_DIR/voice-live.json`. With the panel
+closed the words show in one notification that updates in place. What is sent is
+a fresh `whisper-cli` pass over the whole take, as before (1 to 4 s after release).
 Under the input box, a small row puts things to show Claude into the text where
 the cursor is (`agentic-shell grab`): Window hides the panel, takes a screenshot
 of the focused window into `~/.cache/agentic/shots` (the last 20 are kept),

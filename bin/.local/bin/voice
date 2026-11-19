@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Talk to the main Claude chat: press once to speak, once more to send (SUPER+CTRL+D). Speech recognition
-# runs locally (whisper.cpp); the answer to a spoken question can be read out.
+# Talk to the main Claude chat: hold SUPER+CTRL+D (or the panel's mic button) while you speak, or tap it
+# once to start and once more to send. Speech recognition runs locally (whisper.cpp); while you speak the
+# words so far show in the agent panel, or in a notification when the panel is closed. The answer to a
+# spoken question can be read out.
+#   voice press          key or button down: start listening (or send, when a tap left it listening)
+#   voice release        key or button up: send if it was held, keep listening if it was only tapped
 #   voice talk           start recording, or stop and send what was said to the main chat
 #   voice say <text>     read text out: the HTTP voice service first, local piper when it can't be reached
 #   voice reply <text>   used by the session hook: reads the main chat's answer when the question was spoken
 #   voice setup          what's missing
 #   voice status         "recording" while it listens, else "idle" (the agent panel's mic button)
+# While it listens, $XDG_RUNTIME_DIR/voice-live.json holds {"state": "listening"|"sending", "text"} for the
+# panel: partial text from a whisper-server on 127.0.0.1 that runs only during the recording.
 # Settings: ~/.config/agentic/voice.conf (shell syntax):
 #   WHISPER_MODEL=~/.local/share/whisper/ggml-base.bin    model file for whisper-cli
 #   TTS_URL=https://host:port/speak                       POST {"text","pacing"} -> audio/wav, bearer token
@@ -15,11 +21,20 @@
 set -u
 run="${XDG_RUNTIME_DIR:-/tmp}"
 rec="$run/voice-input.wav"; pidf="$run/voice-record.pid"; flag="$run/voice-reply"
+modef="$run/voice-mode"; live="$run/voice-live.json"; livepid="$run/voice-live.pid"; noteid="$run/voice-note.id"
+HOLD_MIN=0.45     # a release sooner than this was a tap: keep listening until the next press
 conf="${XDG_CONFIG_HOME:-$HOME/.config}/agentic/voice.conf"
 WHISPER_MODEL="$HOME/.local/share/whisper/ggml-base.bin"; TTS_URL=""; TTS_TOKEN_CMD=""; PIPER_MODEL=""
 [[ -f $conf ]] && source "$conf"
 WHISPER_MODEL=${WHISPER_MODEL/#\~/$HOME}; PIPER_MODEL=${PIPER_MODEL/#\~/$HOME}
 say_note() { notify-send -a Claude -t 2500 "Voice" "$1"; }
+# One notification for the whole take, updated in place: "Listening", the words so far, "Sent".
+take_note() {
+    local id; id=$(cat "$noteid" 2>/dev/null)
+    id=$(notify-send -a Claude -t "${2:-0}" -p ${id:+-r "$id"} "Voice" "$1" 2>/dev/null) && echo "$id" > "$noteid"
+}
+panel_shown() { [[ $(qs ipc call agentic status 2>/dev/null) == shown* ]]; }
+recording() { [[ -f $pidf ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; }
 # The piper speech tool (AUR piper-tts); a plain `piper` may be the mouse configuration tool, so check it.
 piper_bin() {
     command -v piper-tts && return
@@ -56,23 +71,117 @@ speak() {
     pw-play "$wav" 2>/dev/null || mpv --really-quiet "$wav"
 }
 
+start() {
+    rm -f "$rec" "$noteid"
+    pw-record --rate 16000 --channels 1 "$rec" >/dev/null 2>&1 &
+    echo $! > "$pidf"
+    printf '{"state": "listening", "text": ""}\n' > "$live"
+    panel_shown || take_note "Listening …"
+    setsid -f "$0" _live </dev/null >/dev/null 2>&1
+}
+
+finish() {
+    kill -INT "$(cat "$pidf")" 2>/dev/null; rm -f "$pidf" "$modef"
+    [[ -f $livepid ]] && kill "$(cat "$livepid")" 2>/dev/null
+    printf '{"state": "sending", "text": ""}\n' > "$live"
+    sleep 0.3
+    if [[ -n $(missing | head -1) ]]; then rm -f "$live"; say_note "Not set up yet: voice setup"; exit 1; fi
+    # Its own file, so a new take can start while this one is still being read.
+    local take="$run/voice-take-$$.wav"; mv -f "$rec" "$take" 2>/dev/null
+    text=$(whisper-cli -m "$WHISPER_MODEL" -l auto -nt -np -f "$take" 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ *//; s/ *$//')
+    rm -f "$take" "$live"
+    [[ -n $text ]] || { take_note "Didn't catch anything." 2500; exit 0; }
+    touch "$flag"
+    # Through the inbox: typed into the main chat when it's idle and nobody is typing there.
+    "${VOICE_INBOX:-$HOME/.local/bin/inbox}" add --wake needs voice "$text" >/dev/null
+    take_note "Sent: $text" 2500
+}
+
 case ${1:-talk} in
-talk)
-    if [[ -f $pidf ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
-        kill -INT "$(cat "$pidf")"; rm -f "$pidf"; sleep 0.3
-        if [[ -n $(missing | head -1) ]]; then say_note "Not set up yet: voice setup"; exit 1; fi
-        text=$(whisper-cli -m "$WHISPER_MODEL" -l auto -nt -np -f "$rec" 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ *//; s/ *$//')
-        [[ -n $text ]] || { say_note "Didn't catch anything."; exit 0; }
-        touch "$flag"
-        # Through the inbox: typed into the main chat when it's idle and nobody is typing there.
-        "$HOME/.local/bin/inbox" add --wake needs voice "$text" >/dev/null
-        say_note "Sent: $text"
+press)
+    if recording; then finish; exit; fi
+    start
+    echo "held $(date +%s.%N)" > "$modef" ;;
+release)
+    recording || exit 0
+    read -r mode since < "$modef" 2>/dev/null
+    [[ $mode == held ]] || exit 0
+    if python3 -c "import sys,time; sys.exit(0 if time.time() - float(sys.argv[1]) >= float(sys.argv[2]) else 1)" "$since" "$HOLD_MIN"; then
+        finish
     else
-        rm -f "$rec"
-        pw-record --rate 16000 --channels 1 "$rec" >/dev/null 2>&1 &
-        echo $! > "$pidf"
-        say_note "Listening… press again to send"
+        echo latched > "$modef"
+        panel_shown || take_note "Listening … tap again to send"
     fi ;;
+talk)
+    if recording; then finish; else start; echo latched > "$modef"; fi ;;
+_live)
+    # The words so far, about once a second, from a whisper-server that lives only as long as the take.
+    echo $$ > "$livepid"
+    exec python3 - "$rec" "$pidf" "$live" "$WHISPER_MODEL" "$0" <<'EOF'
+import json, os, signal, socket, struct, subprocess, sys, time, urllib.request, uuid
+rec, pidf, live, model, me = sys.argv[1:6]
+s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+# -ac 768: a 15 s window instead of 30 s, about half the time per pass; the final text uses the whole take.
+srv = subprocess.Popen(["whisper-server", "-m", model, "--host", "127.0.0.1", "--port", str(port), "-t", "8",
+                        "-l", "auto", "-ac", "768", "-nt"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def done(*_):
+    try: os.remove(os.path.join(os.path.dirname(live), "voice-live.pid"))
+    except OSError: pass
+    srv.terminate()
+    try: srv.wait(2)
+    except subprocess.TimeoutExpired: srv.kill()
+    sys.exit(0)
+signal.signal(signal.SIGTERM, done)
+def alive():
+    try: os.kill(int(open(pidf).read()), 0); return True
+    except (OSError, ValueError): return False
+def pcm():
+    """The samples written so far: pw-record fixes the WAV sizes only when it stops."""
+    try: b = open(rec, "rb").read()
+    except OSError: return None, b""
+    if b[:4] != b"RIFF": return None, b""
+    i, fmt = 12, None
+    while i + 8 <= len(b):
+        cid, size = b[i:i+4], struct.unpack("<I", b[i+4:i+8])[0]
+        if cid == b"fmt ": fmt = b[i+8:i+8+16]
+        if cid == b"data": return fmt, b[i+8:]
+        i += 8 + size
+    return None, b""
+def wav(fmt, data):
+    return b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<I", 16) + fmt + b"data" + struct.pack("<I", len(data)) + data
+def ask(body):
+    k = uuid.uuid4().hex
+    form = (f"--{k}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\n").encode() + body + \
+           (f"\r\n--{k}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n--{k}--\r\n").encode()
+    r = urllib.request.Request(f"http://127.0.0.1:{port}/inference", data=form, headers={"Content-Type": f"multipart/form-data; boundary={k}"})
+    return json.loads(urllib.request.urlopen(r, timeout=10).read()).get("text", "").strip()
+def shown():
+    try: return subprocess.run(["qs", "ipc", "call", "agentic", "status"], capture_output=True, text=True, timeout=2).stdout.startswith("shown")
+    except Exception: return False
+last = ""
+while alive():
+    time.sleep(0.4)
+    fmt, data = pcm()
+    if not fmt: continue
+    rate, bps = struct.unpack("<I", fmt[4:8])[0], struct.unpack("<H", fmt[12:14])[0]
+    if len(data) < rate * bps * 0.7: continue
+    cut = rate * bps * 14
+    try: text = ask(wav(fmt, data[-cut:] if len(data) > cut else data))
+    except Exception: continue
+    if len(data) > cut: text = "… " + text
+    if not alive(): break
+    if text and text != last:
+        last = text
+        tmp = live + ".tmp"
+        with open(tmp, "w") as f: json.dump({"state": "listening", "text": text}, f)
+        os.replace(tmp, live)
+        if not shown():
+            subprocess.run([me, "_note", text], timeout=3)
+done()
+EOF
+    ;;
+_note)
+    shift; take_note "$*" ;;
 say)
     shift; speak "$*" ;;
 status)

@@ -296,7 +296,9 @@ Item {
             id: status
             readonly property string state: chat.target === "main" ? "" : Agentic.stateOf(chat.target)
             readonly property string refused: Agentic.answerTab === chat.target ? Agentic.answerProblem : ""
-            readonly property string line: chat.problem !== "" ? chat.problem : refused !== "" ? refused : chat.hint !== "" ? chat.hint
+            readonly property string heard: Agentic.voiceState === "sending" ? "Sending to the main chat ..."
+                : (Agentic.recording || Agentic.voiceState === "listening" ? "Listening" + (Agentic.voiceText === "" ? " ..." : ": " + (Agentic.voiceText.length > 180 ? "... " + Agentic.voiceText.slice(-180) : Agentic.voiceText)) : "")
+            readonly property string line: heard !== "" ? heard : chat.problem !== "" ? chat.problem : refused !== "" ? refused : chat.hint !== "" ? chat.hint
                 : (Agentic.sending ? "Sending ..." : (state !== "" ? state + (Agentic.detailOf(chat.target) ? ": " + Agentic.detailOf(chat.target) : "") : ""))
             anchors { left: parent.left; right: parent.right; top: asks.bottom }
             height: line !== "" ? Math.max(told.implicitHeight, 22) + 6 : 0
@@ -310,7 +312,7 @@ Item {
                 wrapMode: Text.Wrap
                 maximumLineCount: 3
                 verticalAlignment: Text.AlignTop
-                color: chat.problem !== "" || status.refused !== "" || chat.hint !== "" ? Theme.love : (status.state === "needs you" ? Theme.gold : Theme.fgDim)
+                color: status.heard !== "" ? Theme.fg : chat.problem !== "" || status.refused !== "" || chat.hint !== "" ? Theme.love : (status.state === "needs you" ? Theme.gold : Theme.fgDim)
             }
             MouseArea {
                 id: toTerm
@@ -383,14 +385,16 @@ Item {
                     }
                 }
             }
-            // Speak to the main chat, from any tab: press, talk, press again (voice talk).
+            // Speak to the main chat, from any tab: hold it while you talk (a tap keeps it listening
+            // until the next tap), like SUPER+CTRL+D.
             IconButton {
                 id: mic
                 anchors { right: go.left; rightMargin: 2; bottom: parent.bottom; bottomMargin: 5 }
+                onPressed: Agentic.voicePress()
+                onReleased: Agentic.voiceRelease()
                 icon: "󰍬"
                 filled: Agentic.recording
                 opacity: Agentic.recording || containsMouse ? 1 : 0.6
-                onClicked: Agentic.voice()
             }
             IconButton {
                 id: go
