@@ -272,7 +272,9 @@ theme `Agentic.enabled` is false and nothing of it is loaded. It is a layer
 surface (`qs-agentic`) only while it is open, and its feed process runs only
 then. `shell.qml` loads it with an inline `LazyLoader { active: Agentic.enabled;
 Panel {} }` on purpose: loaded by `source:`, Quickshell 0.3.2 crashed when the
-process ended within about two seconds of a config reload. To try a change
+process ended within about two seconds of a config reload. The price: a syntax
+error in a panel file fails the config load like one in any other shell file, in
+every theme, so read the Quickshell log after editing one. To try a change
 without touching the desktop, run a second instance (`qs -p <copy>`) with
 `QS_AGENTIC_CONF=<an agentic.json>` and `QS_AGENTIC_NOFOCUS=1` (it then never
 takes the keyboard).
