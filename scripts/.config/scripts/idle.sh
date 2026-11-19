@@ -18,6 +18,13 @@
 # Anything that inhibits idle -- a video playing in Firefox or mpv -- holds all
 # of it off. Suspending for any reason (lid, idle, menu) locks first.
 #
+# Locking never holds swayidle up (2026-11-19). With -w swayidle waits for every command, and the lock
+# runs until I unlock: while locked the screen never went off, the steps that came due meanwhile (screen
+# off, the 15-minute suspend) all ran right after the unlock, and a lock asked for by before-sleep only
+# started after before-sleep had ended, so the laptop went to sleep while the lock was still being built
+# (22:56:27, the lock's window lost the keyboard as it came up). Now the lock runs in the background,
+# and before-sleep starts it itself and waits until it is up. -w stays: it makes swayidle wait for that.
+#
 # The old one-liner (`swayidle -w timeout 300 hyprlock ...`) only locked: it
 # had no screen-off step, so the lock screen stayed lit on the OLED panel
 # indefinitely, and nothing ever suspended on idle.
@@ -25,6 +32,7 @@
 # Usage:
 #   idle.sh           start swayidle (autostart)
 #   idle.sh suspend   the 15-minute step: suspend if on battery and nothing plays
+#   idle.sh before-sleep   lock and wait until the lock is up
 
 set -uo pipefail
 
@@ -46,12 +54,28 @@ case "${1:-start}" in
         fi
         exec swayidle -w \
             timeout 270 'brightnessctl -q -s set 10%' resume 'brightnessctl -q -r' \
-            timeout 300 "$LOCK" \
+            timeout 300 "$LOCK &" \
             timeout 330 "$(dpms off)" resume "$(dpms on)" \
             timeout 900 "$0 suspend" \
-            before-sleep 'loginctl lock-session; sleep 1' \
+            before-sleep "$0 before-sleep" \
             after-resume "$(dpms on)" \
-            lock "$LOCK"
+            lock "$LOCK &"
+        ;;
+    before-sleep)
+        # Lock, then wait (at most 3 s) until the compositor has confirmed it: the Quickshell lock logs
+        # "locked"; hyprlock (other themes, the fallback) says nothing, so its old second. Matching the
+        # process first keeps an earlier lock's log from counting.
+        "$LOCK" >/dev/null 2>&1 &
+        log="${XDG_CACHE_HOME:-$HOME/.cache}/agentic/lock.log"
+        end=$((SECONDS + 3))
+        while ((SECONDS < end)); do
+            if pgrep -u "$UID" -f "^qs -p $HOME/.config/quickshell/lock\$" >/dev/null &&
+                grep -qF 'agentic-lock: locked' "$log" 2>/dev/null; then
+                exit 0
+            fi
+            pidof hyprlock >/dev/null && { sleep 1; exit 0; }
+            sleep 0.1
+        done
         ;;
     suspend)
         # Only machines with a battery suspend on idle.
@@ -61,7 +85,7 @@ case "${1:-start}" in
         systemctl suspend
         ;;
     *)
-        echo "usage: ${0##*/} [suspend]" >&2
+        echo "usage: ${0##*/} [suspend|before-sleep]" >&2
         exit 2
         ;;
 esac

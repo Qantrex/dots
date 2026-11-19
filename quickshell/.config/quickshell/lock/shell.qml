@@ -103,6 +103,8 @@ ShellRoot {
     WlSessionLock {
         id: lock
         locked: !root.preview
+        // idle.sh's before-sleep step waits for this line before it lets the suspend go on.
+        onSecureChanged: if (secure) console.info("agentic-lock: locked")
         WlSessionLockSurface {
             color: "#000000"
             LockView { anchors.fill: parent; shell: root }
