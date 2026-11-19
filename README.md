@@ -19,7 +19,7 @@ Managed with [GNU Stow](https://www.gnu.org/software/stow/) for clean symlinks a
 | --- | --- |
 | `hypr` | Hyprland compositor, hyprlock, hyprpaper |
 | `quickshell` | The desktop shell ([Quickshell](#shell-quickshell)): bar, popouts, notifications, OSD, launcher |
-| `zsh` | `.zshrc` (oh-my-zsh), `.zsh_aliases`, functions (`gpumode`, `fixnet`, `hyprr`, …) |
+| `zsh` | `.zshenv` (puts `~/.local/bin` on the PATH for every zsh, scripts too), `.zshrc` (oh-my-zsh), `.zsh_aliases`, functions (`gpumode`, `fixnet`, `hyprr`, …) |
 | `starship` | Prompt |
 | `fish` | Fish config (zsh is the login shell) |
 | `foot` | Terminal emulator |

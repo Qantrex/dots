@@ -47,6 +47,7 @@ LINKS=(
   ".local/share/applications/homerow.desktop|homerow"
   ".local/share/icons/hicolor/scalable/apps/homerow.svg|homerow"
   ".config/zsh|zsh"
+  ".zshenv|zsh"
   ".zshrc|zsh"
   ".zsh_aliases|zsh"
   ".config/starship.toml|starship"
