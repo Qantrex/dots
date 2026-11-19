@@ -343,7 +343,8 @@ shows as always.
 
 The theme has its own lock screen, `agentic-lock`: a Quickshell config of its
 own (`quickshell/lock/`), run as a separate process like hyprlock, so that a
-reload of the desktop's shell never touches a locked session. It shows the
+reload of the desktop's shell never touches a locked session; it doesn't watch
+its files either, so editing the shared `services/` doesn't reload it. It shows the
 clock, the date, the password field (checked through PAM with hyprlock's
 service) and a short brief: by default only the lines of `agentic brief` that
 say how many (late tasks, waiting threads, new inbox events, the week's usage),
@@ -352,8 +353,9 @@ never task names or subjects. `lock_brief` in the theme's `agentic.json` can be
 compositor doesn't confirm within 3 s) or ends in any other way than an
 unlock, `agentic-lock` starts hyprlock, and `misc.allow_session_lock_restore`
 lets hyprlock take over a session whose lock died. `agentic-lock --trial [N]`
-unlocks by itself after N seconds (default 90) for the first try. idle.sh locks
-with `agentic-lock`, which uses hyprlock in every other theme.
+unlocks by itself after N seconds (default 90) for the first try. On the laptop
+idle.sh locks with `agentic-lock`, which uses hyprlock in every other theme; the
+PC keeps hyprlock for now.
 
 Next to the send button sits a microphone, push to talk like `SUPER+CTRL+D`: hold
 it while you speak and let go to send what was said straight to the main chat

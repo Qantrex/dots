@@ -35,8 +35,9 @@ brief=$(jq -r '.lock_brief // "counts"' "$conf" 2>/dev/null)
 mkdir -p "${log%/*}"
 AGENTIC_LOCK_TRIAL=$trial AGENTIC_LOCK_BRIEF=$brief qs -p "$dir" >"$log" 2>&1
 rc=$?
-# 0: unlocked. 3: the compositor didn't confirm the lock (another lock, no support). Anything else: it
-# died, maybe with the session still locked; misc.allow_session_lock_restore lets hyprlock take over.
-((rc == 0)) && exit 0
+# Unlocked only when the lock says so: `qs kill` ends it with 0 too, with the session still locked. 3: the
+# compositor didn't confirm the lock (another lock, no support). Anything else: it died, maybe with the
+# session still locked; misc.allow_session_lock_restore lets hyprlock take over.
+((rc == 0)) && grep -qF 'agentic-lock: unlocked (' "$log" && exit 0
 echo "agentic-lock: the Quickshell lock ended with $rc, starting hyprlock" >>"$log"
 exec hyprlock

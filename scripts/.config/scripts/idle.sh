@@ -13,6 +13,7 @@
 # after 15 idle minutes, even in the middle of an Ollama request. On the PC:
 #   5:00   `away --idle`              lock + quiet mode (pc-quiet)
 #   5:30   screens off
+# The PC keeps hyprlock (`away` looks for it) until it gets theme root-agentic (agentic-os.md, stage 3).
 #
 # Anything that inhibits idle -- a video playing in Firefox or mpv -- holds all
 # of it off. Suspending for any reason (lid, idle, menu) locks first.
@@ -41,7 +42,7 @@ case "${1:-start}" in
                 timeout 330 "$(dpms off)" resume "$(dpms on)" \
                 before-sleep 'loginctl lock-session; sleep 1' \
                 after-resume "$(dpms on)" \
-                lock "$LOCK"
+                lock 'pidof hyprlock >/dev/null || hyprlock'
         fi
         exec swayidle -w \
             timeout 270 'brightnessctl -q -s set 10%' resume 'brightnessctl -q -r' \
