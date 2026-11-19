@@ -13,5 +13,9 @@ claude() {
   [[ -e $hub/README.md ]] || print "# Claude hub\n\nStart folder of plain \`claude\`; see ~/.config/zsh/functions/claude." > "$hub/README.md"
   # ~ through settings, not --add-dir: since Claude Code 2.1.327 --add-dir asks "Yes, add it" in every new
   # session; through settings it doesn't ask (same access, chosen 2026-11-19).
-  ( cd "$hub" && command claude --settings "{\"permissions\":{\"additionalDirectories\":[\"$HOME\"]}}" "$@" )
+  # A context limit as threads have (compaction fires about 32k below the flag, so at about 208k), unless the
+  # arguments set one or call a subcommand (claude agents, mcp, ...).
+  local -a limit=(--autocompact 240000)
+  [[ ${@[(I)--autocompact*]} -gt 0 || $1 == (agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|sessions|setup-token|stop|kill|ultrareview|update|upgrade) ]] && limit=()
+  ( cd "$hub" && command claude --settings "{\"permissions\":{\"additionalDirectories\":[\"$HOME\"]}}" $limit "$@" )
 }

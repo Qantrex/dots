@@ -2,5 +2,8 @@
 # Start Claude Code in the current folder, for the rare case where that matters
 # (the plain `claude` function always starts in ~).
 claude-here() {
-  command claude "$@"
+  # The same context limit as `claude` (see there).
+  local -a limit=(--autocompact 240000)
+  [[ ${@[(I)--autocompact*]} -gt 0 || $1 == (agents|attach|auth|auto-mode|doctor|gateway|import|install|logs|mcp|plugin|plugins|purge|respawn|rm|sessions|setup-token|stop|kill|ultrareview|update|upgrade) ]] && limit=()
+  command claude $limit "$@"
 }
