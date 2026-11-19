@@ -136,8 +136,26 @@ def running(ag, wins, include_adopted=False):
             and (include_adopted or t.get("origin") != "adopted")]
 
 
+def trusted(folder):
+    """Whether Claude Code trusts <folder> (itself or a parent), so the session doesn't stop at its trust question."""
+    try:
+        projects = json.load(open(os.path.join(HOME, ".claude.json"))).get("projects", {})
+    except (OSError, ValueError):
+        return True  # can't tell: don't warn
+    d = os.path.realpath(folder)
+    while True:
+        if projects.get(d, {}).get("hasTrustDialogAccepted"):
+            return True
+        if d == "/":
+            return False
+        d = os.path.dirname(d)
+
+
 def launch(name, folder, cmd_args):
     """Open a tmux window <name> in <folder> running claude with the given arguments."""
+    if not trusted(folder):
+        print(f"Note: Claude Code doesn't trust {folder} yet, so '{name}' waits at its trust question "
+              f"(the brief and messages wait too). The owner answers it: `dock show {name}`, pick Yes.")
     os.makedirs(RUN, exist_ok=True)
     script = os.path.join(RUN, name + ".sh")
     unset = " ".join(f"-u {v}" for v in CLEAN_ENV)
