@@ -41,6 +41,8 @@ Island {
             }
             // root-agentic: the thread this workspace belongs to (ClaudeWorkspaces), shown as a dot.
             readonly property var thread: Agentic.enabled ? ClaudeWorkspaces.of(modelData.id) : null
+            // The state straight from the threads list, which follows the threads' files; the map is slower.
+            readonly property string threadState: thread ? (Agentic.stateOf(thread.thread) || thread.state || "") : ""
 
             implicitWidth: Math.max(Theme.barHeight - 8, content.implicitWidth + (active ? 22 : 14))
             implicitHeight: Theme.barHeight - 8
@@ -59,7 +61,7 @@ Island {
                 // Each screen counts its own 1–10 (hypr/lua/workspaces.lua): 14 is the side screen's 4.
                 text: "Workspace " + ((ws.modelData.id - 1) % 10 + 1) + "\n"
                       + ws.modelData.toplevels.values.map(t => "· " + (t.title || t.wayland?.appId || "")).join("\n")
-                      + (ws.thread ? "\nThread: " + ws.thread.thread + " (" + ws.thread.state
+                      + (ws.thread ? "\nThread: " + ws.thread.thread + " (" + ws.threadState
                                      + (ws.thread.how === "pin" ? ", pinned" : "") + ")" : "")
             }
 
@@ -93,8 +95,8 @@ Island {
                 visible: ws.thread !== null
                 anchors { top: parent.top; right: parent.right; topMargin: 2; rightMargin: 2 }
                 width: 5; height: 5; radius: 2.5
-                color: !ws.thread ? "transparent" : ws.thread.state === "needs you" ? Theme.gold
-                       : ws.thread.state === "working" ? Theme.fg : Theme.fgDim
+                color: !ws.thread ? "transparent" : ws.threadState === "needs you" ? Theme.gold
+                       : ws.threadState === "working" ? Theme.fg : Theme.fgDim
             }
 
             Row {

@@ -184,7 +184,7 @@ PanelWindow {
             if (ClaudeWorkspaces.herePinned)
                 out.push({ icon: "󰤱", title: "Unpin workspace " + wsNo, subtitle: "Pinned to " + here + "; back to its folders",
                            run: () => ClaudeWorkspaces.unpin() });
-            if (out.length) return out;
+            // The send items still follow: "pin the versions" may be a message.
         }
         if (t !== "") {
             if (here) out.push(sendTo(here, Agentic.stateOf(here)));
