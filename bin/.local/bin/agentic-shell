@@ -497,7 +497,8 @@ def cmd_requests():
         e = {"id": r["id"], "tab": r.get("tab") or "", "name": r.get("name") or "", "tool": tool,
              "at": datetime.fromtimestamp(r.get("at") or 0).strftime("%H:%M"), "cwd": r.get("cwd") or ""}
         if tool == "AskUserQuestion" and isinstance(i, dict) and isinstance(i.get("questions"), list):
-            e.update(kind="ask", title="A question", text="", questions=i["questions"])
+            e.update(kind="ask", title="A question" if len(i["questions"]) == 1 else f"{len(i['questions'])} questions",
+                     text="", questions=i["questions"])
         else:
             title, text = request_text(tool, i)
             if len(text) > MAX_REQUEST:
