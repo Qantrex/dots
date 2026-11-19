@@ -52,9 +52,11 @@ start_main() {
     # The chat restarts by itself after /exit or a crash; everything that matters is in files.
     # ~ comes in through settings, not --add-dir: --add-dir asks for trust in every new session.
     # --remote-control: the same conversation continues in the Claude app on the phone.
+    # --autocompact: Claude Code compacts about 32k below the flag (measured 2026-11-19: flag 100k fired at
+    # 68k, 150k at 117-120k, 240k at 207-208k), so 182000 makes it compact at about 150k.
     local loop='while :; do
         env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
-            AGENTIC_ROLE=main SSH_AUTH_SOCK="'"$SSH_AUTH_SOCK"'" "'"$claude"'" -n main-chat --model opus --effort high --autocompact 150000 --remote-control main-chat \
+            AGENTIC_ROLE=main SSH_AUTH_SOCK="'"$SSH_AUTH_SOCK"'" "'"$claude"'" -n main-chat --model opus --effort high --autocompact 182000 --remote-control main-chat \
             --settings "{\"permissions\":{\"additionalDirectories\":[\"$HOME\"]}}"
         sleep 2
     done'
