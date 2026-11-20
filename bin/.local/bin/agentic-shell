@@ -177,7 +177,16 @@ def question(b):
 INLINE = re.compile(r"(`[^`\n]+`)|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\(([^)\s]+)\)")
 
 
-TABLE_SEP = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
+def table_sep(line):
+    """The line under a table's header: cells of dashes, a colon at an end for the alignment.
+    Cell by cell, so a long line costs its length (one pattern over the whole line took seconds
+    on a wide line of spaces, and the feed with it)."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|"):
+        s = s[:-1]
+    return all(re.fullmatch(r":?-+:?", c.strip()) for c in s.split("|"))
 
 
 def table_cells(line):
@@ -253,7 +262,7 @@ def _rich(text, strong, code, tables):
             lines.append(f'<span style="color:{code}">{html.escape(line, quote=False)}</span>')
             continue
         # A table: a row with a pipe, then the line of dashes with as many cells (GitHub's rule).
-        if tables and "|" in line and n < len(src) and "-" in src[n] and TABLE_SEP.match(src[n]):
+        if tables and "|" in line and n < len(src) and "-" in src[n] and table_sep(src[n]):
             head, sep = table_cells(line), table_cells(src[n])
             if len(head) == len(sep) and (len(head) > 1 or line.strip().startswith("|")):
                 aligns = ["center" if c.startswith(":") and c.endswith(":") else "right" if c.endswith(":") else "left"
@@ -291,13 +300,13 @@ def when(d):
 TAGS = re.compile(r"<(/?)[a-zA-Z][\w-]*(\s[^>]*)?>")
 
 
-PASTED = re.compile(r'\n*</?pasted_content(?: id="[^"]*")?>\n*')
+PASTED = re.compile(r'\n*</?pasted_content id="[^"]*">\n*')
 
 
 def user_text(text):
     """(role, text) for something that arrived as a user message, or None to leave it out."""
     t = text.strip()
-    if "<pasted_content" in t:
+    if "<pasted_content id=" in t:
         # What Claude Code took as pasted (a paste in the terminal, a long text that arrived at
         # once) is still the message: the marks around it go, a line break stays in their place.
         t = PASTED.sub("\n", t).strip()
@@ -320,7 +329,8 @@ def user_text(text):
     if t.startswith("<"):
         # A wrapper Claude Code put around something that wasn't typed (a message from another
         # session, a finished background task): one dim line, tags dropped.
-        return "note", clip(TAGS.sub(" ", t), 240)
+        rest = clip(TAGS.sub(" ", t), 240)
+        return ("note", rest) if rest.strip() else None
     return "user", t
 
 
@@ -822,16 +832,23 @@ def leave_diff(before, after, look_again):
     """(left over, missing, not counted) after the round trip. Missing: what only passed by before
     is not counted. Left over: what only passes by gets looks until it is gone (look_again()
     returns a new snapshot, or None when it has looked long enough); what stays is reported."""
-    lost = set(before) - set(after)
+    def unit(l):   # a unit is the same unit while its job runs
+        return l[:-len(JOB)] if l.endswith(JOB) else l
+
+    lost = {l for l in set(before) - set(after) if unit(l) not in {unit(a) for a in after}}
     skipped = {l for l in lost if passing(l)}
-    left = set(after) - set(before)
+    left = {l for l in set(after) - set(before) if unit(l) not in {unit(b) for b in before}}
     while any(passing(l) for l in left):
         again = look_again()
         if again is None:
             break
+        if not any(l.startswith("layer ") for l in again):
+            continue   # a look that saw no layers at all failed (hyprctl): it proves nothing gone
         gone = {l for l in left if passing(l) and l not in again}
-        skipped |= gone
-        left -= gone
+        # A job that is over and left its unit running: that unit is new and counts.
+        stays = {unit(l) for l in gone if l.endswith(JOB) and unit(l) in again}
+        skipped |= {l for l in gone if unit(l) not in stays}
+        left = (left - gone) | stays
     return sorted(left), sorted(lost - skipped), sorted(skipped)
 
 
