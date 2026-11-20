@@ -742,10 +742,14 @@ def qs_pid():
 def snapshot():
     lines = []
     for row in sh(["systemctl", "--user", "list-units", "--state=active,activating", "--no-legend", "--plain"]).splitlines():
-        unit = row.split()[0] if row.split() else ""
+        cols = row.split()
+        unit = cols[0] if cols else ""
         # Scopes and slices come and go with every window opened; services, timers, sockets and paths don't.
         if unit.endswith((".service", ".timer", ".socket", ".path")) and not unit.startswith("app-"):
-            lines.append(f"unit {unit}")
+            # A timer's job in the middle of its run (a oneshot that is still starting) ends by itself.
+            job = (unit.endswith(".service") and len(cols) > 2 and cols[2] == "activating"
+                   and sh(["systemctl", "--user", "show", unit, "-p", "Type", "--value"]).strip() == "oneshot")
+            lines.append(f"unit {unit}{JOB if job else ''}")
     try:
         layers = json.loads(sh(["hyprctl", "layers", "-j"]) or "{}")
         for mon, m in layers.items():
@@ -791,6 +795,34 @@ def snapshot():
     return sorted(lines)
 
 
+JOB = " (a job, running)"
+# Layers of the shell that show and go on their own in every theme.
+PASSING_LAYERS = ("qs-notifications", "qs-osd")
+
+
+def passing(line):
+    """Something that comes and goes by itself whatever the theme: a notification or the volume
+    display on screen, a timer's job in the middle of its run."""
+    return line.endswith(JOB) or (line.startswith("layer ") and line.split()[-1] in PASSING_LAYERS)
+
+
+def leave_diff(before, after, look_again):
+    """(left over, missing, not counted) after the round trip. Missing: what only passed by before
+    is not counted. Left over: what only passes by gets looks until it is gone (look_again()
+    returns a new snapshot, or None when it has looked long enough); what stays is reported."""
+    lost = set(before) - set(after)
+    skipped = {l for l in lost if passing(l)}
+    left = set(after) - set(before)
+    while any(passing(l) for l in left):
+        again = look_again()
+        if again is None:
+            break
+        gone = {l for l in left if passing(l) and l not in again}
+        skipped |= gone
+        left -= gone
+    return sorted(left), sorted(lost - skipped), sorted(skipped)
+
+
 def stable_snapshot():
     """The shell starts short-lived helpers (a `claude-usage` read, a volume query) all the time.
     Keep only what is there in three looks, half a second apart."""
@@ -819,8 +851,19 @@ def cmd_leave_check():
         print(f"  + {l}")
     for l in sorted(set(before) - set(during)):
         print(f"  - {l}")
-    left = sorted(set(after) - set(before))
-    lost = sorted(set(before) - set(after))
+    looks = [0]
+
+    def look_again():
+        # A notification stays for some seconds, a job for as long as it runs: up to 20 s more.
+        if looks[0] >= 5:
+            return None
+        looks[0] += 1
+        time.sleep(4)
+        return snapshot()
+
+    left, lost, skipped = leave_diff(before, after, look_again)
+    for l in skipped:
+        print(f"not counted, it comes and goes on its own: {l}")
     if not left and not lost:
         print("back on root: nothing left over, nothing missing. OK")
         return
