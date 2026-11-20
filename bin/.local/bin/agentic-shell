@@ -177,10 +177,30 @@ def question(b):
 INLINE = re.compile(r"(`[^`\n]+`)|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\(([^)\s]+)\)")
 
 
+TABLE_SEP = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
+
+
+def table_cells(line):
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    return [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", s)]
+
+
 def rich(text, strong, code):
     """A message as Qt rich text. Everything from the message is escaped first, so the only tags
     in the result are the ones written here (no images, no links to fetch): bold, headings,
-    code. The rest of Markdown stays as typed."""
+    code, tables. The rest of Markdown stays as typed. The feed is the panel's only source, so a
+    table that trips the code costs the tables, never the message."""
+    try:
+        return _rich(text, strong, code, True)
+    except Exception:
+        return _rich(text, strong, code, False)
+
+
+def _rich(text, strong, code, tables):
     def inline(line):
         res, pos = [], 0
         for m in INLINE.finditer(line):
@@ -196,14 +216,58 @@ def rich(text, strong, code):
         res.append(html.escape(line[pos:], quote=False))
         return "".join(res)
 
-    lines, fenced = [], False
-    for line in text.split("\n"):
+    def table(head, aligns, rows):
+        # Qt draws the grid from border="1"; its colour is the muted text colour of the theme.
+        def row(cells, tag):
+            out = []
+            for k in range(len(head)):
+                c = inline(cells[k]) if k < len(cells) else ""
+                if tag == "th":
+                    c = f'<b style="color:{strong}">{c}</b>'
+                out.append(f'<{tag} align="{aligns[k]}">{c}</{tag}>')
+            return "<tr>" + "".join(out) + "</tr>"
+        return (f'<table border="1" cellspacing="0" cellpadding="4" '
+                f'style="border-collapse:collapse;border-color:{code};margin-top:4px;margin-bottom:4px">'
+                + row(head, "th") + "".join(row(r, "td") for r in rows) + "</table>")
+
+    blocks, lines, fenced = [], [], False
+
+    def flush(for_table=False):
+        # Empty lines next to a table would add to the table's own margin.
+        if for_table:
+            while lines and not lines[-1].strip():
+                lines.pop()
+        if lines:
+            blocks.append('<p style="white-space:pre-wrap;margin:0">' + "\n".join(lines) + "</p>")
+        lines.clear()
+
+    src = text.split("\n")
+    n = 0
+    while n < len(src):
+        line = src[n]
+        n += 1
         if line.lstrip().startswith("```"):
             fenced = not fenced
             continue
         if fenced:
             lines.append(f'<span style="color:{code}">{html.escape(line, quote=False)}</span>')
             continue
+        # A table: a row with a pipe, then the line of dashes with as many cells (GitHub's rule).
+        if tables and "|" in line and n < len(src) and "-" in src[n] and TABLE_SEP.match(src[n]):
+            head, sep = table_cells(line), table_cells(src[n])
+            if len(head) == len(sep) and (len(head) > 1 or line.strip().startswith("|")):
+                aligns = ["center" if c.startswith(":") and c.endswith(":") else "right" if c.endswith(":") else "left"
+                          for c in sep]
+                n += 1
+                rows = []
+                while n < len(src) and src[n].strip() and "|" in src[n] and not src[n].lstrip().startswith("```"):
+                    rows.append(table_cells(src[n]))
+                    n += 1
+                flush(True)
+                blocks.append(table(head, aligns, rows))
+                while n < len(src) and not src[n].strip():
+                    n += 1
+                continue
         m = re.match(r"\s{0,3}#{1,6}\s+(.*)", line)
         if m:
             lines.append(f'<b style="color:{strong}">{inline(m.group(1))}</b>')
@@ -213,7 +277,8 @@ def rich(text, strong, code):
             lines.append(f"{m.group(1)}• {inline(m.group(2))}")
             continue
         lines.append(inline(line))
-    return '<p style="white-space:pre-wrap;margin:0">' + "\n".join(lines) + "</p>"
+    flush()
+    return "".join(blocks) or '<p style="white-space:pre-wrap;margin:0"></p>'
 
 
 def when(d):
