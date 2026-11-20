@@ -842,9 +842,9 @@ def leave_diff(before, after, look_again):
         again = look_again()
         if again is None:
             break
-        if not any(l.startswith("layer ") for l in again):
-            continue   # a look that saw no layers at all failed (hyprctl): it proves nothing gone
-        gone = {l for l in left if passing(l) and l not in again}
+        # A look that saw no layers (hyprctl failed) or no units (systemctl failed) proves nothing gone.
+        seen = {kind for kind in ("layer ", "unit ") if any(l.startswith(kind) and l != "layer ?" for l in again)}
+        gone = {l for l in left if passing(l) and l not in again and l.split()[0] + " " in seen}
         # A job that is over and left its unit running: that unit is new and counts.
         stays = {unit(l) for l in gone if l.endswith(JOB) and unit(l) in again}
         skipped |= {l for l in gone if unit(l) not in stays}
