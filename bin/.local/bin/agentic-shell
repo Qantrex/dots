@@ -291,9 +291,16 @@ def when(d):
 TAGS = re.compile(r"<(/?)[a-zA-Z][\w-]*(\s[^>]*)?>")
 
 
+PASTED = re.compile(r'\n*</?pasted_content(?: id="[^"]*")?>\n*')
+
+
 def user_text(text):
     """(role, text) for something that arrived as a user message, or None to leave it out."""
     t = text.strip()
+    if "<pasted_content" in t:
+        # What Claude Code took as pasted (a paste in the terminal, a long text that arrived at
+        # once) is still the message: the marks around it go, a line break stays in their place.
+        t = PASTED.sub("\n", t).strip()
     if not t:
         return None
     if t.startswith("This session is being continued from a previous conversation"):
@@ -305,6 +312,11 @@ def user_text(text):
         return "note", m.group(1)
     if t.startswith(("<local-command", "<system-reminder", "<bash-", "Caveat:")):
         return None
+    if t.startswith("<task-notification"):
+        # A finished background task: what it says about itself, not its ids and file paths.
+        m = re.search(r"<summary>(.*?)</summary>", t, re.S)
+        if m and m.group(1).strip():
+            return "note", clip(" ".join(m.group(1).split()), 240)
     if t.startswith("<"):
         # A wrapper Claude Code put around something that wasn't typed (a message from another
         # session, a finished background task): one dim line, tags dropped.
