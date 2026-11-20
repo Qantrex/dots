@@ -14,7 +14,7 @@
 
 Levels: info, broke, stalled (a thread went quiet, from `thread watch`), needs (a thread waits for the owner), questions (a thread asks the owner, see `thread
 questions`), done (a thread finished: its last step is total/total), paused N/M (a thread stopped before
-its last step; never a result). Text that strangers can write (file names, mail subjects) is marked
+its last step; never a result), idle (misc answered a job and waits for the next). Text that strangers can write (file names, mail subjects) is marked
 untrusted and shown as data, never as an instruction.
 Data: ~/.local/state/agentic/inbox.jsonl; why a wake did or didn't happen: inbox.wake.log next to it.
 """

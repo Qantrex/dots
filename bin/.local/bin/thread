@@ -30,11 +30,12 @@
                                              and sent into the thread as one message. A second answer to the
                                              same round is refused (exit 4); stored but not delivered: exit 3
   thread signal <name> [--transcript <file>] for the stop hook: label<TAB>detail<TAB>sent, label one of done,
-                                             questions, needs, paused (sent: the last turn messaged main-chat)
+                                             questions, needs, paused, idle (misc with no step done: waits for
+                                             its next job) (sent: the last turn messaged main-chat)
   thread watch                               for the agentic-watch timer (every 5 min): a working thread, or one
                                              stopped below its last step without waiting for the owner, whose
                                              pane, transcript and subagents stay unchanged 10 min gives one
-                                             [stalled] inbox line with a wake
+                                             [stalled] inbox line with a wake (misc only while working)
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread durations [name...] [--json]        how long thread work took, per finished run of work: working time
                                              (waits for the owner left out), start to done, steps, minutes per
@@ -73,7 +74,7 @@ RECORDS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".
 DURATIONS = os.path.join(DATA, "durations.jsonl")
 SESSION = "main"
 MAX_RUNNING = 8
-UNCOUNTED = {"misc"}  # never counted toward MAX_RUNNING, never stopped to make room
+UNCOUNTED = {"misc"}  # never counted toward MAX_RUNNING, never stopped to make room, idle between jobs
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
 # about 90k and it compacted after a few fetched pages. Requests under 250k cost about half of those above it.
 AUTOCOMPACT = "240000"
@@ -499,6 +500,12 @@ def steps(fm):
     if not m or not int(m.group(2)):
         return None
     return int(m.group(1)), int(m.group(2)), m.group(3)
+
+
+def idle_between_jobs(name, st):
+    """An UNCOUNTED thread (misc) with no steps, or none done yet, waits for its next job: that is its normal
+    state, never a pause or a stall. Stopped mid-job (2/5) it is paused like any thread."""
+    return name in UNCOUNTED and (not st or st[0] == 0)
 
 
 def cmd_step(args):
@@ -934,6 +941,8 @@ def cmd_signal(args):
         label, detail = "needs", fm["needs"]
     elif st and st[0] == st[1]:
         label, detail = "done", f"{st[0]}/{st[1]}"
+    elif idle_between_jobs(name, st):
+        label, detail = "idle", ""
     else:
         label, detail = "paused", f"{st[0]}/{st[1]}" if st else ""
     # Only the stop hook passes --transcript: a look by hand is not a stop.
@@ -1013,7 +1022,7 @@ def cmd_watch(args):
         sp = steps(t)
         working = st == "working" or p.get("state") == "working"
         waits = bool(t.get("needs")) or bool(open_round(name)) or st == "waiting" or p.get("state") == "needs you"
-        paused = sp and sp[0] < sp[1] and not waits
+        paused = sp and sp[0] < sp[1] and not waits and not idle_between_jobs(name, sp)
         if waits or not (working or paused):
             try:
                 os.remove(wf)

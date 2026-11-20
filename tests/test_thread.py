@@ -4,7 +4,7 @@
 Run: python3 tests/test_thread.py
 
 Everything runs in a throwaway HOME and XDG folders. Only commands that never touch tmux are used (step,
-signal, durations), so the real threads and the main chat are never typed into.
+signal, durations), or `watch` with tmux, `claude agents` and `inbox` stubbed, so the real threads and the main chat are never typed into.
 """
 import json
 import os
@@ -126,9 +126,85 @@ class LogTest(unittest.TestCase):
         stops = [(x["label"], x["detail"]) for x in self.e.logged() if x["event"] == "stop"]
         self.assertEqual(stops, [("paused", "1/3"), ("done", "3/3")])
 
+    def test_misc_between_jobs_is_idle_not_paused(self):
+        self.e.state("misc", "s-misc")
+        self.assertEqual(self.e.run("signal", "misc"), "idle\t\t\n")           # no steps yet
+        self.e.run("step", "misc", "0/1", "waiting for the first job")
+        self.assertEqual(self.e.run("signal", "misc"), "idle\t\t\n")
+        self.e.run("step", "misc", "2/5", "testing")
+        self.assertEqual(self.e.run("signal", "misc"), "paused\t2/5\t\n")      # stopped mid-job: a pause
+        self.e.run("step", "misc", "5/5", "done")
+        self.assertEqual(self.e.run("signal", "misc"), "done\t5/5\t\n")
+        self.e.run("step", "demo", "0/3", "reading")
+        self.assertEqual(self.e.run("signal", "demo"), "paused\t0/3\t\n")      # other threads unchanged
+
     def test_unwritable_log_never_breaks_a_step(self):
         os.makedirs(self.e.log)                                   # a folder where the file should be
         self.assertIn("demo: 1/3", self.e.run("step", "demo", "1/3"))
+
+
+class WatchTest(unittest.TestCase):
+    """`thread watch` with tmux, `claude agents` and `inbox` replaced by stubs in the throwaway home."""
+
+    def setUp(self):
+        self.e = Env()
+        self.bin = os.path.join(self.e.dir, "stubbin")
+        local = os.path.join(self.e.dir, ".local", "bin")
+        os.makedirs(self.bin)
+        os.makedirs(local)
+        self.agents = os.path.join(self.e.dir, "agents.json")
+        self.added = os.path.join(self.e.dir, "inbox-added")
+        self.wins = os.path.join(self.e.dir, "windows")
+        stubs = {
+            os.path.join(self.bin, "tmux"): f'[ "$1" = list-windows ] && cat {self.wins}; '
+                                            '[ "$1" = capture-pane ] && echo "nothing happens"; exit 0',
+            os.path.join(local, "claude"): f"cat {self.agents}",
+            os.path.join(local, "inbox"): f'echo "$*" >> {self.added}',
+        }
+        for path, body in stubs.items():
+            with open(path, "w") as f:
+                f.write("#!/bin/sh\n" + body + "\n")
+            os.chmod(path, 0o755)
+        self.e.env["PATH"] = self.bin + os.pathsep + self.e.env["PATH"]
+
+    def tearDown(self):
+        self.e.close()
+
+    def threads(self, rows):
+        """rows: (name, progress, claude state); every one has its own tmux window."""
+        with open(self.wins, "w") as f:
+            f.writelines(f"{n}\t{i + 2}\t{100 + i}\t%{i}\t0\n" for i, (n, _, _) in enumerate(rows))
+        with open(self.agents, "w") as f:
+            json.dump([{"sessionId": "s-" + n, "state": st} for n, _, st in rows], f)
+        for n, prog, _ in rows:
+            self.e.state(n, "s-" + n, progress=prog)
+
+    def stalled_after_ten_minutes(self):
+        self.e.run("watch")
+        watch = os.path.join(self.e.dir, "state", "agentic", "watch")
+        for f in os.listdir(watch):                                  # pretend the screens stayed 11 min
+            with open(os.path.join(watch, f)) as fh:
+                w = json.load(fh)
+            w["fp_at"] -= 660
+            with open(os.path.join(watch, f), "w") as fh:
+                json.dump(w, fh)
+        self.e.run("watch")
+        try:
+            with open(self.added) as fh:
+                return sorted(l.split("'")[1] for l in fh)
+        except OSError:
+            return []
+
+    def test_misc_idle_never_stalls_but_stuck_work_does(self):
+        self.threads([("misc", "0/1 waiting for the first job", "idle"), ("demo", "0/3 reading", "idle")])
+        self.assertEqual(self.stalled_after_ten_minutes(), ["demo"])
+
+    def test_misc_stuck_working_or_stopped_mid_job_still_stalls(self):
+        self.threads([("misc", "0/1 waiting", "busy")])
+        self.assertEqual(self.stalled_after_ten_minutes(), ["misc"])
+        os.remove(self.added)
+        self.threads([("misc", "2/5 testing", "idle")])
+        self.assertEqual(self.stalled_after_ten_minutes(), ["misc"])
 
 
 class DurationsTest(unittest.TestCase):
