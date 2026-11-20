@@ -35,7 +35,8 @@
   thread watch                               for the agentic-watch timer (every 5 min): a working thread, or one
                                              stopped below its last step without waiting for the owner, whose
                                              pane, transcript and subagents stay unchanged 10 min gives one
-                                             [stalled] inbox line with a wake (misc only while working)
+                                             [stalled] inbox line with a wake (misc only while working; never
+                                             while background shells or agents run for it)
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread durations [name...] [--json]        how long thread work took, per finished run of work: working time
                                              (waits for the owner left out), start to done, steps, minutes per
@@ -998,11 +999,23 @@ def newest_mtime(path):
     return best
 
 
+# The footer counter Claude Code shows while background work runs (same pattern as the stop hook).
+BACKGROUND = re.compile(r"[0-9]+ background agents?|[0-9]+ shells?")
+
+
+def in_background(screen, p):
+    """Background work runs for the thread (a shell or agent in its pane's footer), or its stop said it waits on
+    some (the stop hook's progress "in the background: ..."). It continues by itself when that work reports."""
+    return bool(BACKGROUND.search("\n".join(screen.splitlines()[-8:]))) \
+        or str(p.get("detail", "")).startswith("in the background")
+
+
 def cmd_watch(args):
     """Run by a user timer every 5 minutes (started by `agentic on`). A thread that is working, or that stopped
     below its last step without waiting for the owner, is quiet when its pane (digits and spinners aside), its
     transcript and its session folder (subagents) all stayed the same for 10 minutes. Each quiet spell gives
-    one inbox line with a wake. Code only, no Claude call."""
+    one inbox line with a wake. A thread waiting on its background work (a render queue, a watcher) waits like
+    one waiting for the owner, and is never quiet. Code only, no Claude call."""
     if os.path.exists(os.path.join(os.path.dirname(PROGRESS), "off")):
         return
     os.makedirs(WATCH, exist_ok=True)
@@ -1029,9 +1042,15 @@ def cmd_watch(args):
             except OSError:
                 pass
             continue
-        seen.add(name)
         screen = subprocess.run(["tmux", "capture-pane", "-p", "-t", wins[name][2]], capture_output=True,
                                 text=True).stdout
+        if in_background(screen, p):
+            try:
+                os.remove(wf)
+            except OSError:
+                pass
+            continue
+        seen.add(name)
         # The spinner and its timer change while nothing happens; leave them out of the fingerprint.
         norm = re.sub(r"[0-9]+|[✻✽✶✳✢·*●◐◑◒◓⏺]", "", screen)
         fp = hashlib.sha1(norm.encode()).hexdigest()

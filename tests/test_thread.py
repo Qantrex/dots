@@ -156,8 +156,11 @@ class WatchTest(unittest.TestCase):
         self.added = os.path.join(self.e.dir, "inbox-added")
         self.wins = os.path.join(self.e.dir, "windows")
         stubs = {
-            os.path.join(self.bin, "tmux"): f'[ "$1" = list-windows ] && cat {self.wins}; '
-                                            '[ "$1" = capture-pane ] && echo "nothing happens"; exit 0',
+            # capture-pane -p -t %<n>: the screen file of pane n if the test wrote one, else a still screen
+            os.path.join(self.bin, "tmux"): f'[ "$1" = list-windows ] && cat {self.wins}\n'
+                                            f'[ "$1" = capture-pane ] && screen={self.e.dir}/screen-"${{4#%}}" && '
+                                            'if [ -f "$screen" ]; then cat "$screen"; else echo "nothing happens"; fi\n'
+                                            'exit 0',
             os.path.join(local, "claude"): f"cat {self.agents}",
             os.path.join(local, "inbox"): f'echo "$*" >> {self.added}',
         }
@@ -198,6 +201,21 @@ class WatchTest(unittest.TestCase):
     def test_misc_idle_never_stalls_but_stuck_work_does(self):
         self.threads([("misc", "0/1 waiting for the first job", "idle"), ("demo", "0/3 reading", "idle")])
         self.assertEqual(self.stalled_after_ten_minutes(), ["demo"])
+
+    def test_background_work_is_waiting_not_stalled(self):
+        # cabinet-renders on 2026-11-20: its turn ended with a render-queue watcher running in a background shell
+        rows = [("renders", "4/6 queued", "idle"), ("agents", "2/5 sweeping", "busy"), ("said", "1/3 x", "idle"),
+                ("stuck", "1/3 x", "busy")]
+        self.threads(rows)
+        with open(os.path.join(self.e.dir, "screen-0"), "w") as f:
+            f.write("✻ Worked for 43s · 1 shell still running\n❯\n  ⏵⏵ auto mode on · 1 shell · ↓ to manage\n")
+        with open(os.path.join(self.e.dir, "screen-1"), "w") as f:
+            f.write("✻ Sweeping\n❯\n  ⏵⏵ auto mode on · 2 background agents\n")
+        progress = os.path.join(self.e.dir, "state", "agentic", "progress")
+        os.makedirs(progress)
+        with open(os.path.join(progress, "said.json"), "w") as f:
+            json.dump({"name": "said", "state": "working", "detail": "in the background: 1 shell"}, f)
+        self.assertEqual(self.stalled_after_ten_minutes(), ["stuck"])
 
     def test_misc_stuck_working_or_stopped_mid_job_still_stalls(self):
         self.threads([("misc", "0/1 waiting", "busy")])
