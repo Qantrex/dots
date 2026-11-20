@@ -386,7 +386,8 @@ def cmd_start(args):
         sys.exit(f"Thread '{name}' already runs (dock show {name}).")
     if name in wins or name == "main":
         sys.exit(f"A tmux window called '{name}' already exists; pick another name.")
-    make_room(ag, wins)
+    if name not in UNCOUNTED:
+        make_room(ag, wins)
     sid = str(uuid.uuid4())
     fm = {"name": name, "folder": folder, "model": model, "status": "running", "session": sid,
           "started": datetime.now().strftime("%Y-%m-%d %H:%M")}
@@ -435,7 +436,8 @@ def cmd_resume(args):
     if live_state(fm, ag, wins) not in ("stopped", "left open"):
         print(f"'{name}' is running: dock show {name}")
         return
-    make_room(ag, wins)
+    if name not in UNCOUNTED:
+        make_room(ag, wins)
     folder = fm.get("folder") or HOME
     if not os.path.isdir(folder):
         folder = os.path.join(DATA, "..", "claude-hub")
