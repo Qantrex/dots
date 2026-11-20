@@ -73,6 +73,7 @@ RECORDS = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".
 DURATIONS = os.path.join(DATA, "durations.jsonl")
 SESSION = "main"
 MAX_RUNNING = 8
+UNCOUNTED = {"misc"}  # never counted toward MAX_RUNNING, never stopped to make room
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
 # about 90k and it compacted after a few fetched pages. Requests under 250k cost about half of those above it.
 AUTOCOMPACT = "240000"
@@ -200,9 +201,10 @@ def live_state(fm, ag, wins):
 
 def running(ag, wins, include_adopted=False):
     """Threads that run now. Adopted sessions (my own from before) don't count toward the limit and are never
-    stopped automatically, unless include_adopted."""
+    stopped automatically, unless include_adopted. The 'misc' thread (main chat's own small work) doesn't
+    count either (owner, 2026-11-20)."""
     return [t for t in all_threads() if live_state(t, ag, wins) not in ("stopped", "left open")
-            and (include_adopted or t.get("origin") != "adopted")]
+            and (include_adopted or (t.get("origin") != "adopted" and t["name"] not in UNCOUNTED))]
 
 
 def trust(folder):
@@ -1418,8 +1420,9 @@ def main():
         if rest and rest[0] == "--all":
             # Only threads started by `thread`; adopted sessions are mine and stay.
             ag, wins = agents(), windows()
-            for t in running(ag, wins):
-                stop(t["name"])
+            for t in running(ag, wins, include_adopted=True):
+                if t.get("origin") != "adopted":
+                    stop(t["name"])
         elif rest:
             stop(slug(rest[0]))
         else:
