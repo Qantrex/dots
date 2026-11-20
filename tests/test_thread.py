@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Tests for bin/.local/bin/thread: the durations log, `thread durations` and the backfill.
+"""Tests for bin/.local/bin/thread: the durations log, `thread durations` and the backfill, `thread send`.
 
 Run: python3 tests/test_thread.py
 
 Everything runs in a throwaway HOME and XDG folders. Only commands that never touch tmux are used (step,
-signal, durations), or `watch` with tmux, `claude agents` and `inbox` stubbed, so the real threads and the main chat are never typed into.
+signal, durations), or `watch` and `send` with tmux, `claude agents` and `inbox` stubbed, so the real threads and
+the main chat are never typed into.
 """
 import json
 import os
@@ -360,6 +361,112 @@ class BackfillTest(unittest.TestCase):
         self.assertEqual(len(d["open"]), 1)
         self.assertFalse(d["open"][0]["partial"])
         self.assertEqual(d["open"][0]["start"], T0)
+
+
+# A stand-in tmux for `thread send`: the pane is a file with what is typed in its input line.
+# NOSHOW: the screen never shows the typed text. DRAFT: something is typed there already.
+# FAIL_AT=n: the n-th send-keys call fails.
+SEND_TMUX = r'''#!/usr/bin/env python3
+import json, os, sys
+d = os.environ["HOME"]; st = os.path.join(d, "pane.json")
+s = json.load(open(st)) if os.path.exists(st) else {"typed": "", "sent": [], "keys": 0, "pieces": []}
+a = sys.argv[1:]; rc = 0
+if a[0] == "list-windows":
+    print("demo\t2\t100\t%0\t0")
+elif a[0] == "capture-pane":
+    shown = "" if os.environ.get("NOSHOW") else s["typed"].split("\n")[0]
+    if os.environ.get("DRAFT") and not s["keys"]:
+        shown = "a draft"
+    print("some output\n\u276f " + shown + "\n  status line")
+elif a[0] == "send-keys":
+    s["keys"] += 1
+    if str(s["keys"]) == os.environ.get("FAIL_AT"):
+        rc = 1
+    elif "-l" in a:
+        s["typed"] += a[-1]; s["pieces"].append(len(a[-1]))
+    elif a[-1] == "Enter":
+        s["sent"].append(s["typed"]); s["typed"] = ""
+json.dump(s, open(st, "w")); sys.exit(rc)
+'''
+
+
+class SendTest(unittest.TestCase):
+    """`thread send` against the stand-in tmux: what is typed, in which pieces, and what each failure leaves."""
+
+    def setUp(self):
+        self.e = Env()
+        self.e.state("demo", "s-demo")
+        stubbin = os.path.join(self.e.dir, "stubbin")
+        os.makedirs(stubbin)
+        with open(os.path.join(stubbin, "tmux"), "w") as f:
+            f.write(SEND_TMUX)
+        os.chmod(os.path.join(stubbin, "tmux"), 0o755)
+        self.e.env["PATH"] = stubbin + os.pathsep + self.e.env["PATH"]
+
+    def tearDown(self):
+        self.e.close()
+
+    def send(self, text, **env):
+        """(exit code, the pane afterwards, stderr) of one `thread send demo <text>` on a fresh pane."""
+        pane = os.path.join(self.e.dir, "pane.json")
+        if os.path.exists(pane):
+            os.remove(pane)
+        r = subprocess.run([sys.executable, THREAD, "send", "demo", text], capture_output=True, text=True,
+                           env=dict(self.e.env, **{k: str(v) for k, v in env.items()}))
+        try:
+            with open(pane) as f:
+                state = json.load(f)
+        except OSError:
+            state = {"typed": "", "sent": [], "keys": 0, "pieces": []}
+        return r.returncode, state, r.stderr
+
+    def test_a_short_line_is_one_piece_then_enter(self):
+        code, p, _ = self.send("  hello   there ")
+        self.assertEqual((code, p["sent"], p["pieces"], p["keys"]), (0, ["hello there"], [11], 2))
+        code, p, _ = self.send("-x starts with a dash")
+        self.assertEqual((code, p["sent"]), (0, ["-x starts with a dash"]))
+        code, p, _ = self.send("x" * 300)
+        self.assertEqual((code, p["pieces"]), (0, [300]))
+
+    def test_a_long_text_is_typed_in_pieces_and_arrives_whole(self):
+        long = "".join(chr(97 + i % 26) for i in range(2000))
+        code, p, _ = self.send(long)
+        self.assertEqual((code, p["sent"], p["pieces"]), (0, [long], [300] * 6 + [200]))
+        code, p, _ = self.send("x" * 301)
+        self.assertEqual((code, p["pieces"], p["sent"]), (0, [300, 1], ["x" * 301]))
+        umlauts = "äöü € " * 150
+        code, p, _ = self.send(umlauts)
+        self.assertEqual((code, p["sent"]), (0, [" ".join(umlauts.split())]))
+
+    def test_several_lines_stay_one_message_and_no_key_but_the_line_feed_gets_through(self):
+        code, p, _ = self.send("\n\none\r\ntwo\rthree\n  four\n\n")
+        self.assertEqual((code, p["sent"]), (0, ["one\ntwo\nthree\n  four"]))   # a carriage return would be Enter
+        code, p, _ = self.send("a\tb\x1bc\x03d\x7fe\nf")
+        self.assertEqual((code, p["sent"]), (0, ["a    bcde\nf"]))                # a tab completes, an escape clears
+
+    def test_a_draft_or_dialog_is_never_typed_over(self):
+        code, p, err = self.send("hello", DRAFT=1)
+        self.assertEqual((code, p["keys"]), (3, 0))
+        self.assertIn("has text typed already", err)
+
+    def test_a_failure_says_whether_the_text_is_in_the_input(self):
+        code, p, _ = self.send("hello", FAIL_AT=1)                  # nothing typed: a plain failure
+        self.assertEqual((code, p["typed"], p["sent"]), (1, "", []))
+        long = "y" * 1000
+        code, p, err = self.send(long, FAIL_AT=3)                   # half typed
+        self.assertEqual((code, p["typed"], p["sent"]), (4, long[:600], []))
+        self.assertIn("typed in the input of 'demo' but was not sent", err)
+        code, p, _ = self.send("hello", FAIL_AT=2)                  # typed, Enter failed
+        self.assertEqual((code, p["typed"], p["sent"]), (4, "hello", []))
+        code, p, _ = self.send(long, NOSHOW=1)                      # typed, never showed: no blind Enter
+        self.assertEqual((code, p["typed"], p["sent"]), (4, long, []))
+
+    def test_only_a_running_session_gets_text(self):
+        code, p, err = self.send("hello")
+        self.assertEqual(code, 0)
+        r = subprocess.run([sys.executable, THREAD, "send", "nosuch", "hello"], capture_output=True, text=True,
+                           env=self.e.env)
+        self.assertEqual(r.returncode, 2)
 
 
 if __name__ == "__main__":
