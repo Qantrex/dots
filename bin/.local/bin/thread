@@ -10,8 +10,9 @@
                                              that a shutdown or crash left open (what `cr` did)
   thread model <name> <model>                switch the model (only while it's idle)
   thread send <name|main> <text...>          type a message into a thread or the main chat and send it, as if
-                                             typed there; refused (exit 3) while a question or dialog is open
-                                             or something is already typed. The shell's agent panel uses this.
+                                             typed there (several lines stay several lines, one message);
+                                             refused (exit 3) while a question or dialog is open or something
+                                             is already typed. The shell's agent panel uses this.
   thread progress [--brief]                  what each running thread is doing right now: state, how long, steps
                                              done (4/7, 57 %), last action, its share of the weekly limit
   thread step [<name>] <done>/<total> [next] a thread records how far it is (inside a thread the name comes
@@ -339,8 +340,7 @@ def cmd_send(args):
     if len(args) < 2:
         sys.exit("thread send <name|main> <text...>")
     name = "main" if args[0] == "main" else slug(args[0])
-    # One line: a raw newline would send the first half early.
-    text = " ".join(" ".join(args[1:]).split())
+    text = message(" ".join(args[1:]))
     if not text:
         sys.exit("thread send: nothing to send")
     # Only Claude sessions: the main chat and threads with a state file, never a shell window.
@@ -350,18 +350,50 @@ def cmd_send(args):
     sys.exit(send_text(name, text, quiet=False))
 
 
+def message(raw):
+    """What `thread send` sends for the text it was given. One line: its words with single spaces,
+    as always. Several lines: the lines as written (indents kept), without empty lines around them."""
+    lines = [l.rstrip() for l in raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines) if len(lines) > 1 else " ".join(raw.split())
+
+
 def send_text(name, text, quiet=True):
-    """Type one line into the main chat's or a thread's input and press Enter. 0 sent, 2 no such session,
+    """Put a text into the main chat's or a thread's input and press Enter. 0 sent, 2 no such session,
     3 a question, dialog or draft is open there, 1 tmux failed."""
     pane = target(name)
     if not pane:
         return 2
+    return send_to(pane, text, name, quiet)
+
+
+def send_to(pane, text, name="", quiet=True):
     if not empty_prompt(pane):
         if not quiet:
             print(f"thread send: '{name}' is asking something or has text typed already; answer it in its terminal (dock term {name})", file=sys.stderr)
         return 3
+    if "\n" in text:
+        # Several lines: typed line by line, with a line feed (Ctrl+J, a new line in Claude Code)
+        # in front of each but the first. Never a carriage return, which is Enter and would send
+        # the first half early. Not a tmux paste and not one burst of keys: Claude Code takes
+        # both as pasted text and marks the message as pasted from somewhere else (checked
+        # 2026-11-20: one burst of 1000 bytes is a paste, 80 lines typed one by one are not).
+        for n, line in enumerate(text.split("\n")):
+            if subprocess.run(["tmux", "send-keys", "-t", pane, "-l", "--", ("\n" if n else "") + line]).returncode:
+                return 1
+            time.sleep(0.02)
+        # A long text takes a moment to show; Enter before that would send nothing.
+        for _ in range(20):
+            time.sleep(0.15)
+            if not empty_prompt(pane):
+                break
+        else:
+            return 1
     # -l: literal keys, --: a text starting with a dash is still text.
-    if subprocess.run(["tmux", "send-keys", "-t", pane, "-l", "--", text]).returncode:
+    elif subprocess.run(["tmux", "send-keys", "-t", pane, "-l", "--", text]).returncode:
         return 1
     time.sleep(0.15)
     if subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"]).returncode:
