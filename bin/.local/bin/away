@@ -16,6 +16,10 @@
 # reads them back as they're used. Never while a Steam game runs. Log:
 # ~/.local/state/away.log. Needs the apps in their own scopes (hypr apps.lua).
 #
+# The lock is hyprlock until the Quickshell lock of theme root-agentic has passed its check on this PC
+# (the check writes ~/.local/state/agentic/lock-checked, agentic-os.md stage 3). After that it is
+# agentic-lock: the Quickshell lock in root-agentic, hyprlock in every other theme and as its fallback.
+#
 # Quiet mode needs the root helper once: sudo ~/.config/scripts/setup-pc-quiet.sh
 # Without it, away still locks and turns the screens off.
 #
@@ -56,8 +60,17 @@ reclaim_apps() {
     echo "$(date '+%F %T') pushed to swap: ${moved[*]}" >>"$LOG"
 }
 
+readonly QSLOCK_RE="^qs -p $HOME/.config/quickshell/lock\$"
+locker=hyprlock
+[[ -e ${XDG_STATE_HOME:-$HOME/.local/state}/agentic/lock-checked && -x $HOME/.local/bin/agentic-lock ]] &&
+    locker=$HOME/.local/bin/agentic-lock
+# Either lock, whoever started it. When the Quickshell lock dies, hyprlock takes the session over
+# (agentic-lock), so a lock found here is followed by "is anything locking", never by one pid.
+any_lock() { pidof hyprlock >/dev/null || pgrep -u "$UID" -f "$QSLOCK_RE" >/dev/null; }
+still_locked() { if ((started)); then kill -0 "$lock" 2>/dev/null; else any_lock; fi; }
+
 reclaimer() {   # runs while the lock is up
-    while kill -0 "$lock" 2>/dev/null; do
+    while still_locked; do
         big_model_loaded && ! pgrep -x reaper >/dev/null && reclaim_apps
         sleep 120
     done
@@ -72,31 +85,34 @@ flock -n 9 || exit 0
 # Already locked (lock before sleep, or another lock): attach to that lock, so
 # quiet mode and the reclaimer still run until it ends. Before 2026-11-06 away
 # exited here, so after a wake from sleep the idle lock never went quiet.
-lock=$(pidof -s hyprlock || true)
+lock=""
 started=0
+found=0; any_lock && found=1
 
 quiet=0
 if [[ -x /usr/local/sbin/pc-quiet ]] && ! { ((idle)) && pgrep -x reaper >/dev/null; }; then
     sudo -n /usr/local/sbin/pc-quiet on && quiet=1
 fi
 
-if [[ -z $lock ]]; then
-    hyprlock &
+if ((!found)); then
+    "$locker" &
     lock=$!
     started=1
 fi
-reclaimer &
+# Without the flock: its `sleep` outlives the kill below by up to two minutes, and with fd 9 open it kept
+# the lock, so an `away` within two minutes of an unlock did nothing (found 2026-11-20).
+reclaimer 9>&- &
 rec=$!
 
 if ((started && ! idle)); then
-    sleep 1   # let hyprlock take the screens first
+    sleep 1   # let the lock take the screens first
     hyprctl dispatch 'hl.dsp.dpms({ action = "off" })' >/dev/null
 fi
 
 if ((started)); then
     wait "$lock"
 else
-    while kill -0 "$lock" 2>/dev/null; do sleep 3; done   # not our child: poll
+    while still_locked; do sleep 3; done   # not our child: poll
 fi
 kill "$rec" 2>/dev/null
 

@@ -13,7 +13,11 @@
 # after 15 idle minutes, even in the middle of an Ollama request. On the PC:
 #   5:00   `away --idle`              lock + quiet mode (pc-quiet)
 #   5:30   screens off
-# The PC keeps hyprlock (`away` looks for it) until it gets theme root-agentic (agentic-os.md, stage 3).
+# The PC keeps hyprlock until the Quickshell lock has passed its check there: the check writes
+# ~/.local/state/agentic/lock-checked, and from then on `away` and the lock event use agentic-lock
+# (agentic-os.md, stage 3). `away` runs in the background like the laptop's lock: it waits for the unlock,
+# and with -w that held swayidle up, so the screens stayed lit for as long as the PC was locked (seen on
+# 2026-11-20: locked for three hours, both screens on).
 #
 # Anything that inhibits idle -- a video playing in Firefox or mpv -- holds all
 # of it off. Suspending for any reason (lid, idle, menu) locks first.
@@ -45,12 +49,17 @@ dpms() { printf "hyprctl dispatch 'hl.dsp.dpms({ action = \"%s\" })' >/dev/null"
 case "${1:-start}" in
     start)
         if [[ $(cat /etc/hostname 2>/dev/null) == bauarch-pc ]]; then
+            pc_lock='pidof hyprlock >/dev/null || hyprlock &'
+            pc_sleep='pidof hyprlock >/dev/null || hyprlock & sleep 1'
+            if [[ -e ${XDG_STATE_HOME:-$HOME/.local/state}/agentic/lock-checked ]]; then
+                pc_lock="$LOCK &"; pc_sleep="$0 before-sleep"
+            fi
             exec swayidle -w \
-                timeout 300 "$HOME/.local/bin/away --idle" \
+                timeout 300 "$HOME/.local/bin/away --idle &" \
                 timeout 330 "$(dpms off)" resume "$(dpms on)" \
-                before-sleep 'loginctl lock-session; sleep 1' \
+                before-sleep "$pc_sleep" \
                 after-resume "$(dpms on)" \
-                lock 'pidof hyprlock >/dev/null || hyprlock'
+                lock "$pc_lock"
         fi
         exec swayidle -w \
             timeout 270 'brightnessctl -q -s set 10%' resume 'brightnessctl -q -r' \
