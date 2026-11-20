@@ -365,7 +365,8 @@ class BackfillTest(unittest.TestCase):
 
 # A stand-in tmux for `thread send`: the pane is a file with what is typed in its input line.
 # NOSHOW: the screen never shows the typed text. DRAFT: something is typed there already.
-# FAIL_AT=n: the n-th send-keys call fails.
+# FAIL_AT=n: the n-th send-keys call fails. DIALOG_AFTER=n: from the n-th send-keys call on a dialog
+# is on the screen instead of the input.
 SEND_TMUX = r'''#!/usr/bin/env python3
 import json, os, sys
 d = os.environ["HOME"]; st = os.path.join(d, "pane.json")
@@ -374,10 +375,13 @@ a = sys.argv[1:]; rc = 0
 if a[0] == "list-windows":
     print("demo\t2\t100\t%0\t0")
 elif a[0] == "capture-pane":
-    shown = "" if os.environ.get("NOSHOW") else s["typed"].split("\n")[0]
+    shown = "" if os.environ.get("NOSHOW") else s["typed"].replace("\n", "\n  ")
     if os.environ.get("DRAFT") and not s["keys"]:
         shown = "a draft"
-    print("some output\n\u276f " + shown + "\n  status line")
+    if s["keys"] >= int(os.environ.get("DIALOG_AFTER") or 10**9):
+        print("Do you want to proceed?\n\u276f 1. Yes\n  2. No\n\nEsc to cancel")
+    else:
+        print("some output\n\u276f " + shown + "\n  status line")
 elif a[0] == "send-keys":
     s["keys"] += 1
     if str(s["keys"]) == os.environ.get("FAIL_AT"):
@@ -458,8 +462,16 @@ class SendTest(unittest.TestCase):
         self.assertIn("typed in the input of 'demo' but was not sent", err)
         code, p, _ = self.send("hello", FAIL_AT=2)                  # typed, Enter failed
         self.assertEqual((code, p["typed"], p["sent"]), (4, "hello", []))
-        code, p, _ = self.send(long, NOSHOW=1)                      # typed, never showed: no blind Enter
-        self.assertEqual((code, p["typed"], p["sent"]), (4, long, []))
+        code, p, _ = self.send(long, NOSHOW=1)                      # never showed: no more keys, no blind Enter
+        self.assertEqual((code, p["typed"], p["sent"]), (4, long[:300], []))
+
+    def test_a_dialog_that_comes_up_while_typing_gets_no_more_keys_and_no_enter(self):
+        long = "z" * 1500
+        code, p, err = self.send(long, DIALOG_AFTER=2)
+        self.assertEqual((code, p["keys"], p["sent"]), (4, 2, []))
+        self.assertIn("but was not sent", err)
+        code, p, _ = self.send("one\ntwo", DIALOG_AFTER=1)
+        self.assertEqual((code, p["keys"], p["sent"]), (4, 1, []))
 
     def test_only_a_running_session_gets_text(self):
         code, p, err = self.send("hello")

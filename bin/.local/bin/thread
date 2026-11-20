@@ -12,7 +12,8 @@
   thread send <name|main> <text...>          type a message into a thread or the main chat and send it, as if
                                              typed there (several lines stay several lines, one message);
                                              refused (exit 3) while a question or dialog is open or something
-                                             is already typed. The shell's agent panel uses this.
+                                             is already typed; exit 4 when the text is typed there but could
+                                             not be sent. The shell's agent panel uses this.
   thread progress [--brief]                  what each running thread is doing right now: state, how long, steps
                                              done (4/7, 57 %), last action, its share of the weekly limit
   thread step [<name>] <done>/<total> [next] a thread records how far it is (inside a thread the name comes
@@ -374,6 +375,21 @@ def send_text(name, text, quiet=True):
 PIECE = 300
 
 
+def shows(pane, typed, wait=5.0):
+    """The screen shows the end of what was typed so far: that is where the cursor is, also when a
+    long text has pushed the prompt sign off the screen. A dialog that came up in the meantime
+    hides the input, so the text is not there. Spaces and line ends don't count (the input wraps
+    where it likes), nor does the first character (`!` and `#` change the prompt instead)."""
+    want = re.sub(r"\s+", "", typed)[1:][-24:]
+    end = time.time() + wait
+    while True:
+        if want in re.sub(r"\s+", "", sh(["tmux", "capture-pane", "-p", "-t", pane])):
+            return True
+        if time.time() >= end:
+            return False
+        time.sleep(0.02)
+
+
 def send_to(pane, text, name="", quiet=True):
     if not empty_prompt(pane):
         if not quiet:
@@ -396,19 +412,16 @@ def send_to(pane, text, name="", quiet=True):
     # Several lines stay several lines: a line end goes in as a line feed (Ctrl+J, a new line in
     # Claude Code), never as a carriage return, which is Enter and would send the first half early.
     # Checked 2026-11-20 on a session of its own: 6000 characters and 81 lines arrive as typed.
+    # The next piece, and Enter, go only once the screen shows the piece before: a text in pieces
+    # takes a second, and a dialog that comes up in that time must not get the rest or the Enter.
     # -l: literal keys, --: a text starting with a dash is still text.
+    paced = len(text) > PIECE or "\n" in text
     for n in range(0, len(text), PIECE):
         if n:
             time.sleep(0.03)
         if subprocess.run(["tmux", "send-keys", "-t", pane, "-l", "--", text[n:n + PIECE]]).returncode:
             return typed_not_sent() if n else 1
-    if len(text) > PIECE or "\n" in text:
-        # A long text takes a moment to show; Enter before that would send nothing.
-        for _ in range(20):
-            time.sleep(0.15)
-            if not empty_prompt(pane):
-                break
-        else:
+        if paced and not shows(pane, text[:n + PIECE]):
             return typed_not_sent()
     time.sleep(0.15)
     if subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"]).returncode:
