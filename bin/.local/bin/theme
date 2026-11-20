@@ -354,7 +354,18 @@ def reload(ctx, changed, wallpaper=True):
         if re.search(r"^current_theme\s*=\s*Ziro\s*$", text, re.M) and run("spicetify", "refresh", "-n", "-q"):
             later.append("Spotify")
 
-    for proc, label in (("vesktop", "Discord"), ("foot", "open terminals"), ("btop", "btop"),
+    # Vencord watches its themes folder, not what the link points to: touching the link
+    # (not its target) fires that watcher, and Discord reloads the theme in place.
+    discord = HOME / ".config/vesktop/themes/theme.theme.css"
+    if discord.is_symlink():
+        try:
+            os.utime(discord, follow_symlinks=False)
+            if running("vesktop"):
+                done.append("Discord")
+        except OSError:
+            pass
+
+    for proc, label in (("foot", "open terminals"), ("btop", "btop"),
                         ("zathura", "zathura"), ("yazi", "yazi"), ("nvim", "nvim")):
         if running(proc):
             later.append(label)

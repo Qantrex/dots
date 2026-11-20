@@ -605,8 +605,8 @@ There are three themes:
     avatars. Spotify: gradient progress bars, a glowing cover with cat ears, pink
     rows. Firefox: the selected tab in pink with cat ears, a gradient line under the
     toolbar. aerc: a pink, lavender and mint styleset. GTK selections and suggested
-    buttons in pink (`gtk_accent`), Qt highlights in pink. Discord picks it up on
-    Ctrl+R, Spotify and Firefox on their next start.
+    buttons in pink (`gtk_accent`), Qt highlights in pink. Discord changes at
+    once, Spotify and Firefox on their next start.
   - **Sounds.** Three sets, `chirp`, `robo` and `blip` (`sounds/make.sh` builds
     them): on notifications, on unlock and when the daemon starts.
 
@@ -654,9 +654,9 @@ ways:
 The links are relative, so the repo has to live at `~/dotfiles` (as the install
 assumes anyway). The installer renders the theme before it links anything.
 
-After a switch, Hyprland, the shell, GTK (gsettings), the cursor, tmux and the
-wallpaper change at once. Spotify (spicetify is refreshed), Discord, open
-terminals, btop, yazi, nvim and zathura show the new theme the next time they
+After a switch, Hyprland, the shell, GTK (gsettings), the cursor, tmux, Discord
+and the wallpaper change at once (Vencord watches its themes folder, so `theme`
+touches the link there). Spotify (spicetify is refreshed), open terminals, btop, yazi, nvim and zathura show the new theme the next time they
 start. Firefox keeps its own theme (`assets.firefox` names the right one); a theme can add to its chrome through `firefox-userChrome.css`, linked by the installer (`setup_firefox_chrome`), which Firefox reads at its next start.
 
 ### Templates
