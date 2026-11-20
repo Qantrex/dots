@@ -18,6 +18,12 @@ Item {
     property string hint: ""          // why the desk row could not get a screenshot or the clipboard
 
     function takeFocus() { input.forceActiveFocus(); }
+    // A card that goes takes the keyboard focus with it when its text field had it, and typing
+    // then goes nowhere: back to the input box, unless another text field is being typed into.
+    function refocus() {
+        const f = chat.Window.activeFocusItem;
+        if (Agentic.open && (!f || f.cursorPosition === undefined)) input.forceActiveFocus();
+    }
 
     function apply(op) {
         if (op.op === "reset") {
@@ -272,6 +278,7 @@ Item {
                 Repeater {
                     id: waiting
                     model: ScriptModel { values: Agentic.requestsOf(chat.target); objectProp: "id" }
+                    onItemRemoved: Qt.callLater(chat.refocus)
                     Request {
                         required property var modelData
                         request: modelData
