@@ -363,7 +363,8 @@ def message(raw):
 
 def send_text(name, text, quiet=True):
     """Put a text into the main chat's or a thread's input and press Enter. 0 sent, 2 no such session,
-    3 a question, dialog or draft is open there, 1 tmux failed."""
+    3 a question, dialog or draft is open there, 1 tmux failed with nothing typed, 4 the text is typed
+    there but was not sent."""
     pane = target(name)
     if not pane:
         return 2
@@ -379,6 +380,16 @@ def send_to(pane, text, name="", quiet=True):
             print(f"thread send: '{name}' is asking something or has text typed already; answer it in its terminal (dock term {name})", file=sys.stderr)
         return 3
     text = text.replace("\r\n", "\n").replace("\r", "\n")   # a carriage return is Enter
+    # Typed keys are keys: a tab would complete or accept a suggestion, an escape would clear the
+    # line. A tab becomes spaces, other control characters go; the line feed stays.
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text.replace("\t", "    "))
+
+    def typed_not_sent():
+        # Left as it is: clearing it would mean pressing keys into a session in an unknown state.
+        if not quiet:
+            print(f"thread send: the text is typed in the input of '{name}' but was not sent; look at it in its terminal (dock term {name})", file=sys.stderr)
+        return 4
+
     # Typed as keys, in pieces with a short pause between them: Claude Code takes about 800
     # characters that arrive at once (and any tmux paste) as pasted text, and marks the message, or
     # the middle of it, as pasted from somewhere else. A short text is one piece, as it always was.
@@ -390,7 +401,7 @@ def send_to(pane, text, name="", quiet=True):
         if n:
             time.sleep(0.03)
         if subprocess.run(["tmux", "send-keys", "-t", pane, "-l", "--", text[n:n + PIECE]]).returncode:
-            return 1
+            return typed_not_sent() if n else 1
     if len(text) > PIECE or "\n" in text:
         # A long text takes a moment to show; Enter before that would send nothing.
         for _ in range(20):
@@ -398,10 +409,10 @@ def send_to(pane, text, name="", quiet=True):
             if not empty_prompt(pane):
                 break
         else:
-            return 1
+            return typed_not_sent()
     time.sleep(0.15)
     if subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"]).returncode:
-        return 1
+        return typed_not_sent()
     return 0
 
 
@@ -928,7 +939,9 @@ def cmd_answer(args):
     os.replace(qpath(name) + ".tmp", qpath(name))
     if code:
         why = {2: "it isn't running (thread resume, then thread answer --resend)",
-               3: "it has a dialog or typed text open (thread answer --resend later)"}.get(code, "tmux failed")
+               3: "it has a dialog or typed text open (thread answer --resend later)",
+               4: f"the text is typed in its input but was not sent (look at it with dock term {name}, clear it, "
+                  "then thread answer --resend)"}.get(code, "tmux failed")
         print(f"Answers for '{name}' stored, not delivered: {why}.", file=sys.stderr)
         sys.exit(3)
     print(f"Answers sent to '{name}' (round {r['round']}).")
