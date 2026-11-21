@@ -8,6 +8,8 @@ signal, durations), or `watch` and `send` with tmux, `claude agents` and `inbox`
 the main chat are never typed into.
 """
 import json
+import time
+import re
 import os
 import shutil
 import subprocess
@@ -144,7 +146,7 @@ class LogTest(unittest.TestCase):
         self.assertIn("demo: 1/3", self.e.run("step", "demo", "1/3"))
 
 
-class WatchTest(unittest.TestCase):
+class WatchBase(unittest.TestCase):
     """`thread watch` with tmux, `claude agents` and `inbox` replaced by stubs in the throwaway home."""
 
     def setUp(self):
@@ -199,6 +201,8 @@ class WatchTest(unittest.TestCase):
         except OSError:
             return []
 
+
+class WatchTest(WatchBase):
     def test_misc_idle_never_stalls_but_stuck_work_does(self):
         self.threads([("misc", "0/1 waiting for the first job", "idle"), ("demo", "0/3 reading", "idle")])
         self.assertEqual(self.stalled_after_ten_minutes(), ["demo"])
@@ -224,6 +228,64 @@ class WatchTest(unittest.TestCase):
         os.remove(self.added)
         self.threads([("misc", "2/5 testing", "idle")])
         self.assertEqual(self.stalled_after_ten_minutes(), ["misc"])
+
+
+class RetireTest(WatchBase):
+    """`thread watch` stops and archives a finished thread: done, card written, idle 30 min."""
+
+    def setUp(self):
+        super().setUp()
+        tm = os.path.join(self.bin, "tmux")
+        with open(tm, "w") as f:                    # /exit closes the window; list-clients: panes on screen
+            f.write("#!/bin/sh\n"
+                    f'[ "$1" = list-windows ] && cat {self.wins}\n'
+                    f'[ "$1" = list-clients ] && cat {self.e.dir}/clients 2>/dev/null\n'
+                    f'[ "$1" = send-keys ] && grep -v "\t$3\t" {self.wins} > {self.wins}.n; '
+                    f'[ "$1" = send-keys ] && mv {self.wins}.n {self.wins}\n'
+                    f'[ "$1" = capture-pane ] && echo "done." && echo "❯ "\n'
+                    "exit 0\n")
+        self.cards = os.path.join(self.e.dir, "Notes", "Results")
+        os.makedirs(self.cards)
+
+    def finished(self, name, stop_ts=0, card=True, label="done", progress="3/3 done"):
+        self.e.state(name, "s-" + name, progress=progress)
+        if card:
+            with open(os.path.join(self.cards, f"2026-01-05-{name}.md"), "w") as f:
+                f.write(f"---\ntype: result\nthread: {name}\nsession: s-{name}\n---\n")
+        return {"ts": stop_ts, "thread": name, "session": "s-" + name, "event": "stop", "label": label}
+
+    def status(self, name):
+        return re.search(r"^status: (\S+)", open(os.path.join(self.e.threads, name + ".md")).read(), re.M).group(1)
+
+    def test_only_a_finished_thread_with_a_card_idle_30_min_is_archived(self):
+        names = ["old", "nocard", "paused", "misc", "fixes", "recent", "shown", "working"]
+        self.threads([(n, "3/3 done", "busy" if n == "working" else "idle") for n in names])
+        ev = [self.finished("old"), self.finished("nocard", card=False),
+              self.finished("paused", label="paused", progress="2/3 x"), self.finished("misc"),
+              self.finished("fixes"), self.finished("shown"), self.finished("working")]
+        self.e.events(ev)
+        with open(self.e.log, "a") as f:                                  # done 5 min ago
+            f.write(json.dumps(dict(self.finished("recent"), ts=time.time() - 300)) + "\n")
+        with open(os.path.join(self.e.dir, "clients"), "w") as f:
+            f.write("%6\n")                                              # the owner looks at 'shown'
+        self.e.run("watch")
+        self.assertEqual([n for n in names if self.status(n) == "archived"], ["old"])
+        self.assertEqual(open(self.added).read().count("archived thread 'old': finished"), 1)
+        listed = [l.split()[0] for l in self.e.run("list").splitlines()]
+        self.assertNotIn("old", listed)
+        self.assertIn("old", [l.split()[0] for l in self.e.run("list", "--all").splitlines()])
+
+    def test_a_finished_thread_left_open_is_archived_without_a_stop(self):
+        self.threads([("live", "1/3 x", "busy")])
+        self.e.events([self.finished("gone"), self.finished("gonepaused", label="paused", progress="1/3 x")])
+        self.e.run("watch")                                               # 'gone' has no window and no session
+        self.assertEqual((self.status("gone"), self.status("gonepaused")), ("archived", "running"))
+
+    def test_a_later_event_after_done_keeps_it(self):
+        self.threads([("again", "3/3 done", "idle")])
+        self.e.events([self.finished("again"), {"ts": 50, "thread": "again", "session": "s-again", "event": "resume"}])
+        self.e.run("watch")
+        self.assertEqual(self.status("again"), "running")
 
 
 class DurationsTest(unittest.TestCase):

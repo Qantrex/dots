@@ -46,7 +46,9 @@
                                              stopped below its last step without waiting for the owner, whose
                                              pane, transcript and subagents stay unchanged 10 min gives one
                                              [stalled] inbox line with a wake (misc only while working; never
-                                             while background shells or agents run for it)
+                                             while background shells or agents run for it). Also stops and
+                                             archives a finished thread: idle 30 min after a done stop whose
+                                             result card exists (never misc or fixes; one quiet inbox line)
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread durations [name...] [--json]        how long thread work took, per finished run of work: working time
                                              (waits for the owner left out), start to done, steps, minutes per
@@ -86,6 +88,10 @@ DURATIONS = os.path.join(DATA, "durations.jsonl")
 SESSION = "main"
 MAX_RUNNING = 8
 UNCOUNTED = {"misc"}  # never counted toward MAX_RUNNING, never stopped to make room, idle between jobs
+# A thread idle this long after a done stop, with its result card written, is stopped and archived by
+# `thread watch`, except these (owner, 2026-11-21). `thread resume` brings any of them back.
+RETIRE_AFTER = 30 * 60
+KEEP_OPEN = UNCOUNTED | {"fixes"}
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
 # about 90k and it compacted after a few fetched pages. Requests under 250k cost about half of those above it.
 AUTOCOMPACT = "240000"
@@ -315,6 +321,7 @@ def clear_progress(name):
             pass
     items.sort(key=lambda p: -p.get("at", 0))
     cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache")
+    os.makedirs(cache, exist_ok=True)
     with open(os.path.join(cache, "agentic-threads.json"), "w") as f:
         json.dump(items, f)
     mark = {"working": "● ", "needs you": "! "}
@@ -1444,6 +1451,51 @@ def in_background(screen, p):
         or str(p.get("detail", "")).startswith("in the background")
 
 
+def retire_finished(ag, wins, now=None):
+    """Stop and archive threads that are finished: idle (or left open, its session gone) at total/total,
+    nothing open for the owner, their last
+    event a done stop whose result card exists, and nothing new in the transcript for RETIRE_AFTER. Never
+    KEEP_OPEN or adopted sessions, never a thread the owner has on screen (a tmux client shows its pane) or one
+    with a dialog or typed text (stop() checks). One quiet inbox line each, no wake. Returns the names."""
+    now = now or time.time()
+    last = {}
+    for e in load_events():
+        last[(e["thread"], e.get("session", ""))] = e
+    shown = set(sh(["tmux", "list-clients", "-F", "#{pane_id}"]).split())
+    done = []
+    for t in all_threads():
+        name, session = t["name"], t.get("session", "")
+        st = steps(t)
+        state = live_state(t, ag, wins)
+        if name in KEEP_OPEN or t.get("origin") == "adopted" or not st or st[0] != st[1] or t.get("needs") \
+                or open_round(name) or not (state == "idle" and name in wins or state == "left open"):
+            continue
+        e = last.get((name, session))
+        if not e or e.get("event") != "stop" or e.get("label") != "done" or not find_card(session):
+            continue
+        tpath = transcript_of(session)
+        if now - max(e["ts"], newest_mtime(tpath) if tpath else 0.0) < RETIRE_AFTER \
+                or name in wins and wins[name][2] in shown:
+            continue
+        try:
+            if state == "left open":             # its session is gone already (a reboot): nothing to stop
+                clear_progress(name)
+            elif not stop(name):
+                continue
+        except Exception as ex:                  # one thread that can't be stopped never stops the watch
+            print(f"thread watch: could not stop '{name}': {ex}", file=sys.stderr)
+            continue
+        fm, body = read(name)
+        fm["status"] = "archived"
+        write(name, fm, body)
+        subprocess.run([os.path.join(HOME, ".local/bin/inbox"), "add", "archived", "thread",
+                        f"'{name}': finished and idle for {RETIRE_AFTER // 60} min, stopped and archived "
+                        f"(result in `results`, `thread resume {name}` brings it back)"],
+                       stdin=subprocess.DEVNULL, capture_output=True)
+        done.append(name)
+    return done
+
+
 def cmd_watch(args):
     """Run by a user timer every 5 minutes (started by `agentic on`). A thread that is working, or that stopped
     below its last step without waiting for the owner, is quiet when its pane (digits and spinners aside), its
@@ -1455,6 +1507,8 @@ def cmd_watch(args):
     os.makedirs(WATCH, exist_ok=True)
     ag, wins = agents(), windows()
     now = time.time()
+    if retire_finished(ag, wins, now):
+        wins = windows()
     seen = set()
     for t in all_threads():
         name = t["name"]
