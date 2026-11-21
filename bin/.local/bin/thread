@@ -42,11 +42,11 @@
                                              copied to Results/files/<card>/. --backfill [--since YYYY-MM-DD]
                                              [--dry-run]: once, a card for every session that ended at done
                                              since then (default 14 days), marked read except today's
-  thread watch                               for the agentic-watch timer (every 5 min): a working thread, or one
-                                             stopped below its last step without waiting for the owner, whose
-                                             pane, transcript and subagents stay unchanged 10 min gives one
-                                             [stalled] inbox line with a wake (misc only while working; never
-                                             while background shells or agents run for it). Also stops and
+  thread watch                               for the agentic-watch timer (every 5 min): a thread still in its
+                                             turn (working, not idle at its prompt) whose pane, transcript and
+                                             subagents stay unchanged 10 min gives one [stalled] inbox line with
+                                             a wake, once per quiet period (never while background shells or
+                                             agents run for it). Also stops and
                                              archives a finished thread: idle 30 min after a done stop whose
                                              result card exists (never misc or fixes; one quiet inbox line)
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
@@ -1423,6 +1423,24 @@ def last_tool(tpath):
     return ""
 
 
+def last_entry_ts(tpath, tail=262144):
+    """The time of the transcript's newest entry that has a timestamp (from its last 256 KB), else 0."""
+    try:
+        with open(tpath, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - tail))
+            lines = f.read().decode("utf-8", "ignore").splitlines()
+    except OSError:
+        return 0.0
+    for line in reversed(lines):
+        m = re.search(r'"timestamp":\s*"([^"]+)"', line)
+        if m:
+            ts = iso_ts(m.group(1))
+            if ts:
+                return ts
+    return 0.0
+
+
 def newest_mtime(path):
     """The newest change of a file, or of anything below a folder (a session's subagents and tool output)."""
     best = 0.0
@@ -1497,10 +1515,10 @@ def retire_finished(ag, wins, now=None):
 
 
 def cmd_watch(args):
-    """Run by a user timer every 5 minutes (started by `agentic on`). A thread that is working, or that stopped
-    below its last step without waiting for the owner, is quiet when its pane (digits and spinners aside), its
-    transcript and its session folder (subagents) all stayed the same for 10 minutes. Each quiet spell gives
-    one inbox line with a wake. A thread waiting on its background work (a render queue, a watcher) waits like
+    """Run by a user timer every 5 minutes (started by `agentic on`). A thread still in its turn is quiet when
+    its pane (digits and spinners aside), its transcript entries and its session folder (subagents) all stayed
+    the same for 10 minutes. Each quiet spell gives one inbox line with a wake. A thread idle at its prompt is
+    never quiet: its turn ended, and its stop already told the main chat. A thread waiting on its background work (a render queue, a watcher) waits like
     one waiting for the owner, and is never quiet. Code only, no Claude call."""
     if os.path.exists(os.path.join(os.path.dirname(PROGRESS), "off")):
         return
@@ -1520,11 +1538,11 @@ def cmd_watch(args):
             p = json.load(open(os.path.join(PROGRESS, name + ".json")))
         except (OSError, ValueError):
             p = {}
-        sp = steps(t)
+        # Only a turn that is still running can stall. A thread idle at its prompt ended its turn on purpose
+        # (done, paused, waiting for something): its stop already reached the main chat (owner, 2026-11-21).
         working = st == "working" or p.get("state") == "working"
         waits = bool(t.get("needs")) or bool(open_round(name)) or st == "waiting" or p.get("state") == "needs you"
-        paused = sp and sp[0] < sp[1] and not waits and not idle_between_jobs(name, sp)
-        if waits or not (working or paused):
+        if waits or not working:
             try:
                 os.remove(wf)
             except OSError:
@@ -1543,7 +1561,9 @@ def cmd_watch(args):
         norm = re.sub(r"[0-9]+|[✻✽✶✳✢·*●◐◑◒◓⏺]", "", screen)
         fp = hashlib.sha1(norm.encode()).hexdigest()
         tpath = (glob.glob(os.path.join(HOME, ".claude/projects/*", t.get("session", "x") + ".jsonl")) or [""])[0]
-        act = max(newest_mtime(tpath), newest_mtime(tpath[:-6]) if tpath else 0.0)
+        # Progress is a new transcript entry or a change in its subagents, not the file's time: Claude Code also
+        # appends bookkeeping records without a timestamp (17:19 on 2026-11-21 that started a second report).
+        act = max(last_entry_ts(tpath), newest_mtime(tpath[:-6])) if tpath else 0.0
         try:
             w = json.load(open(wf))
         except (OSError, ValueError):
@@ -1552,14 +1572,15 @@ def cmd_watch(args):
             w["fp"], w["fp_at"] = fp, now
         last = max(w.get("fp_at", now), act)
         quiet = now - last
-        if quiet >= QUIET and w.get("reported") != last:
-            what = "working" if working else f"stopped at {sp[0]}/{sp[1]}"
+        # One line per quiet period: it ends only with new transcript or subagent progress, never with a
+        # changed screen alone, so a screen that flickers can't report the same stall again.
+        if quiet >= QUIET and w.get("reported") != act:
             lt = last_tool(tpath) if tpath else ""
-            text = (f"'{name}': quiet for {int(quiet // 60)} min ({what}, nothing changed on screen, in the "
+            text = (f"'{name}': quiet for {int(quiet // 60)} min mid-turn (nothing changed on screen, in the "
                     f"transcript or its subagents)" + (f"; last tool call: {lt}" if lt else ""))
             subprocess.run([os.path.join(HOME, ".local/bin/inbox"), "add", "--wake", "stalled", "thread", text],
                            stdin=subprocess.DEVNULL, capture_output=True)
-            w["reported"] = last
+            w["reported"] = act
         with open(wf + ".tmp", "w") as f:
             json.dump(w, f)
         os.replace(wf + ".tmp", wf)

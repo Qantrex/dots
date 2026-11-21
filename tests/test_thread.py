@@ -203,9 +203,25 @@ class WatchBase(unittest.TestCase):
 
 
 class WatchTest(WatchBase):
-    def test_misc_idle_never_stalls_but_stuck_work_does(self):
-        self.threads([("misc", "0/1 waiting for the first job", "idle"), ("demo", "0/3 reading", "idle")])
-        self.assertEqual(self.stalled_after_ten_minutes(), ["demo"])
+    def test_idle_at_the_prompt_never_stalls_only_a_turn_that_runs(self):
+        # willhaben on 2026-11-21: idle at 5/6, waiting until the owner frees Chrome, flagged at 17:14 and 17:34
+        self.threads([("misc", "0/1 waiting for the first job", "idle"), ("waits", "5/6 waiting for Chrome", "idle"),
+                      ("stuck", "2/6 x", "busy")])
+        self.assertEqual(self.stalled_after_ten_minutes(), ["stuck"])
+
+    def test_one_line_per_quiet_period_even_when_the_file_changes(self):
+        self.threads([("stuck", "2/6 x", "busy")])
+        tp = self.e.transcript("s-stuck", [prompt(0), bash(5, "t1", "sleep 9999")])
+        old = time.time() - 3600
+        os.utime(tp, (old, old))
+        self.assertEqual(self.stalled_after_ten_minutes(), ["stuck"])
+        with open(tp, "a") as f:                                    # bookkeeping without a timestamp
+            f.write(json.dumps({"type": "data-flow-records"}) + "\n")
+        os.utime(tp, (old + 60, old + 60))                          # a newer file time, still long ago
+        self.assertEqual(self.stalled_after_ten_minutes(), ["stuck"])   # still the one line
+        with open(tp, "a") as f:                                    # real progress, then quiet again
+            f.write(json.dumps(result(3000, "t1", "ok")) + "\n")
+        self.assertEqual(self.stalled_after_ten_minutes(), ["stuck", "stuck"])
 
     def test_background_work_is_waiting_not_stalled(self):
         # cabinet-renders on 2026-11-20: its turn ended with a render-queue watcher running in a background shell
@@ -222,11 +238,8 @@ class WatchTest(WatchBase):
             json.dump({"name": "said", "state": "working", "detail": "in the background: 1 shell"}, f)
         self.assertEqual(self.stalled_after_ten_minutes(), ["stuck"])
 
-    def test_misc_stuck_working_or_stopped_mid_job_still_stalls(self):
+    def test_misc_stuck_working_still_stalls(self):
         self.threads([("misc", "0/1 waiting", "busy")])
-        self.assertEqual(self.stalled_after_ten_minutes(), ["misc"])
-        os.remove(self.added)
-        self.threads([("misc", "2/5 testing", "idle")])
         self.assertEqual(self.stalled_after_ten_minutes(), ["misc"])
 
 
