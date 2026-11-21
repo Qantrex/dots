@@ -44,6 +44,7 @@ Singleton {
     property var brief: []            // lines of `agentic brief`
     property var inbox: []            // [{at, level, source, text, untrusted, new}], newest first
     property int newCount: 0          // inbox events since the home tab was last looked at
+    property int results: 0           // unread result cards of finished threads (`results`, ~/Notes/Results)
 
     // From `agentic-shell requests`: [{id, tab, name, tool, at, cwd, kind, title, text, cut, questions}].
     // tab is "main", a thread's name, or "" for a session that has no tab.
@@ -211,6 +212,7 @@ Singleton {
                     root.brief = h.brief || [];
                     root.inbox = h.inbox || [];
                     root.newCount = h.new || 0;
+                    root.results = h.results || 0;
                     root.threads = h.threads || [];
                     // The thread it showed is gone: back to the main chat.
                     if (root.tabs.indexOf(root.target) < 0) root.target = "main";

@@ -6,7 +6,7 @@
                                then every new message as it is written (until killed)
   agentic-shell home [--seen]  one JSON object: the brief, the last inbox events, how many are
                                new since the home tab was last looked at (--seen: now), and
-                               the threads that are open
+                               the threads that are open, and the number of unread result cards
   agentic-shell requests       one JSON object: what waits for a yes, a no or an answer (permission
                                requests and question dialogs of Claude sessions, open question
                                rounds of threads)
@@ -503,7 +503,11 @@ def cmd_home(args):
             f.write(str(int(time.time())))
         new = 0
     brief = sh([os.path.join(BIN, "agentic"), "brief", "--print"], timeout=20).strip().splitlines()
-    out({"brief": brief, "inbox": inbox, "new": new, "threads": threads()})
+    try:
+        results = int(sh([os.path.join(BIN, "results"), "count"], timeout=5).strip() or 0)
+    except ValueError:
+        results = 0
+    out({"brief": brief, "inbox": inbox, "new": new, "threads": threads(), "results": results})
 
 
 # ---- what is running (the leave check) --------------------------------------------------------

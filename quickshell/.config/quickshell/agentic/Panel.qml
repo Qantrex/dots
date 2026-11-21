@@ -98,6 +98,30 @@ PanelWindow {
                     id: tools
                     anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                     spacing: 2
+                    // Unread result cards of finished threads; a click opens the list (Results.base in Obsidian).
+                    MouseArea {
+                        id: results
+                        visible: Agentic.results > 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        implicitWidth: resultsLabel.implicitWidth + 20
+                        height: head.height
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: Quickshell.execDetached([Agentic.bin + "/results", "open"])
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.radiusSmall
+                            color: results.containsMouse ? Theme.hover : "transparent"
+                        }
+                        Label {
+                            id: resultsLabel
+                            anchors.centerIn: parent
+                            text: Agentic.results + " new result" + (Agentic.results === 1 ? "" : "s")
+                            size: Agentic.fontSize
+                            color: Theme.fgMuted
+                        }
+                        Tooltip { target: results; show: results.containsMouse; text: "Results of finished threads, unread (`results` lists them)\nClick: open the list in Obsidian" }
+                    }
                     Tab {
                         name: "home"
                         height: head.height
