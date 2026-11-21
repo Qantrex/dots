@@ -481,6 +481,66 @@ class SendTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
 
 
+ROUND = {"questions": [
+    {"question": "Which start?", "header": "Start", "options": [{"label": "A", "description": "a"},
+                                                                {"label": "B", "description": "b"}]},
+    {"question": "How much?", "header": "Budget", "options": [{"label": "Low", "description": "l"},
+                                                              {"label": "High", "description": "h"}]}]}
+
+
+class AskTest(unittest.TestCase):
+    """`thread ask` tells the main chat itself, so a thread that keeps working after asking is heard."""
+
+    def setUp(self):
+        self.e = Env()
+        self.e.state("demo", "s-demo", progress="1/3 asking")
+        self.bin = os.path.join(self.e.dir, ".local", "bin")
+        self.calls = os.path.join(self.e.dir, "inbox.calls")
+        os.makedirs(self.bin)
+
+    def tearDown(self):
+        self.e.close()
+
+    def inbox(self, code=0):
+        with open(os.path.join(self.bin, "inbox"), "w") as f:
+            f.write(f'#!/bin/sh\nprintf "%s\\t" "$@" >> "{self.calls}"; echo >> "{self.calls}"; exit {code}\n')
+        os.chmod(os.path.join(self.bin, "inbox"), 0o755)
+
+    def ask(self):
+        r = subprocess.run([sys.executable, THREAD, "ask", "demo"], input=json.dumps(ROUND), capture_output=True,
+                           text=True, env=self.e.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout, json.load(open(os.path.join(self.e.threads, "demo.questions.json")))
+
+    def sent(self):
+        try:
+            return [l.rstrip("\t").split("\t") for l in open(self.calls).read().splitlines()]
+        except OSError:
+            return []
+
+    def test_asking_sends_one_questions_line_and_the_stop_sends_none(self):
+        self.inbox()
+        out, rnd = self.ask()
+        self.assertIn("the main chat is told", out)
+        self.assertEqual(self.sent(), [["add", "--wake", "questions", "thread",
+                                        f"'demo': 2 questions (Start, Budget), round {rnd['round']}"]])
+        self.assertIn("notified", rnd)
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5)])
+        self.assertEqual(self.e.run("signal", "demo", "--transcript", tp), "questions\t2 questions\tnotified\n")
+
+    def test_without_an_inbox_or_when_it_fails_the_stop_still_sends_it(self):
+        out, rnd = self.ask()                                           # no inbox at all
+        self.assertNotIn("told", out)
+        self.assertNotIn("notified", rnd)
+        self.assertEqual(self.e.run("signal", "demo"), "questions\t2 questions\t\n")
+        os.remove(os.path.join(self.e.threads, "demo.questions.json"))
+        self.inbox(code=1)                                              # an inbox that fails
+        out, rnd = self.ask()
+        self.assertEqual(len(self.sent()), 1)
+        self.assertNotIn("notified", rnd)
+        self.assertEqual(self.e.run("signal", "demo"), "questions\t2 questions\t\n")
+
+
 RESULTS_BIN = os.path.join(os.path.dirname(THREAD), "results")
 
 

@@ -24,7 +24,8 @@
                                              under "Open for the owner"
   thread ask [<name>] [file]                 questions for the owner as JSON (stdin or file), in the shape
                                              AskUserQuestion takes: {"questions": [{question, header, options:
-                                             [{label, description, preview?}], multiSelect?}]}, at most 4
+                                             [{label, description, preview?}], multiSelect?}]}, at most 4;
+                                             a [questions] inbox line tells the main chat right away
   thread questions <name> [--json]           the open question round: {"thread", "round", "questions"}
                                              (questions empty when none is open)
   thread answer <name> [--resend]            answers from stdin: {"round"?, "answers": {"<question>": "<label>"
@@ -33,7 +34,8 @@
                                              same round is refused (exit 4); stored but not delivered: exit 3
   thread signal <name> [--transcript <file>] for the stop hook: label<TAB>detail<TAB>sent, label one of done,
                                              questions, needs, paused, idle (misc with no step done: waits for
-                                             its next job) (sent: the last turn messaged main-chat)
+                                             its next job) (sent: the last turn messaged main-chat;
+                                             "notified" for a question round `thread ask` already announced)
   thread result <name> [--transcript <file>] the thread's result card in ~/Notes/Results from its newest answer
                                              (a done stop writes it by itself): one card per thread session,
                                              newest answer on top, files from /tmp and other short-lived places
@@ -877,8 +879,32 @@ def cmd_ask(args):
         json.dump(rnd, f, ensure_ascii=False, indent=1)
     os.replace(qpath(name) + ".tmp", qpath(name))
     set_needs(name, f"{len(qs)} question{'s' if len(qs) > 1 else ''}")
-    print(f"{name}: {len(qs)} question(s) stored as round {rnd['round']}. End your turn now; the main chat asks "
-          "the owner and the answers arrive as a message.")
+    # The main chat hears of the round now, not at the thread's next stop: a thread that keeps working after
+    # asking may not stop for a long time. The stop then sends no second line for this round (cmd_signal).
+    if announce_round(name, rnd):
+        rnd["notified"] = datetime.now().isoformat(timespec="seconds")
+        with open(qpath(name) + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(rnd, f, ensure_ascii=False, indent=1)
+        os.replace(qpath(name) + ".tmp", qpath(name))
+    print(f"{name}: {len(qs)} question(s) stored as round {rnd['round']}"
+          + (" and the main chat is told" if rnd.get("notified") else "")
+          + ". End your turn now; the main chat asks the owner and the answers arrive as a message.")
+
+
+def announce_round(name, rnd):
+    """One [questions] inbox line with a wake for a new round. False when there is no inbox or it failed."""
+    inbox = os.path.join(HOME, ".local/bin/inbox")
+    if not os.access(inbox, os.X_OK):
+        return False
+    qs = rnd["questions"]
+    heads = ", ".join(q["header"] for q in qs)
+    text = f"'{name}': {len(qs)} question{'s' if len(qs) > 1 else ''} ({heads}), round {rnd['round']}"
+    try:
+        r = subprocess.run([inbox, "add", "--wake", "questions", "thread", text[:240]],
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
 
 
 def cmd_questions(args):
@@ -1006,6 +1032,8 @@ def cmd_signal(args):
     if r:
         n = len(r["questions"])
         label, detail = "questions", f"{n} question{'s' if n > 1 else ''}"
+        if r.get("notified"):
+            sent = "notified"           # `thread ask` already told the main chat: the stop hook sends no line
     elif fm.get("needs"):
         label, detail = "needs", fm["needs"]
     elif st and st[0] == st[1]:
