@@ -481,5 +481,127 @@ class SendTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
 
 
+RESULTS_BIN = os.path.join(os.path.dirname(THREAD), "results")
+
+
+def write_tool(sec, tid, path):
+    return {"type": "assistant", "timestamp": iso(sec),
+            "message": {"id": f"m-{tid}", "content": [{"type": "tool_use", "id": tid, "name": "Write",
+                                                        "input": {"file_path": path, "content": "x"}}]}}
+
+
+class ResultCardTest(unittest.TestCase):
+    """Result cards in <HOME>/Notes/Results: written at a done stop, one per thread session."""
+
+    def setUp(self):
+        self.e = Env()
+        self.e.state("demo", "s-demo", progress="3/3 done")
+        self.vault = os.path.join(self.e.dir, "Notes")
+        self.results_dir = os.path.join(self.vault, "Results")
+        self.scratch = tempfile.mkdtemp(prefix="thread-scratch-")      # under /tmp: short-lived
+        self.pdf = os.path.join(self.scratch, "report.pdf")
+        with open(self.pdf, "wb") as f:
+            f.write(b"%PDF-1.4 demo")
+
+    def tearDown(self):
+        self.e.close()
+        shutil.rmtree(self.scratch, ignore_errors=True)
+
+    def card(self, name=None):
+        d = self.results_dir
+        cards = sorted(f for f in os.listdir(d) if f.endswith(".md")) if os.path.isdir(d) else []
+        if name:
+            cards = [f for f in cards if name in f]
+        self.assertLessEqual(len(cards), 1)
+        return open(os.path.join(d, cards[0])).read() if cards else None
+
+    def results(self, *args):
+        r = subprocess.run([sys.executable, RESULTS_BIN, *args], capture_output=True, text=True, env=self.e.env)
+        return r.stdout
+
+    def test_a_done_stop_writes_the_card_with_the_answer_and_copies_scratch_files(self):
+        text = f"**Done:** the report is ready.\n`{self.pdf}`\n\nDetails: [the PDF]({self.pdf}), tool at {THREAD}."
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5, "working on it"), answer(60, text)])
+        self.assertEqual(self.e.run("signal", "demo", "--transcript", tp), "done\t3/3\t\n")   # output unchanged
+        c = self.card()
+        self.assertIn("type: result\nthread: demo\n", c)
+        self.assertIn("read: false", c)
+        self.assertIn('summary: "Done: the report is ready."', c)
+        self.assertIn("**Done:** the report is ready.", c)
+        self.assertNotIn("working on it", c)
+        sub = os.listdir(os.path.join(self.results_dir, "files"))[0]
+        copied = os.path.join(self.results_dir, "files", sub, "report.pdf")
+        self.assertEqual(open(copied, "rb").read(), b"%PDF-1.4 demo")
+        rel = os.path.relpath(copied, self.vault)
+        self.assertIn(f"[[{rel}|report.pdf]]\n", c)                     # the path in backticks became a link
+        self.assertIn(f"[the PDF]({rel})", c)                             # a markdown link target too
+        self.assertNotIn(f"`{self.pdf}`\n", c.split("## Files")[0])
+        self.assertIn(f"(file://{os.path.abspath(THREAD)})", c)           # durable, outside the vault: linked
+        self.assertEqual(self.results("count").strip(), "1")
+
+    def test_a_pause_or_a_look_by_hand_writes_no_card(self):
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5, "half way")])
+        self.e.run("step", "demo", "1/3", "building")
+        self.e.run("signal", "demo", "--transcript", tp)
+        self.e.run("step", "demo", "3/3", "done")
+        self.e.run("signal", "demo")
+        self.assertIsNone(self.card())
+
+    def test_same_answer_changes_nothing_and_a_new_one_goes_on_top_unread(self):
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5, "First result.")])
+        self.e.run("signal", "demo", "--transcript", tp)
+        self.results("read", "demo")
+        before = self.card()
+        self.assertIn("read: true", before)
+        self.e.run("signal", "demo", "--transcript", tp)                  # the same stop again
+        self.assertEqual(self.card(), before)
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5, "First result."), prompt(100),
+                                          answer(105, "Second result.")])
+        self.e.run("signal", "demo", "--transcript", tp)
+        c = self.card()
+        self.assertIn("read: false", c)
+        self.assertLess(c.index("Second result."), c.index("## Earlier results"))
+        self.assertLess(c.index("## Earlier results"), c.index("> First result."))
+        self.assertIn('summary: "Second result."', c)
+
+    def test_files_are_vault_notes_it_wrote_not_code_or_claude_md(self):
+        note = os.path.join(self.vault, "Area", "Plan.md")
+        code = os.path.join(self.vault, "Homelab", "deploy", "x", "run.md")
+        rules = os.path.join(self.vault, "Area", "CLAUDE.md")
+        for p in (note, code, rules):
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            open(p, "w").write("x")
+        tp = self.e.transcript("s-demo", [prompt(0), write_tool(2, "w1", note), write_tool(3, "w2", code),
+                                          write_tool(4, "w3", rules), answer(5, "Wrote the plan.")])
+        self.e.run("signal", "demo", "--transcript", tp)
+        files = self.card().split("## Files")[1].split("## Thread")[0]
+        self.assertEqual(files.strip(), "- [[Area/Plan|Plan]]")
+
+    def test_backfill_writes_one_card_per_session_from_its_last_done(self):
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5, "Round one."), prompt(50), answer(55, "Round two."),
+                                          prompt(200), answer(205, "Later talk, not a result.")])
+        self.e.events([{"ts": 9, "at": iso(9), "thread": "demo", "session": "s-demo", "event": "stop", "label": "done"},
+                       {"ts": 59, "at": iso(59), "thread": "demo", "session": "s-demo", "event": "stop", "label": "done"}])
+        out = self.e.run("result", "--backfill", "--since", "2026-01-01")
+        self.assertIn("new card", out)
+        c = self.card()
+        self.assertIn("Round two.", c)
+        self.assertNotIn("Later talk", c)
+        self.assertIn("read: true", c)                                    # not from today
+        self.assertIn("has a card", self.e.run("result", "--backfill", "--since", "2026-01-01"))
+
+    def test_results_lists_unread_first_and_marks_read(self):
+        self.e.state("other", "s-other", progress="1/1 done")
+        self.e.run("signal", "demo", "--transcript", self.e.transcript("s-demo", [prompt(0), answer(5, "Demo out.")]))
+        self.e.run("signal", "other", "--transcript", self.e.transcript("s-other", [prompt(0), answer(9, "Other out.")]))
+        lines = self.results().splitlines()
+        self.assertIn("2 unread results", lines[0])
+        self.assertIn("Other out.", lines[1])                             # newest first
+        self.results("read", "1")
+        self.assertEqual(self.results("count").strip(), "1")
+        self.assertIn("(read)", self.results("--all").splitlines()[-1])
+        self.assertEqual(json.loads(self.results("--json"))[0]["thread"], "demo")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

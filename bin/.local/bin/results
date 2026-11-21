@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Results: the result cards of finished threads, in ~/Notes/Results (one note per thread session, written by
+`thread` when a thread reaches done; the Obsidian Base Results/Results.base shows the same list).
+
+  results [--all] [--json]          unread cards, newest first, one line each (--all: every card, unread first)
+  results show <which>              print a card
+  results open <which>              open a card in Obsidian and mark it read (no <which>: the Base)
+  results read <which>... | --all   mark cards read          results unread <which>...   mark them unread
+  results count                     number of unread cards (the agent panel shows it)
+  results path <which>              the card's file
+
+<which>: the number from the last list (1 = first line of `results`, or of `results --all` for read cards),
+the thread's name, or the card's file name.
+"""
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.parse
+
+HOME = os.path.expanduser("~")
+VAULT = os.path.join(HOME, "Notes")
+RESULTS = os.path.join(VAULT, "Results")
+
+
+def props(text):
+    """The card's properties. YAML when it can be read (Obsidian rewrites the block when a property is changed
+    there), else simple key: value lines."""
+    m = re.match(r"---\n(.*?)\n---\n?", text, re.S)
+    if not m:
+        return {}
+    try:
+        import yaml
+        d = yaml.safe_load(m.group(1))
+        if isinstance(d, dict):
+            return {k: ("" if v is None else v) for k, v in d.items()}
+    except Exception:
+        pass
+    d = {}
+    for line in m.group(1).splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            v = v.strip()
+            if v[:1] == '"':
+                try:
+                    v = json.loads(v)
+                except ValueError:
+                    v = v.strip('"')
+            d[k.strip()] = v
+    return d
+
+
+def truthy(v):
+    return v is True or str(v).strip().lower() in ("true", "yes")
+
+
+def cards():
+    """Every card: unread first, then newest first."""
+    out = []
+    for f in glob.glob(os.path.join(RESULTS, "*.md")):
+        try:
+            p = props(open(f, encoding="utf-8").read())
+        except OSError:
+            continue
+        if p.get("type") != "result":
+            continue
+        out.append({"file": f, "card": os.path.basename(f)[:-3], "thread": str(p.get("thread", "")),
+                    "date": str(p.get("date", "")).replace(" ", "T")[:16], "area": str(p.get("area", "")),
+                    "status": str(p.get("status", "")), "read": truthy(p.get("read")),
+                    "summary": str(p.get("summary", ""))})
+    out.sort(key=lambda c: c["date"], reverse=True)
+    out.sort(key=lambda c: c["read"])
+    return out
+
+
+def pick(which, all_cards):
+    """The cards one argument means: a number in the list (unread first), a thread name or a card name."""
+    if which.isdigit():
+        i = int(which) - 1
+        return [all_cards[i]] if 0 <= i < len(all_cards) else []
+    w = which[:-3] if which.endswith(".md") else which
+    hits = [c for c in all_cards if c["card"] == w] or [c for c in all_cards if c["thread"] == w]
+    return hits[:1]
+
+
+def set_read(card, value):
+    """Change only the read line of the card's properties, so the rest stays as Obsidian or `thread` wrote it."""
+    text = open(card["file"], encoding="utf-8").read()
+    m = re.match(r"(---\n)(.*?)(\n---\n?)", text, re.S)
+    if not m:
+        return
+    head = m.group(2)
+    new = "read: " + ("true" if value else "false")
+    head = re.sub(r"^read:.*$", new, head, count=1, flags=re.M) if re.search(r"^read:", head, re.M) else head + "\n" + new
+    with open(card["file"] + ".tmp", "w", encoding="utf-8") as f:
+        f.write(m.group(1) + head + m.group(3) + text[m.end():])
+    os.replace(card["file"] + ".tmp", card["file"])
+
+
+def line(i, c):
+    d = c["date"].replace("T", " ")
+    return f"{i:>2}  {d:16}  {c['thread'][:24]:24}  {c['area'][:14]:14}  {c['summary'][:110]}"
+
+
+def obsidian(rel):
+    url = "obsidian://open?vault=" + urllib.parse.quote(os.path.basename(VAULT)) + "&file=" + urllib.parse.quote(rel)
+    subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def main():
+    a = sys.argv[1:]
+    cmd = a[0] if a and not a[0].startswith("-") else "list"
+    rest = a[1:] if a and not a[0].startswith("-") else a
+    all_cards = cards()
+    if cmd in ("-h", "--help", "help"):
+        print(__doc__)
+    elif cmd == "list":
+        shown = all_cards if "--all" in rest else [c for c in all_cards if not c["read"]]
+        if "--json" in rest:
+            print(json.dumps(shown, ensure_ascii=False))
+            return
+        if not shown:
+            print("No unread results." + (" `results --all` lists the read ones." if all_cards else ""))
+            return
+        unread = sum(not c["read"] for c in all_cards)
+        print(f"{unread} unread result{'s' if unread != 1 else ''}" + (f", {len(all_cards)} in all" if "--all" in rest else "")
+              + f" (~/Notes/Results, `results open <n>`):")
+        for i, c in enumerate(shown, 1):
+            print(line(i, c) + ("" if not c["read"] else "  (read)"))
+    elif cmd == "count":
+        print(sum(not c["read"] for c in all_cards))
+    elif cmd in ("show", "path", "open", "read", "unread"):
+        if cmd == "open" and not rest:
+            obsidian("Results/Results.base")
+            return
+        if cmd == "read" and rest == ["--all"]:
+            targets = [c for c in all_cards if not c["read"]]
+        else:
+            targets = [c for w in rest for c in pick(w, all_cards)]
+        if not targets:
+            sys.exit(f"results {cmd}: no such card ({' '.join(rest) or 'nothing given'}); `results --all` lists them.")
+        for c in targets:
+            if cmd == "show":
+                print(open(c["file"], encoding="utf-8").read())
+            elif cmd == "path":
+                print(c["file"])
+            elif cmd == "open":
+                obsidian(os.path.relpath(c["file"], VAULT))
+                set_read(c, True)
+                print(f"Opened {c['card']} in Obsidian.")
+            else:
+                set_read(c, cmd == "read")
+                print(f"{c['card']}: {cmd}")
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main()

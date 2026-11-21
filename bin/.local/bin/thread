@@ -34,6 +34,12 @@
   thread signal <name> [--transcript <file>] for the stop hook: label<TAB>detail<TAB>sent, label one of done,
                                              questions, needs, paused, idle (misc with no step done: waits for
                                              its next job) (sent: the last turn messaged main-chat)
+  thread result <name> [--transcript <file>] the thread's result card in ~/Notes/Results from its newest answer
+                                             (a done stop writes it by itself): one card per thread session,
+                                             newest answer on top, files from /tmp and other short-lived places
+                                             copied to Results/files/<card>/. --backfill [--since YYYY-MM-DD]
+                                             [--dry-run]: once, a card for every session that ended at done
+                                             since then (default 14 days), marked read except today's
   thread watch                               for the agentic-watch timer (every 5 min): a working thread, or one
                                              stopped below its last step without waiting for the owner, whose
                                              pane, transcript and subagents stay unchanged 10 min gives one
@@ -1011,7 +1017,345 @@ def cmd_signal(args):
     # Only the stop hook passes --transcript: a look by hand is not a stop.
     if tpath:
         log_event(name, "stop", fm, label=label, detail=detail)
-    print(f"{label}\t{detail}\t{sent}")
+    print(f"{label}\t{detail}\t{sent}", flush=True)
+    # A done stop leaves its result card in the vault. The hook reads the line above; nothing else is printed.
+    if tpath and label == "done":
+        try:
+            write_card(name, fm, tpath)
+        except Exception as e:
+            print(f"thread signal: no result card for '{name}': {e}", file=sys.stderr)
+
+
+# ---- result cards: what a thread produced, in one place in the vault ----------------------------------
+
+VAULT = os.path.join(HOME, "Notes")
+RESULTS = os.path.join(VAULT, "Results")
+RESULT_DATA = os.path.join(DATA, "results")       # one JSON per thread session: every result it gave
+COPY_MAX = 20 * 1024 * 1024                       # LiveSync takes 50 MB per file; keep the vault light
+# Places that don't last: session scratchpads, /tmp, ~/temp, and ~/Downloads (an inbox for a couple of weeks).
+SHORT_LIVED = ("/tmp/", "/var/tmp/", "/dev/shm/", os.path.join(HOME, "temp") + "/", os.path.join(HOME, "Downloads") + "/")
+PATH_RE = re.compile(r"(?<![\w/.:~-])(~?/[^\s`'\"()\[\]<>,;|*]+)")
+VAULT_REL_RE = re.compile(r"(?<![\w/.:~-])([A-Z][\w.-]*/[^\s`'\"()\[\]<>,;|*]*\.md)\b")
+
+
+def answers(tpath, until=None):
+    """The thread's answers in its transcript: [(unix time, text)], one per assistant message id with text, in
+    order. Text blocks of one message id are joined, like the stop hook does. until: only those before it."""
+    out, idx = [], {}
+    with open(tpath, encoding="utf-8", errors="ignore") as f:
+        for n, line in enumerate(f):
+            if '"assistant"' not in line or '"text"' not in line:
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("type") != "assistant" or e.get("isSidechain"):
+                continue
+            m = e.get("message") or {}
+            texts = [b.get("text", "") for b in m.get("content") or [] if isinstance(b, dict) and b.get("type") == "text"]
+            texts = [t for t in texts if t.strip()]
+            ts = iso_ts(e.get("timestamp", "")) or 0
+            if not texts or (until and ts > until):
+                continue
+            mid = m.get("id") or e.get("uuid") or f"line {n}"
+            if mid in idx:
+                out[idx[mid]] = (out[idx[mid]][0], out[idx[mid]][1] + "\n" + "\n".join(texts))
+            else:
+                idx[mid] = len(out)
+                out.append((ts, "\n".join(texts)))
+    return out
+
+
+FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def written_files(tpath):
+    """Files the session wrote or edited with its file tools, in order."""
+    seen = []
+    with open(tpath, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if '"tool_use"' not in line or not re.search(r'"name":\s*"(Write|Edit|MultiEdit|NotebookEdit)"', line):
+                continue
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            for b in (e.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") in FILE_TOOLS:
+                    p = (b.get("input") or {}).get("file_path") or (b.get("input") or {}).get("notebook_path")
+                    if p and p not in seen:
+                        seen.append(p)
+    return seen
+
+
+def mentioned_paths(text):
+    """Paths in a text as written there (absolute, ~/..., or vault-relative like Marketplace/X.md), each with
+    the file it means. Only existing regular files."""
+    out = []
+    for m in PATH_RE.finditer(text):
+        raw = m.group(1).rstrip(".:!?")
+        real = os.path.expanduser(raw)
+        if raw.startswith("//") or not os.path.isfile(real):
+            continue
+        out.append((raw, os.path.abspath(real)))
+    for m in VAULT_REL_RE.finditer(text):
+        real = os.path.join(VAULT, m.group(1))
+        if os.path.isfile(real):
+            out.append((m.group(1), real))
+    return out
+
+
+def where_section(body):
+    m = re.search(r"^## Where things are\n(.*?)(?=^## |\Z)", body, re.S | re.M)
+    return m.group(1) if m else ""
+
+
+def short_lived(p):
+    return any(os.path.realpath(p).startswith(s) or p.startswith(s) for s in SHORT_LIVED)
+
+
+def in_vault(p):
+    return os.path.realpath(p).startswith(os.path.realpath(VAULT) + "/")
+
+
+def area_of(folder):
+    """A short name for where the thread worked: the project, the school subject or the vault area."""
+    rel = os.path.relpath(os.path.realpath(folder), os.path.realpath(HOME)) if folder else "."
+    if rel.startswith(".."):
+        return os.path.basename(folder.rstrip("/")) or folder
+    parts = [] if rel == "." else rel.split(os.sep)
+    if parts[:1] == ["Projects"] and len(parts) > 1:
+        return parts[1]
+    if parts[:2] == ["Documents", "Schule"] and len(parts) > 2:
+        return "School " + parts[2]
+    if parts[:1] == ["Notes"]:
+        return parts[1] if len(parts) > 1 else "Notes"
+    if parts[:2] == ["Documents", "Diplomarbeit"]:
+        return "Diplomarbeit"
+    if not parts or parts[:3] == [".local", "share", "claude-hub"]:
+        return "home"
+    return parts[-1]
+
+
+def first_line(text):
+    """The answer's first line as plain text: the thread's one-line report."""
+    for l in text.splitlines():
+        if re.fullmatch(r"\s*(\[\[[^\]]*\]\]|`?~?/\S+`?)\s*", l):     # a link or path on its own line
+            continue
+        l = re.sub(r"\[\[(?:[^\]|]*\|)?([^\]]*)\]\]", r"\1", l)
+        l = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", l)
+        l = " ".join(re.sub(r"[*`#>]", "", l).split()).strip(" -")
+        if l:
+            return l[:200]
+    return ""
+
+
+NOTE_EXT = (".md", ".canvas", ".base")
+
+
+def result_file(real):
+    """Not a result: the cards themselves, CLAUDE.md files, code in the vault, agentic's own state and logs."""
+    r = os.path.realpath(real)
+    rel = os.path.relpath(r, os.path.realpath(HOME))
+    return not (r.startswith(os.path.realpath(RESULTS) + "/") or os.path.basename(r) == "CLAUDE.md"
+                or "/deploy/" in r or "/.git/" in r
+                or rel.startswith((".local/share/agentic/", ".local/state/", ".cache/", ".claude/")))
+
+
+def vault_link(real):
+    rel = os.path.relpath(os.path.realpath(real), os.path.realpath(VAULT))
+    if rel.endswith(".md"):
+        rel = rel[:-3]
+    return f"[[{rel}|{os.path.basename(rel)}]]" if "/" in rel else f"[[{rel}]]"
+
+
+def copy_into(src, folder):
+    """Copy a file into folder (made on demand); a different file with the same name gets -2, -3, ..."""
+    os.makedirs(folder, exist_ok=True)
+    base, ext = os.path.splitext(os.path.basename(src))
+    dest, n = os.path.join(folder, base + ext), 2
+    while os.path.exists(dest):
+        if open(dest, "rb").read() == open(src, "rb").read():
+            return dest
+        dest, n = os.path.join(folder, f"{base}-{n}{ext}"), n + 1
+    shutil.copy2(src, dest)
+    return dest
+
+
+def collect_files(text, body, tpath, stem):
+    """What the result points to: files named in the answer or under "Where things are", and vault notes the
+    session wrote. Short-lived files are copied next to the card (Results/files/<card>/). Returns (rewrites
+    {path as written: link}, lines for the Files section)."""
+    # The state file names code and logs too: from there only vault files and short-lived ones count. Of the
+    # files the session wrote, only vault notes (code in the vault, like Homelab/deploy, is not a result).
+    found = mentioned_paths(text)
+    found += [(r, p) for r, p in mentioned_paths(where_section(body)) if in_vault(p) or short_lived(p)]
+    found += [(p, p) for p in written_files(tpath) if in_vault(p) and os.path.isfile(p)
+              and os.path.splitext(p)[1].lower() in NOTE_EXT]
+    rewrites, entries, done = {}, [], {}
+    for raw, real in found:
+        if not result_file(real):
+            continue
+        if real in done:
+            if done[real]:
+                rewrites.setdefault(raw, done[real])
+            continue
+        link = ""
+        if in_vault(real):
+            link = vault_link(real)
+            entries.append(f"- {link}")
+        elif short_lived(real):
+            size = os.path.getsize(real)
+            if size > COPY_MAX:
+                entries.append(f"- `{os.path.basename(real)}` not copied ({size // 1048576} MB, over "
+                               f"{COPY_MAX // 1048576} MB), still at `{real}` for now")
+            else:
+                link = vault_link(copy_into(real, os.path.join(RESULTS, "files", stem)))
+                entries.append(f"- {link} (copied from `{real}`)")
+        else:
+            entries.append(f"- [{os.path.basename(real)}](file://{real.replace(' ', '%20')}) `{real.replace(HOME, '~', 1)}`")
+        done[real] = link
+        if link:
+            rewrites[raw] = link
+    return rewrites, entries
+
+
+def relink(text, rewrites):
+    """Paths in the answer that have a place in the vault point there: a markdown link target gets the vault
+    path, a path in backticks or on its own becomes a wikilink."""
+    for raw in sorted(rewrites, key=len, reverse=True):
+        link = rewrites[raw]
+        target = link[2:-2].split("|")[0]
+        target += "" if os.path.splitext(target)[1] else ".md"
+        text = text.replace(f"]({raw})", "](" + target.replace(" ", "%20") + ")")
+        text = text.replace(f"`{raw}`", link)
+        text = re.sub(r"(?<![\w/.\[(~-])" + re.escape(raw) + r"(?![\w/|\]])", lambda _: link, text)
+    return text
+
+
+def find_card(session):
+    """The card of a thread session, by its `session:` property (it may have been renamed in Obsidian)."""
+    for f in glob.glob(os.path.join(RESULTS, "*.md")):
+        try:
+            head = open(f, encoding="utf-8").read(4000)
+        except OSError:
+            continue
+        if re.search(rf"^session: ['\"]?{re.escape(session)}['\"]?\s*$", head, re.M):
+            return f
+    return None
+
+
+def card_is_read(card):
+    try:
+        head = open(card, encoding="utf-8").read(4000)
+    except OSError:
+        return False
+    m = re.search(r"^read:\s*(\S+)", head, re.M)
+    return bool(m) and m.group(1).lower() in ("true", "yes")
+
+
+def write_card(name, fm, tpath, until=None, read_flag=None):
+    """The thread's result card in ~/Notes/Results: one per thread session, its newest answer on top, earlier
+    ones below. Called at every done stop; an answer it already has changes nothing, and a card the owner
+    marked read stays read. read_flag: read or not for a new answer (backfill); default unread.
+    Returns the card's path, or None when there is no answer."""
+    session = fm.get("session") or ""
+    got = answers(tpath, until)
+    if not got or not session:
+        return None
+    ts, text = got[-1]
+    rec_path = os.path.join(RESULT_DATA, session + ".json")
+    try:
+        rec = json.load(open(rec_path, encoding="utf-8"))
+    except (OSError, ValueError):
+        rec = {"thread": name, "session": session, "results": []}
+    h = hashlib.sha1(text.encode()).hexdigest()
+    card = find_card(session)
+    fresh = not rec["results"] or rec["results"][-1]["hash"] != h
+    if not fresh and card:
+        return card
+    when = datetime.fromtimestamp(ts or time.time())
+    if not card:
+        stem, n = f"{when:%Y-%m-%d}-{name}", 2
+        while os.path.exists(os.path.join(RESULTS, stem + ".md")):
+            stem, n = f"{when:%Y-%m-%d}-{name}-{n}", n + 1
+        card = os.path.join(RESULTS, stem + ".md")
+    stem = os.path.basename(card)[:-3]
+    body = read(name)[1] or ""
+    rewrites, entries = collect_files(text, body, tpath, stem)
+    entry = {"at": when.isoformat(timespec="minutes"), "hash": h, "text": relink(text, rewrites), "files": entries}
+    if fresh:
+        rec["results"].append(entry)
+        unread = True if read_flag is None else not read_flag
+    else:                       # the card was deleted: write it again as it was
+        rec["results"][-1] = entry
+        unread = read_flag is not True
+    rec["card"] = os.path.basename(card)
+    newest = rec["results"][-1]
+    folder = fm.get("folder", "")
+    q = lambda s: json.dumps(s, ensure_ascii=False)
+    props = [("type", "result"), ("thread", name), ("date", newest["at"]), ("updated", newest["at"][:10]),
+             ("area", q(area_of(folder))), ("status", "done"), ("read", "false" if unread else "true"),
+             ("summary", q(first_line(newest["text"]))), ("folder", q(folder.replace(HOME, "~", 1))),
+             ("session", session)]
+    files = []
+    for r in reversed(rec["results"]):
+        files += [f for f in r["files"] if f not in files]
+    out = ["---"] + [f"{k}: {v}" for k, v in props] + ["---", "", "## Result", "",
+                                                         f"*{newest['at'].replace('T', ' ')}, thread `{name}`*", "",
+                                                         newest["text"].rstrip(), ""]
+    if files:
+        out += ["## Files", ""] + files + [""]
+    if len(rec["results"]) > 1:
+        out += ["## Earlier results", ""]
+        for r in reversed(rec["results"][:-1]):
+            out += [f"> [!quote]- {r['at'].replace('T', ' ')}"] + \
+                   [("> " + l).rstrip() for l in r["text"].rstrip().splitlines()] + [""]
+    out += ["## Thread", "", f"- State: `{path(name).replace(HOME, '~', 1)}` (`thread show {name}`)",
+            f"- Folder: `{folder.replace(HOME, '~', 1)}`", f"- Go on with it: `thread resume {name}`", ""]
+    os.makedirs(RESULTS, exist_ok=True)
+    with open(card + ".tmp", "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
+    os.replace(card + ".tmp", card)
+    os.makedirs(RESULT_DATA, exist_ok=True)
+    with open(rec_path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(rec, f, ensure_ascii=False, indent=1)
+    os.replace(rec_path + ".tmp", rec_path)
+    return card
+
+
+def cmd_result(args):
+    if "--backfill" in args:
+        since = args[args.index("--since") + 1] if "--since" in args[:-1] else \
+            datetime.fromtimestamp(time.time() - 14 * 86400).strftime("%Y-%m-%d")
+        cut = datetime.fromisoformat(since).timestamp()
+        last = {}
+        for e in load_events():
+            if e.get("event") == "stop" and e.get("label") == "done" and e["ts"] >= cut and e.get("session"):
+                last[(e["thread"], e["session"])] = e
+        today = datetime.now().strftime("%Y-%m-%d")
+        for (name, session), e in sorted(last.items(), key=lambda kv: kv[1]["ts"]):
+            tp = transcript_of(session)
+            have = find_card(session)
+            print(f"{e['at'][:16]}  {name:28} {'has a card' if have else 'no transcript' if not tp else 'new card'}")
+            if have or not tp or "--dry-run" in args:
+                continue
+            fm = dict(read(name)[0] or {}, session=session)
+            card = write_card(name, fm, tp, until=e["ts"] + 5, read_flag=not e["at"].startswith(today))
+            print(f"{'':18}-> {card.replace(HOME, '~', 1) if card else 'no answer found'}")
+        return
+    if not args:
+        sys.exit("thread result <name> [--transcript <file>] | --backfill [--since YYYY-MM-DD] [--dry-run]")
+    name = slug(args[0])
+    fm, _ = read(name)
+    if fm is None:
+        sys.exit(f"No thread '{name}'.")
+    tp = args[args.index("--transcript") + 1] if "--transcript" in args[:-1] else transcript_of(fm.get("session", ""))
+    if not tp:
+        sys.exit(f"No transcript for '{name}'.")
+    card = write_card(name, fm, tp)
+    print(card.replace(HOME, "~", 1) if card else f"'{name}' has no answer yet.")
 
 
 
@@ -1541,6 +1885,8 @@ def main():
         cmd_answer(rest)
     elif cmd == "signal":
         cmd_signal(rest)
+    elif cmd == "result":
+        cmd_result(rest)
     elif cmd == "watch":
         cmd_watch(rest)
     elif cmd == "durations":
