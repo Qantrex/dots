@@ -564,6 +564,17 @@ class ResultCardTest(unittest.TestCase):
         self.assertLess(c.index("## Earlier results"), c.index("> First result."))
         self.assertIn('summary: "Second result."', c)
 
+    def test_a_short_follow_up_keeps_the_files_and_links_of_the_first_answer(self):
+        first = f"Report ready.\n`{self.pdf}`"
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5, first)])
+        self.e.run("signal", "demo", "--transcript", tp)
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5, first), prompt(100, "thanks"), answer(105, "Yes.")])
+        self.e.run("signal", "demo", "--transcript", tp)
+        c = self.card()
+        self.assertIn('summary: "Yes."', c)
+        self.assertIn("report.pdf|report.pdf]]", c.split("## Files")[1])           # still listed
+        self.assertIn("> [[Results/files/", c.split("## Earlier results")[1])      # earlier text keeps its link
+
     def test_files_are_vault_notes_it_wrote_not_code_or_claude_md(self):
         note = os.path.join(self.vault, "Area", "Plan.md")
         code = os.path.join(self.vault, "Homelab", "deploy", "x", "run.md")
