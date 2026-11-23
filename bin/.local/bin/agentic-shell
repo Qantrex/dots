@@ -1049,7 +1049,7 @@ def cmd_notify_wait(args):
         if r.returncode:
             sh(["notify-send", "-a", "Claude", "-t", "4000", "Not answered", (r.stderr.strip() or "That request is gone.")[:200]])
     elif act in ("default", "open"):
-        subprocess.run([os.path.join(BIN, "dock"), "show", target], timeout=30)
+        subprocess.run([os.path.join(BIN, "dock"), "show", "--focus", target], timeout=30)
     elif act == "term":
         subprocess.run([os.path.join(SCRIPTS, "claude-jump.sh"), session], timeout=30)
 

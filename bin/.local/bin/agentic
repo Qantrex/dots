@@ -95,7 +95,7 @@ on)
     else
         (atlas refresh >/dev/null 2>&1 &)
     fi
-    echo "Main chat is on (tmux window $session:main; SUPER+SHIFT+A shows the panel)."
+    echo "Main chat is on (tmux window $session:main, Alt+1 in your terminal; SUPER+SHIFT+A shows the panel)."
     ;;
 off)
     mkdir -p "$state"; touch "$off_flag"

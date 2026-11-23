@@ -2,8 +2,12 @@
 # The side panel for the main Claude chat and its threads (`agentic`, `thread`).
 #   dock toggle          SUPER+SHIFT+A: show the panel with the main chat; from a thread back to the main
 #                        chat; from the main chat hide it
-#   dock show [target]   show the panel with the main chat ("main", the default), a thread by name, a tmux
-#                        pane (%12) or --first (the session that has waited longest)
+#   dock show [--focus] [target]
+#                        switch tmux session "main" (the terminal I work in, main:1) to the main chat ("main",
+#                        the default), a thread by name, a tmux pane (%12) or --first (the session that has
+#                        waited longest), and say how to get back (Alt+1). --focus also brings that terminal to
+#                        the front (clicks on notifications and the bar). No terminal shows "main": the panel.
+#   dock panel [target]  show it in the side panel instead (what `dock show` did before 2026-11-23)
 #   dock term [target]   the same, but always as the real Claude Code terminal (theme root-agentic: Ctrl+T
 #                        in the shell's panel)
 #   dock hide            hide it
@@ -16,7 +20,7 @@
 # tmux sizes a window to the client used last, and Claude Code redraws cleanly at the new width.
 #
 # In the theme root-agentic the Quickshell shell has its own panel in the same place (agentic/Panel.qml,
-# services/Agentic.qml). While it is on, toggle and show open that one for the main chat and the threads,
+# services/Agentic.qml). While it is on, toggle and panel open that one for the main chat and the threads,
 # and the terminal stays one `dock term` away. Every other theme and the desktop PC work as described above.
 
 set -u
@@ -142,6 +146,48 @@ toggle)
     select_target main
     toggle; focus ;;
 show)
+    # The owner works in tmux session "main" in a terminal, not in the panel (2026-11-23): switch that
+    # session's window. The panel's own session ("panel") keeps its window; nothing opens by itself.
+    shift
+    focus_term=""; [[ ${1:-} == --focus ]] && { focus_term=1; shift; }
+    name=${1:-main}
+    [[ $name == --first ]] && name=$(first_waiting)
+    if [[ $name == %* ]]; then
+        win=$(tmux display -p -t "$name" '#{window_id}' 2>/dev/null)
+        [[ $(tmux display -p -t "$name" '#{session_name}' 2>/dev/null) == "$session" ]] || win=""
+    else
+        win=$(window_of "$name")
+    fi
+    if [[ -z $win ]]; then
+        echo "No window '$name' in tmux session '$session' (thread list, thread resume $name)." >&2
+        [[ -n $focus_term ]] && notify-send -a Claude "Claude" "No thread called '$name' is running."
+        exit 1
+    fi
+    client=$(tmux list-clients -t "=$session" -F '#{client_pid}' 2>/dev/null | head -1)
+    if [[ -z $client ]]; then
+        echo "No terminal shows tmux session '$session'; showing it in the side panel (or: tmux attach -t $session)."
+        exec "$0" panel "${1:-main}"
+    fi
+    tmux select-window -t "$win"
+    [[ $name == %* ]] && tmux select-pane -t "$name"
+    label=$(tmux display -p -t "$win" '#{session_name}:#{window_index} #{window_name}')
+    main_idx=$(tmux display -p -t "$(window_of main)" '#{window_index}' 2>/dev/null)
+    if [[ $(tmux display -p -t "$win" '#{window_name}') == main ]]; then
+        echo "tmux $label (the main chat) is on screen."
+    else
+        echo "tmux $label is on screen in your terminal. Back to the main chat: Alt+${main_idx:-1}" \
+             "(or Ctrl+A l for the last window, or dock show main)."
+    fi
+    if [[ -n $focus_term ]]; then
+        p=$client
+        while [[ -n $p && $p != 1 && $p != 0 ]]; do
+            [[ $(cat /proc/"$p"/comm 2>/dev/null) == foot ]] && break
+            p=$(awk '/^PPid:/{print $2}' /proc/"$p"/status 2>/dev/null)
+        done
+        [[ -n $p && $p != 1 && $p != 0 ]] && hyprctl dispatch "hl.dsp.focus({ window = \"pid:$p\" })" >/dev/null
+    fi
+    exit 0 ;;
+panel)
     if [[ -n $native ]] && name=$(native_target "${2:-main}"); then
         shown && toggle
         panel_call open "$name"
@@ -170,6 +216,6 @@ status)
     w=$(tmux display -p -t "$panel:" '#{window_name}' 2>/dev/null)
     echo "panel: $(shown && echo shown || echo hidden), showing ${w:-?}" ;;
 *)
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
     exit 1 ;;
 esac
