@@ -408,7 +408,7 @@ def shows(pane, typed, wait=5.0):
 def send_to(pane, text, name="", quiet=True):
     if not empty_prompt(pane):
         if not quiet:
-            print(f"thread send: '{name}' is asking something or has text typed already; answer it in its terminal (dock term {name})", file=sys.stderr)
+            print(f"thread send: '{name}' is asking something or has text typed already; answer it in its terminal (dock show {name})", file=sys.stderr)
         return 3
     text = text.replace("\r\n", "\n").replace("\r", "\n")   # a carriage return is Enter
     # Typed keys are keys: a tab would complete or accept a suggestion, an escape would clear the
@@ -418,7 +418,7 @@ def send_to(pane, text, name="", quiet=True):
     def typed_not_sent():
         # Left as it is: clearing it would mean pressing keys into a session in an unknown state.
         if not quiet:
-            print(f"thread send: the text is typed in the input of '{name}' but was not sent; look at it in its terminal (dock term {name})", file=sys.stderr)
+            print(f"thread send: the text is typed in the input of '{name}' but was not sent; look at it in its terminal (dock show {name})", file=sys.stderr)
         return 4
 
     # Typed as keys, in pieces with a short pause between them: Claude Code takes about 800
@@ -992,7 +992,7 @@ def cmd_answer(args):
     if code:
         why = {2: "it isn't running (thread resume, then thread answer --resend)",
                3: "it has a dialog or typed text open (thread answer --resend later)",
-               4: f"the text is typed in its input but was not sent (look at it with dock term {name}, clear it, "
+               4: f"the text is typed in its input but was not sent (look at it with dock show {name}, clear it, "
                   "then thread answer --resend)"}.get(code, "tmux failed")
         print(f"Answers for '{name}' stored, not delivered: {why}.", file=sys.stderr)
         sys.exit(3)

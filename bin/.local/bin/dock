@@ -152,9 +152,13 @@ show)
     focus_term=""; [[ ${1:-} == --focus ]] && { focus_term=1; shift; }
     name=${1:-main}
     [[ $name == --first ]] && name=$(first_waiting)
+    sess=$session
     if [[ $name == %* ]]; then
+        # A pane: its window in tmux "main" (the panel's grouped session counts as main), or in whatever
+        # other tmux session it runs in (a plain `claude` in a terminal of its own).
         win=$(tmux display -p -t "$name" '#{window_id}' 2>/dev/null)
-        [[ $(tmux display -p -t "$name" '#{session_name}' 2>/dev/null) == "$session" ]] || win=""
+        sess=$(tmux display -p -t "$name" '#{session_name}' 2>/dev/null)
+        [[ $sess == "$panel" ]] && sess=$session
     else
         win=$(window_of "$name")
     fi
@@ -163,16 +167,24 @@ show)
         [[ -n $focus_term ]] && notify-send -a Claude "Claude" "No thread called '$name' is running."
         exit 1
     fi
-    client=$(tmux list-clients -t "=$session" -F '#{client_pid}' 2>/dev/null | head -1)
+    client=$(tmux list-clients -t "=$sess" -F '#{client_pid}' 2>/dev/null | head -1)
     if [[ -z $client ]]; then
-        echo "No terminal shows tmux session '$session'; showing it in the side panel (or: tmux attach -t $session)."
-        exec "$0" panel "${1:-main}"
+        if [[ $sess == "$session" ]]; then
+            echo "No terminal shows tmux session '$session'; showing it in the side panel (or: tmux attach -t $session)."
+            exec "$0" panel "${1:-main}"
+        fi
+        echo "No terminal shows tmux session '$sess' (tmux attach -t $sess)." >&2
+        [[ -n $focus_term ]] && notify-send -a Claude "Claude" "That session has no terminal open (tmux attach -t $sess)."
+        exit 1
     fi
-    tmux select-window -t "$win"
+    # Named with its session: "panel" shares these windows, and a bare id could switch that one instead.
+    tmux select-window -t "=$sess:$win"
     [[ $name == %* ]] && tmux select-pane -t "$name"
-    label=$(tmux display -p -t "$win" '#{session_name}:#{window_index} #{window_name}')
+    label=$sess:$(tmux display -p -t "=$sess:$win" '#{window_index} #{window_name}')
     main_idx=$(tmux display -p -t "$(window_of main)" '#{window_index}' 2>/dev/null)
-    if [[ $(tmux display -p -t "$win" '#{window_name}') == main ]]; then
+    if [[ $sess != "$session" ]]; then
+        echo "tmux $label is on screen in its own terminal."
+    elif [[ $(tmux display -p -t "=$sess:$win" '#{window_name}') == main ]]; then
         echo "tmux $label (the main chat) is on screen."
     else
         echo "tmux $label is on screen in your terminal. Back to the main chat: Alt+${main_idx:-1}" \
