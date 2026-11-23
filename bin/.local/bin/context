@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# What "this" means right now, for a Claude session: the window you used last (not the Claude panel or quick
-# ask), what it shows if it's a terminal, the selected text, the clipboard and the newest screenshot.
+# What "this" means right now, for a Claude session: the window you used last (not the Claude panel, quick
+# ask or the terminal that shows the main chat), what it shows if it's a terminal, the selected text, the clipboard and the newest screenshot.
 #   context            print it (about 1-3k tokens)
 # Selected text and clipboard are left out when they look like a password (one long word with mixed
 # characters), because password managers copy through the clipboard.
@@ -29,8 +29,20 @@ foot_tmux_pane() {   # the tmux pane a foot window shows, from its client proces
 }
 
 echo "# Context ($(date '+%a %H:%M'))"
-w=$(hyprctl clients -j | jq -c --arg skip "$skip" \
-    '[.[] | select(.focusHistoryID >= 0 and (.class | test($skip) | not))] | sort_by(.focusHistoryID) | .[0] // empty')
+# The owner talks to the main chat in a terminal on tmux main:1 (2026-11-23), not only in the panel: a terminal
+# that shows the main chat's own pane is where they typed the question, not what "this" is. Skip it too.
+main_pane=$(tmux list-windows -t =main -F '#{window_name} #{automatic-rename} #{pane_id}' 2>/dev/null |
+    awk '$1 == "main" && $2 == "0" { print $3; exit }')
+w=""
+while read -r cand; do
+    [[ -z $cand ]] && continue
+    if [[ -n $main_pane && $(jq -r .class <<<"$cand") == foot* ]] &&
+        [[ $(foot_tmux_pane "$(jq -r .pid <<<"$cand")") == "$main_pane" ]]; then
+        continue
+    fi
+    w=$cand; break
+done < <(hyprctl clients -j | jq -c --arg skip "$skip" \
+    '[.[] | select(.focusHistoryID >= 0 and (.class | test($skip) | not))] | sort_by(.focusHistoryID) | .[]')
 if [[ -n $w ]]; then
     class=$(jq -r .class <<<"$w"); title=$(jq -r .title <<<"$w"); ws=$(jq -r .workspace.name <<<"$w"); pid=$(jq -r .pid <<<"$w")
     echo
