@@ -1,0 +1,7 @@
+# Activate the Secret Service through the systemd unit (gnome-keyring-daemon.service, the daemon on the control
+# socket that pam_gnome_keyring unlocks at login) instead of starting a second daemon of its own. Overrides
+# /usr/share/dbus-1/services/org.gnome.keyring.service (this directory is searched first).
+[D-BUS Service]
+Name=org.gnome.keyring
+Exec=/usr/bin/gnome-keyring-daemon --start --foreground --components=secrets
+SystemdService=gnome-keyring-daemon.service

@@ -492,6 +492,23 @@ sudo ~/.config/scripts/setup-boot-style.sh   # --dry-run / --boot / --greeter / 
 
 Needs `terminus-font greetd-tuigreet`.
 
+### Login keyring
+
+The login password is the only one at login. greetd hands it to `pam_gnome_keyring`, which unlocks the
+keyring called `login` in the systemd `gnome-keyring-daemon` (the D-Bus files in `keyring/` make apps use that
+daemon instead of starting a second one). Everything that used to ask after the login reads from there:
+`ssh-unlock --login` takes the ssh passphrases, and rbw (`rbw config set pinentry ~/.local/bin/rbw-pinentry`)
+the Bitwarden master password, which aerc needs at start for its mail passwords. So the login password now
+opens the ssh keys and the Bitwarden vault too. The Vault's master password re-prompt still asks.
+
+```bash
+ssh-unlock --save; rbw-pinentry --save          # once: put the secrets in the keyring
+~/.config/scripts/setup-login-keyring.sh        # /etc/pam.d/greetd (sudo) and keyring "login"; --dry-run
+```
+
+Then log out and in. The keyring password has to be the login password; after changing the login password
+with `passwd`, change the keyring's too (Seahorse), or the next login asks for the keyring once.
+
 ---
 
 ## Maintenance
@@ -832,7 +849,8 @@ hand. All of it is plain scripts in `bin/.local/bin`, usable without any agent:
 | `atlas [topic]` | a map of the machine (repos, deadlines, keybinds, tools, packages, services, sessions) |
 | `claude-usage report/calibrate/estimate` | Claude usage from the local transcripts, priced at API rates |
 | `run-logged <cmd>` | run a command as usual and keep a clean log for Claude to read |
-| `ssh-unlock` | load the keys from `~/.ssh/config` with a passphrase window (also at login) |
+| `ssh-unlock` | load the keys from `~/.ssh/config` into the agent (also at login): passphrases from the login keyring, else a window that offers to save them; `--save` / `--forget` manage the saved ones |
+| `rbw-pinentry` | rbw's pinentry: answers the database unlock from the login keyring, everything else goes to the normal pinentry; `--save` / `--forget` |
 
 Private settings (areas, the chat's rules) live in a separate private repo and are linked into
 `~/.config/agentic/` and `~/.local/share/agentic/main/`.
