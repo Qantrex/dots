@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Pinentry for rbw that answers the Bitwarden master password from the login keyring.
+
+rbw (`rbw config set pinentry ~/.local/bin/rbw-pinentry`) runs this whenever it needs the master password.
+When the login keyring (gnome-keyring, unlocked by the login password through PAM) holds it, the answer comes
+from there and no window opens. Only the unlock of the local database is answered. Everything else goes to the
+real pinentry (/usr/bin/pinentry, or $RBW_PINENTRY_FALLBACK): the master password re-prompt of single entries
+(the Vault entry keeps asking every time, see the README), two-factor codes, API keys, a missing password, and
+every retry after rbw said the password was wrong. After a master password typed into the real pinentry, a window offers to save it.
+A saved password that rbw rejects is removed again, so the next prompt can replace it.
+
+    rbw-pinentry --save      ask for the master password once and save it in the keyring
+    rbw-pinentry --forget    remove it from the keyring
+
+The password only travels through pipes (secret-tool, the Assuan D line); it never reaches argv or a log.
+Keyring item: application=rbw profile=<$RBW_PROFILE or "default">.
+"""
+
+import os
+import subprocess
+import sys
+
+FALLBACK = os.environ.get("RBW_PINENTRY_FALLBACK", "/usr/bin/pinentry")
+PROFILE = os.environ.get("RBW_PROFILE") or "default"
+ATTRS = ["application", "rbw", "profile", PROFILE]
+LABEL = f"rbw master password ({PROFILE})"
+# Set when the password came from the keyring, so a following "wrong password" retry can drop the item.
+SERVED = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), f"rbw-pinentry-served-{PROFILE}")
+
+
+def unescape(s: str) -> str:
+    out, i = bytearray(), 0
+    b = s.encode()
+    while i < len(b):
+        if b[i] == 0x25 and i + 3 <= len(b):  # %XX
+            try:
+                out.append(int(b[i + 1:i + 3], 16))
+                i += 3
+                continue
+            except ValueError:
+                pass
+        out.append(b[i])
+        i += 1
+    return out.decode(errors="replace")
+
+
+def escape(s: str) -> str:
+    return "".join(f"%{ord(c):02X}" if c in "%\r\n" or ord(c) < 0x20 else c for c in s)
+
+
+def keyring_lookup() -> str:
+    try:
+        r = subprocess.run(["secret-tool", "lookup", *ATTRS], capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return r.stdout.decode(errors="replace").rstrip("\n") if r.returncode == 0 else ""
+
+
+def keyring_store(pin: str) -> bool:
+    try:
+        r = subprocess.run(["secret-tool", "store", f"--label={LABEL}", *ATTRS],
+                           input=pin.encode(), capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
+
+
+def keyring_clear() -> None:
+    subprocess.run(["secret-tool", "clear", *ATTRS], capture_output=True)
+
+
+def zenity(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["zenity", *args], capture_output=True, stdin=subprocess.DEVNULL)
+
+
+def offer_save(pin: str) -> None:
+    if zenity("--question", "--title=rbw",
+              "--text=Save the Bitwarden master password in the login keyring, "
+              "so rbw unlocks with the login and doesn't ask again?").returncode == 0:
+        keyring_store(pin)
+
+
+def send(line: str) -> None:
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
+
+
+def fallback(buffered: list[str], is_master: bool) -> None:
+    """Hand the conversation to the real pinentry: replay what rbw said so far, then proxy."""
+    try:
+        p = subprocess.Popen([FALLBACK, *sys.argv[1:]], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             text=True, bufsize=1)
+    except OSError:
+        send("ERR 83886179 no pinentry")
+        return
+
+    def response() -> list[str]:
+        lines = []
+        while True:
+            line = p.stdout.readline()
+            if not line:
+                return lines
+            lines.append(line.rstrip("\n"))
+            if line.startswith(("OK", "ERR")):
+                return lines
+
+    response()  # the real pinentry's greeting; rbw already got ours
+    for cmd in buffered:
+        p.stdin.write(cmd + "\n")
+        p.stdin.flush()
+        response()  # rbw already got an OK for each of these
+    p.stdin.write("GETPIN\n")
+    p.stdin.flush()
+    got = response()
+    pin = "".join(unescape(line[2:]) for line in got if line.startswith("D "))
+    for line in got:
+        send(line)
+    if is_master and pin and got and got[-1].startswith("OK"):
+        offer_save(pin)
+    pin = ""
+    for line in sys.stdin:  # whatever rbw says next (usually BYE) goes straight through
+        p.stdin.write(line)
+        p.stdin.flush()
+        for out in response():
+            send(out)
+        if line.startswith("BYE"):
+            break
+    p.stdin.close()
+    p.wait()
+
+
+def serve() -> None:
+    send("OK Pleased to meet you")
+    buffered, prompt, desc, error = [], "", "", False
+    for raw in sys.stdin:
+        line = raw.rstrip("\n")
+        cmd, _, arg = line.partition(" ")
+        cmd = cmd.upper()
+        if cmd == "BYE":
+            send("OK closing connection")
+            return
+        if cmd != "GETPIN":
+            if cmd == "SETPROMPT":
+                prompt = unescape(arg)
+            elif cmd == "SETDESC":
+                desc = unescape(arg)
+            elif cmd == "SETERROR":
+                error = True
+            buffered.append(line)
+            send("OK")
+            continue
+        is_master = prompt == "Master Password" and desc.startswith("Unlock the local database")
+        if is_master and error and os.path.exists(SERVED):
+            keyring_clear()  # the saved password was just rejected
+        try:
+            os.unlink(SERVED)
+        except FileNotFoundError:
+            pass
+        pin = keyring_lookup() if is_master and not error else ""
+        if pin:
+            with open(SERVED, "w"):
+                pass
+            send("D " + escape(pin))
+            send("OK")
+            pin = ""
+            continue
+        fallback(buffered, is_master)
+        return
+
+
+def main() -> int:
+    if sys.argv[1:] == ["--save"]:
+        r = zenity("--password", "--title=Bitwarden master password (saved in the login keyring)")
+        pin = r.stdout.decode(errors="replace").rstrip("\n")
+        if r.returncode != 0 or not pin:
+            print("cancelled")
+            return 1
+        ok = keyring_store(pin)
+        print("saved" if ok else "could not save")
+        return 0 if ok else 1
+    if sys.argv[1:] == ["--forget"]:
+        keyring_clear()
+        print("forgot")
+        return 0
+    serve()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
