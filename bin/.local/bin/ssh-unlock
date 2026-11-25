@@ -1,28 +1,85 @@
 #!/usr/bin/env bash
-# Load the ssh keys from ~/.ssh/config (IdentityFile lines) into the agent, asking for each passphrase in a
-# small window instead of a terminal. Works from scripts and Claude sessions, which have no terminal to ask in:
-# the passphrase goes from the window straight to ssh-add, nothing else sees it.
+# Load the ssh keys from ~/.ssh/config (IdentityFile lines) into the agent. Each passphrase comes from the login
+# keyring (gnome-keyring, unlocked by the login password through PAM) if it is saved there; otherwise a small
+# window asks for it and offers to save it. Works from scripts and Claude sessions, which have no terminal to
+# ask in. A passphrase only ever travels through a pipe to ssh-add or secret-tool: never argv, never output.
 #   ssh-unlock            load every configured key the agent doesn't hold yet
 #   ssh-unlock --check    only list what's missing (exit 1 if something is)
-#   ssh-unlock --login    same as plain, quietly; started at login
-# The agent keeps the keys until logout or reboot.
+#   ssh-unlock --login    same as plain, silent when every key loads from the keyring; started at login
+#   ssh-unlock --save     ask for every configured key's passphrase, check it, save it in the keyring
+#   ssh-unlock --forget   remove the saved passphrases from the keyring
+# The agent keeps the keys until logout or reboot. Keyring items: application=ssh-unlock key=<key path>.
 
 set -u
 if [[ ${SSH_UNLOCK_ASKPASS:-} == 1 ]]; then
-    # Called by ssh-add as its askpass program: $1 is ssh-add's prompt text.
-    exec zenity --password --title="${1:-ssh passphrase}" 2>/dev/null
+    # Called by ssh-add as its askpass program: the passphrase waits on fd 3. A second call (ssh-add asking
+    # again after a wrong passphrase) finds the pipe empty and answers nothing, so ssh-add gives up.
+    IFS= read -r -d '' p <&3 2>/dev/null
+    [[ -n ${p:-} ]] || exit 1
+    printf '%s\n' "$p"
+    exit 0
 fi
 
 export SSH_AUTH_SOCK=${SSH_AUTH_SOCK:-${XDG_RUNTIME_DIR:-/run/user/$UID}/ssh-agent.socket}
-loaded=$(ssh-add -l 2>/dev/null | awk '{print $2}')
-missing=()
+have_keyring=0
+command -v secret-tool >/dev/null && have_keyring=1
+
+# add_key KEY: ssh-add KEY with the passphrase in $pass (a variable, read through fd 3 by the askpass above).
+add_key() {
+    SSH_UNLOCK_ASKPASS=1 SSH_ASKPASS="$0" SSH_ASKPASS_REQUIRE=force ssh-add "$1" </dev/null >/dev/null 2>&1 \
+        3< <(printf '%s' "$pass")
+}
+ask() {  # ask TITLE: the passphrase window; empty on cancel
+    zenity --password --title="$1" 2>/dev/null
+}
+save() {  # save KEY: store $pass for KEY in the login keyring
+    printf '%s' "$pass" | secret-tool store --label="ssh passphrase ${1/#$HOME/\~}" \
+        application ssh-unlock key "$1" 2>/dev/null
+}
+short() { printf '%s' "${1/#$HOME/\~}"; }
+
+configured=()
 while read -r key; do
     key=${key/#\~/$HOME}
-    [[ -f $key && -f $key.pub ]] || continue
+    [[ -f $key && -f $key.pub ]] && configured+=("$key")
+done < <(awk 'tolower($1) == "identityfile" {print $2}' "${SSH_UNLOCK_CONFIG:-$HOME/.ssh/config}" 2>/dev/null | sort -u)
+
+case ${1:-} in
+--save)
+    (( have_keyring )) || { echo "secret-tool is missing (libsecret)"; exit 1; }
+    # Each passphrase is checked against a throwaway agent before it is saved.
+    tmp=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/ssh-unlock.XXXXXX")
+    trap 'ssh-agent -k >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+    eval "$(ssh-agent -a "$tmp/agent" 2>/dev/null)" >/dev/null || { echo "could not start a test agent"; exit 1; }
+    status=0
+    for key in "${configured[@]}"; do
+        title="Passphrase for $(short "$key") (saved in the login keyring)"
+        while :; do
+            pass=$(ask "$title") || pass=
+            [[ -n $pass ]] || { echo "skipped $(short "$key")"; status=1; break; }
+            if add_key "$key"; then
+                save "$key" && echo "saved $(short "$key")" || { echo "could not save $(short "$key")"; status=1; }
+                break
+            fi
+            title="Wrong passphrase for $(short "$key"), try again"
+        done
+        pass=
+    done
+    exit $status ;;
+--forget)
+    for key in "${configured[@]}"; do
+        secret-tool clear application ssh-unlock key "$key" 2>/dev/null && echo "forgot $(short "$key")"
+    done
+    exit 0 ;;
+esac
+
+loaded=$(ssh-add -l 2>/dev/null | awk '{print $2}')
+missing=()
+for key in "${configured[@]}"; do
     fp=$(ssh-keygen -lf "$key.pub" 2>/dev/null | awk '{print $2}')
     [[ -n $fp ]] && grep -qxF "$fp" <<<"$loaded" && continue
     missing+=("$key")
-done < <(awk 'tolower($1) == "identityfile" {print $2}' "${SSH_UNLOCK_CONFIG:-$HOME/.ssh/config}" 2>/dev/null | sort -u)
+done
 
 case ${1:-} in
 --check)
@@ -33,7 +90,35 @@ esac
 (( ${#missing[@]} )) || { [[ ${1:-} == --login ]] || echo "all configured keys are loaded"; exit 0; }
 status=0
 for key in "${missing[@]}"; do
-    SSH_UNLOCK_ASKPASS=1 SSH_ASKPASS="$0" SSH_ASKPASS_REQUIRE=force ssh-add "$key" </dev/null >/dev/null 2>&1 \
-        && echo "loaded ${key/#$HOME/\~}" || { echo "not loaded: ${key/#$HOME/\~} (cancelled or wrong passphrase)"; status=1; }
+    # 1. The saved passphrase, if there is one. A wrong one (the key's passphrase changed) is removed.
+    if (( have_keyring )); then
+        pass=$(secret-tool lookup application ssh-unlock key "$key" 2>/dev/null) || pass=
+        if [[ -n $pass ]]; then
+            if add_key "$key"; then
+                pass=; [[ ${1:-} == --login ]] || echo "loaded $(short "$key")"; continue
+            fi
+            secret-tool clear application ssh-unlock key "$key" 2>/dev/null
+        fi
+    fi
+    # 2. Ask, up to three times, and offer to save it.
+    title="ssh passphrase for $(short "$key")"
+    ok=0
+    for _ in 1 2 3; do
+        pass=$(ask "$title") || pass=
+        [[ -n $pass ]] || break
+        if add_key "$key"; then ok=1; break; fi
+        title="Wrong passphrase for $(short "$key"), try again"
+    done
+    if (( ok )); then
+        echo "loaded $(short "$key")"
+        if (( have_keyring )) && zenity --question --title="ssh-unlock" \
+            --text="Save the passphrase for $(short "$key") in the login keyring, so it loads at login without asking?" \
+            2>/dev/null; then
+            save "$key" && echo "saved $(short "$key") in the keyring"
+        fi
+    else
+        echo "not loaded: $(short "$key") (cancelled or wrong passphrase)"; status=1
+    fi
+    pass=
 done
 exit $status
