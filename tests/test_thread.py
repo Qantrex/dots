@@ -688,6 +688,71 @@ class AskTest(unittest.TestCase):
         self.assertEqual(self.e.run("signal", "demo"), "questions\t2 questions\t\n")
 
 
+class NeedsTest(unittest.TestCase):
+    """`thread needs` from the thread itself tells the owner at once, once per text (2026-11-26: a thread lost
+    its link to a device and nobody heard until it stopped)."""
+
+    def setUp(self):
+        self.e = Env()
+        self.e.state("demo", "s-demo", progress="2/5 copying")
+        self.bin = os.path.join(self.e.dir, ".local", "bin")
+        os.makedirs(self.bin)
+        self.calls = os.path.join(self.e.dir, "calls")
+        for tool in ("inbox", "desk"):
+            with open(os.path.join(self.bin, tool), "w") as f:
+                f.write(f'#!/bin/sh\nprintf "{tool}\\t" >> "{self.calls}"; printf "%s\\t" "$@" >> "{self.calls}"; '
+                        f'echo >> "{self.calls}"\n')
+            os.chmod(os.path.join(self.bin, tool), 0o755)
+
+    def tearDown(self):
+        self.e.close()
+
+    def needs(self, *args, inside="demo"):
+        env = dict(self.e.env, AGENTIC_THREAD=inside)
+        r = subprocess.run([sys.executable, THREAD, "needs", *args], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def sent(self):
+        try:
+            return [l.rstrip("\t").split("\t") for l in open(self.calls).read().splitlines()]
+        except OSError:
+            return []
+
+    def test_a_new_needs_line_wakes_the_main_chat_once_and_the_stop_only_queues(self):
+        out = self.needs("SSH to the laptop dropped at 20:18")
+        self.assertIn("told now", out)
+        line = ["inbox", "add", "--wake", "needs", "thread", "'demo': needs: SSH to the laptop dropped at 20:18"]
+        self.assertEqual(self.sent(), [line])
+        self.assertNotIn("told", self.needs("SSH to the laptop dropped at 20:18"))   # same text: nobody again
+        self.assertEqual(len(self.sent()), 1)
+        tp = self.e.transcript("s-demo", [prompt(0), answer(5)])
+        self.assertEqual(self.e.run("signal", "demo", "--transcript", tp),
+                         "needs\tSSH to the laptop dropped at 20:18\tnotified\n")      # the hook queues, no wake
+        self.needs("laptop is off, power it on")                                        # a new text: told
+        self.assertEqual(self.sent()[-1][-1], "'demo': needs: laptop is off, power it on")
+        self.needs("--clear")
+        self.needs("laptop is off, power it on")                                        # broke again after clear
+        self.assertEqual(len(self.sent()), 3)
+        self.assertEqual(self.e.run("signal", "demo"), "needs\tlaptop is off, power it on\tnotified\n")
+
+    def test_set_by_the_main_chat_or_unsent_tells_nobody_and_the_stop_wakes_as_before(self):
+        self.needs("demo", "plug in the stick", inside="")                             # the main chat by hand
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(self.e.run("signal", "demo"), "needs\tplug in the stick\t\n")
+        os.remove(os.path.join(self.bin, "inbox"))                                      # no inbox: not marked told
+        self.needs("plug in the stick")
+        self.assertEqual(self.e.run("signal", "demo"), "needs\tplug in the stick\t\n")
+
+    def test_a_silent_thread_gets_a_desktop_notification_without_content(self):
+        fm_path = os.path.join(self.e.threads, "demo.md")
+        text = open(fm_path).read().replace("\n---\n", "\nreport: none\n---\n", 1)
+        open(fm_path, "w").write(text)
+        self.needs("the capture stopped")
+        self.assertEqual(self.sent(), [["desk", "notify", "demo: needs you"]])
+        self.assertEqual(self.e.run("signal", "demo").split("\t")[2], "silent\n")
+
+
 class ProfileTest(unittest.TestCase):
     """Profiles: one file per standing thread, `thread profiles` finds mistakes, silent threads stay away from
     the main chat."""

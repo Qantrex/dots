@@ -44,7 +44,9 @@
                                              <total>/<total> is the done signal
   thread needs [<name>] "<what the owner has to do>" | --clear
                                              the thread waits for the owner: front matter `needs:` and a line
-                                             under "Open for the owner"
+                                             under "Open for the owner"; run by the thread itself, a new text
+                                             also wakes the main chat at once ([needs] inbox line; a silent
+                                             thread: a desktop notification) while it keeps working
   thread ask [<name>] [file]                 questions for the owner as JSON (stdin or file), in the shape
                                              AskUserQuestion takes: {"questions": [{question, header, options:
                                              [{label, description, preview?}], multiSelect?}]}, at most 4;
@@ -521,7 +523,9 @@ def protocol(name, report="normal"):
                 "the main chat (no `thread send main`, no SendMessage) and never use `thread ask`; when you need "
                 "a decision, ask the owner here with AskUserQuestion. When the owner has to do something, say it "
                 "plainly in your answer and record it with `thread needs \"<what>\"` (`thread needs --clear` "
-                "once done). When you stop, the owner gets a desktop notification that says only 'done' or "
+                "once done; it sends the owner a desktop notification at once). When something the owner is "
+                "waiting on breaks (a connection, a running transfer, a device), run `thread needs` within a "
+                "minute with what broke, then look for the cause. When you stop, the owner gets a desktop notification that says only 'done' or "
                 "'waiting for you'. Keep commands, code and findings in this conversation and in files in the "
                 "task's folder, and say where they are. Steps are optional: for a longer task record them with "
                 "`thread step <done>/<total> <next step>`, starting again at 0 for each new task.")
@@ -541,7 +545,9 @@ def protocol(name, report="normal"):
                   "recommendation first), carry on with whatever does not depend on the answers, and end your "
                   "turn. The answers arrive as a message starting with \"Answers from the owner:\". When the "
                   "owner has to do something else (run a script, say promote), `thread needs \"<what>\"`, and "
-                  "`thread needs --clear` once it is done.")
+                  "`thread needs --clear` once it is done; the main chat hears a new needs line at once. When "
+                  "something the owner is waiting on breaks (a connection, a running transfer, a device), run "
+                  "`thread needs` within a minute with what broke, then look for the cause.")
 
 
 def parse_profile(file):
@@ -1124,19 +1130,62 @@ def set_needs(name, text):
     write(name, fm, body)
 
 
+def told_path(name):
+    """The needs line the main chat (or, for a silent thread, the owner's desktop) was last told."""
+    return os.path.join(RUN, name + ".needs-told")
+
+
+def told(name):
+    try:
+        return open(told_path(name), encoding="utf-8").read()
+    except OSError:
+        return ""
+
+
+def tell_needs(name, fm, text):
+    """Tell the owner now, while the thread keeps working (2026-11-26: a thread lost its link to a device and
+    nobody heard of it until it stopped): a [needs] inbox line that wakes the main chat, or for a silent thread
+    a desktop notification without content. Once per text: the same needs line again tells nobody. True when
+    told now."""
+    if text == told(name):
+        return False
+    if silent(fm):
+        cmd = [os.path.join(HOME, ".local/bin/desk"), "notify", f"{name}: needs you"]
+    else:
+        cmd = [os.path.join(HOME, ".local/bin/inbox"), "add", "--wake", "needs", "thread", f"'{name}': needs: {text}"[:240]]
+    if not os.access(cmd[0], os.X_OK):
+        return False
+    try:
+        if subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=20).returncode:
+            return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+    os.makedirs(RUN, exist_ok=True)
+    with open(told_path(name), "w", encoding="utf-8") as f:
+        f.write(text)
+    return True
+
+
 def cmd_needs(args):
     name, rest = own_name(args, 1)
     if not name or not rest:
         sys.exit('thread needs [<name>] "<what the owner has to do>" | --clear')
-    if read(name)[0] is None:
+    fm = read(name)[0]
+    if fm is None:
         sys.exit(f"No thread '{name}'.")
     if rest == ["--clear"]:
         set_needs(name, "")
+        try:
+            os.remove(told_path(name))          # the same thing breaking again is news again
+        except OSError:
+            pass
         print(f"{name}: nothing open for the owner")
     else:
         text = " ".join(" ".join(rest).split())[:200]
         set_needs(name, text)
-        print(f"{name} needs: {text}")
+        # Only the thread's own call tells anyone: the main chat setting it by hand already knows.
+        now = os.environ.get("AGENTIC_THREAD") == name and tell_needs(name, fm, text)
+        print(f"{name} needs: {text}" + (" (the owner is told now; keep working)" if now else ""))
 
 
 def qpath(name):
@@ -1385,6 +1434,8 @@ def cmd_signal(args):
     if r and r.get("notified"):
         sent = "notified"               # `thread ask` already told the main chat: the stop hook sends no line
     label, detail = stop_label(name, fm)
+    if label == "needs" and sent != "silent" and detail == told(name):
+        sent = "notified"               # `thread needs` already woke the main chat: the stop only queues its line
     # Only the stop hook passes --transcript: a look by hand is not a stop.
     if tpath:
         log_event(name, "stop", fm, label=label, detail=detail)
@@ -2352,10 +2403,11 @@ def main():
     elif cmd == "rm":
         if rest and os.path.exists(path(slug(rest[0]))):
             os.remove(path(slug(rest[0])))
-            try:
-                os.remove(keep_path(slug(rest[0])))
-            except OSError:
-                pass
+            for f in (keep_path(slug(rest[0])), told_path(slug(rest[0]))):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
             print(f"Forgot '{slug(rest[0])}'; its transcript stays.")
         else:
             sys.exit("thread rm <name>")
