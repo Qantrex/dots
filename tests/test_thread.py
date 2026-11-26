@@ -823,6 +823,34 @@ class ProfileTest(unittest.TestCase):
         self.assertNotIn("ADVISOR", run("plain"))
         self.assertNotIn("--settings", self.launched("plain"))
 
+    def test_a_state_file_rewritten_without_front_matter_gets_it_back(self):
+        """2026-11-26: a profile thread wrote its state file anew without the front matter, and the next
+        `thread step` kept only `updated:`; the thread lost its profile, model and silence."""
+        self.profile("quiet", f"model: haiku\nfolder: {self.e.dir}\nreport: none\nadvisor: off")
+        self.e.run("start", "quiet")
+        state = os.path.join(self.e.threads, "quiet.md")
+        before = open(state).read().split("---\n")[1]
+        with open(state, "w") as f:                                       # the thread's own Write
+            f.write("## Goal\nnew goal\n\n## Now\nworking\n")
+        env = dict(self.e.env, AGENTIC_THREAD="quiet")
+        subprocess.run([sys.executable, THREAD, "step", "1/3", "next"], env=env, check=True, capture_output=True)
+        text = open(state).read()
+        for line in before.splitlines():
+            if not line.startswith(("updated:", "progress:")):
+                self.assertIn(line + "\n", text)
+        self.assertIn("progress: 1/3 next\n", text)
+        self.assertIn("## Goal\nnew goal\n", text)                       # its own text stays
+        row = [t for t in json.loads(self.e.run("list", "--json")) if t["name"] == "quiet"][0]
+        self.assertEqual((row["model"], row["report"], row["step"]), ("haiku", "none", None))   # silent again
+        self.e.run("stop", "quiet")
+        open(state, "w").write("## Goal\nagain\n")                      # clobbered while stopped
+        self.e.run("resume", "quiet")
+        run = open(os.path.join(self.e.threads, ".run", "quiet.sh")).read()
+        self.assertIn("--append-system-prompt", run)                      # resumed as the profile
+        self.assertIn("CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1", run)
+        self.e.run("rm", "quiet")
+        self.assertFalse(os.path.exists(os.path.join(self.e.threads, ".run", "quiet.fm.json")))
+
     def test_a_profile_thread_answering_without_steps_is_idle_not_paused(self):
         self.silent_state(progress="")
         self.assertEqual(self.e.run("signal", "quiet"), "idle\t\tsilent\n")

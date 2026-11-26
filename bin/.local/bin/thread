@@ -161,7 +161,21 @@ def read(name):
             if ":" in line:
                 k, v = line.split(":", 1)
                 fm[k.strip()] = v.strip()
+    if not fm.get("session"):
+        # The thread rewrote its state file without the front matter (2026-11-26: a profile thread wrote it
+        # anew with its Write tool, and the next `thread step` kept only `updated:`; it then lost its profile,
+        # model and silence). Take the keys back from the copy write() keeps; the next write repairs the file.
+        try:
+            for k, v in json.load(open(keep_path(name), encoding="utf-8")).items():
+                fm.setdefault(k, v)
+        except (OSError, ValueError, AttributeError):
+            pass
     return fm, (m.group(2) if m else text)
+
+
+def keep_path(name):
+    """The copy of a thread's front matter that write() keeps beside its run script."""
+    return os.path.join(RUN, name + ".fm.json")
 
 
 def write(name, fm, body):
@@ -173,6 +187,11 @@ def write(name, fm, body):
     with open(path(name) + ".tmp", "w", encoding="utf-8") as f:
         f.write(f"---\n{head}\n---\n{body}")
     os.replace(path(name) + ".tmp", path(name))
+    if fm.get("session"):
+        os.makedirs(RUN, exist_ok=True)
+        with open(keep_path(name) + ".tmp", "w", encoding="utf-8") as f:
+            json.dump({k: fm[k] for k in keys if k in fm and k != "updated"}, f)
+        os.replace(keep_path(name) + ".tmp", keep_path(name))
 
 
 def log_event(name, event, fm=None, **fields):
@@ -495,7 +514,9 @@ def protocol(name, report="normal"):
     if report == "none":
         return (f"You are thread '{name}', a standing thread that works with the owner directly in its own "
                 f"terminal window (tmux {SESSION}:{name}). Your state file is {path(name)}: keep its Goal (the "
-                "current task), Now, Next, Decisions, Where things are and Open for the owner current, facts only. "
+                "current task), Now, Next, Decisions, Where things are and Open for the owner current, facts only; "
+                "change those sections with Edit and leave the block between the --- lines at the top as it is "
+                "(`thread` keeps it). "
                 "You are silent: nothing you do reaches the main chat, and it must stay that way. Never message "
                 "the main chat (no `thread send main`, no SendMessage) and never use `thread ask`; when you need "
                 "a decision, ask the owner here with AskUserQuestion. When the owner has to do something, say it "
@@ -505,7 +526,9 @@ def protocol(name, report="normal"):
                 "task's folder, and say where they are. Steps are optional: for a longer task record them with "
                 "`thread step <done>/<total> <next step>`, starting again at 0 for each new task.")
     return (f"You are thread '{name}', started by the main chat. Your state file is {path(name)}: keep its "
-                  "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. Split the work "
+                  "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only; change "
+                  "those sections with Edit and leave the block between the --- lines at the top as it is (`thread` "
+                  "keeps it). Split the work "
                   "into steps once you know them and record how far you are with `thread step <done>/<total> <next "
                   "step>` (e.g. `thread step 0/6 reading the repo`, then after each finished step; change the total "
                   "when the plan changes; <total>/<total> only when done and checked: that is the done signal, "
@@ -2329,6 +2352,10 @@ def main():
     elif cmd == "rm":
         if rest and os.path.exists(path(slug(rest[0]))):
             os.remove(path(slug(rest[0])))
+            try:
+                os.remove(keep_path(slug(rest[0])))
+            except OSError:
+                pass
             print(f"Forgot '{slug(rest[0])}'; its transcript stays.")
         else:
             sys.exit("thread rm <name>")
