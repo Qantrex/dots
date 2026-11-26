@@ -246,7 +246,7 @@ class WatchTest(WatchBase):
 
 class SettleTest(WatchBase):
     """A turn the owner ended with Esc runs no Stop hook: its progress said 'working' until something else wrote
-    to it (willhaben, 2026-11-26). The screen decides: no running turn and no background work is a stop."""
+    to it (2026-11-26). The screen decides: no running turn and no background work is a stop."""
 
     FOOT = ("─" * 40, "❯ ", "─" * 40, "  Opus 5.5 · context 7%")
 

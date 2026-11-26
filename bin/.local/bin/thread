@@ -775,7 +775,7 @@ def screen_turn(pane):
 def settle(ag, wins, now=None):
     """Turns that ended without their stop hook. Esc in a thread's terminal ends the turn and Claude Code runs
     no Stop hook then, so its progress file kept 'working' (and `claude agents` can stay busy) until something
-    else wrote to it (willhaben, 2026-11-26). A thread whose progress says working, 20 s without news, while
+    else wrote to it (2026-11-26). A thread whose progress says working, 20 s without news, while
     its screen shows no running turn and no background work, gets the stop the hook would have written: idle,
     paused N/M, done or needs you, with "interrupted" (or "ended") as its detail, and counts as idle in `ag`.
     No inbox line: the owner stopped it. Returns the names."""
