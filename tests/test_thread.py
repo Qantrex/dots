@@ -513,11 +513,14 @@ class BackfillTest(unittest.TestCase):
 # A stand-in tmux for `thread send`: the pane is a file with what is typed in its input line.
 # NOSHOW: the screen never shows the typed text. DRAFT: something is typed there already.
 # FAIL_AT=n: the n-th send-keys call fails. DIALOG_AFTER=n: from the n-th send-keys call on a dialog
-# is on the screen instead of the input.
+# is on the screen instead of the input. RUNNING: a turn runs (spinner, "esc to interrupt") until Esc,
+# and Enter then queues the text; STUCK: Esc does not end it; SHELLS: a background shell stays after Esc.
 SEND_TMUX = r'''#!/usr/bin/env python3
 import json, os, sys
 d = os.environ["HOME"]; st = os.path.join(d, "pane.json")
-s = json.load(open(st)) if os.path.exists(st) else {"typed": "", "sent": [], "keys": 0, "pieces": []}
+s = json.load(open(st)) if os.path.exists(st) else {"typed": "", "sent": [], "keys": 0, "pieces": [],
+                                                    "running": bool(os.environ.get("RUNNING")), "queued": [],
+                                                    "esc": 0}
 a = sys.argv[1:]; rc = 0
 if a[0] == "list-windows":
     print("demo\t2\t100\t%0\t0")
@@ -527,8 +530,12 @@ elif a[0] == "capture-pane":
         shown = "a draft"
     if s["keys"] >= int(os.environ.get("DIALOG_AFTER") or 10**9):
         print("Do you want to proceed?\n\u276f 1. Yes\n  2. No\n\nEsc to cancel")
+    elif s["running"]:
+        print("some output\n\u2722 Working\u2026 (7m 3s \u00b7 \u2193 1.2k tokens)\n\u276f " + shown
+              + "\n  auto mode on \u00b7 esc to interrupt")
     else:
-        print("some output\n\u276f " + shown + "\n  status line")
+        print("some output\n" + ("  \u23bf  Interrupted \u00b7 What should Claude do instead?\n" if s["esc"] else "")
+              + "\u276f " + shown + "\n  status line" + (" \u00b7 1 shell" if os.environ.get("SHELLS") else ""))
 elif a[0] == "send-keys":
     s["keys"] += 1
     if str(s["keys"]) == os.environ.get("FAIL_AT"):
@@ -536,7 +543,10 @@ elif a[0] == "send-keys":
     elif "-l" in a:
         s["typed"] += a[-1]; s["pieces"].append(len(a[-1]))
     elif a[-1] == "Enter":
-        s["sent"].append(s["typed"]); s["typed"] = ""
+        (s["queued"] if s["running"] else s["sent"]).append(s["typed"]); s["typed"] = ""
+    elif a[-1] == "Escape":
+        s["esc"] += 1
+        s["running"] = s["running"] and bool(os.environ.get("STUCK"))
 json.dump(s, open(st, "w")); sys.exit(rc)
 '''
 
@@ -557,13 +567,14 @@ class SendTest(unittest.TestCase):
     def tearDown(self):
         self.e.close()
 
-    def send(self, text, **env):
+    def send(self, text, *flags, **env):
         """(exit code, the pane afterwards, stderr) of one `thread send demo <text>` on a fresh pane."""
         pane = os.path.join(self.e.dir, "pane.json")
         if os.path.exists(pane):
             os.remove(pane)
-        r = subprocess.run([sys.executable, THREAD, "send", "demo", text], capture_output=True, text=True,
+        r = subprocess.run([sys.executable, THREAD, "send", *flags, "demo", text], capture_output=True, text=True,
                            env=dict(self.e.env, **{k: str(v) for k, v in env.items()}))
+        self.out = r.stdout
         try:
             with open(pane) as f:
                 state = json.load(f)
@@ -619,6 +630,32 @@ class SendTest(unittest.TestCase):
         self.assertIn("but was not sent", err)
         code, p, _ = self.send("one\ntwo", DIALOG_AFTER=1)
         self.assertEqual((code, p["keys"], p["sent"]), (4, 1, []))
+
+    def test_during_a_running_turn_it_queues_and_says_so_and_now_interrupts_first(self):
+        """2026-11-26: a STOP to a thread inside a 7-minute retry loop only queued and arrived minutes late."""
+        code, p, _ = self.send("stop the retries", RUNNING=1)
+        self.assertEqual((code, p["queued"], p["sent"], p["esc"]), (0, ["stop the retries"], [], 0))
+        self.assertIn("queued: 'demo' is in a running turn for 7m 3s", self.out)
+        self.assertIn("--now", self.out)
+        code, p, _ = self.send("stop the retries", "--now", RUNNING=1)
+        self.assertEqual((code, p["sent"], p["queued"], p["esc"]), (0, ["stop the retries"], [], 1))
+        self.assertIn("sent now: interrupted 'demo's running turn (7m 3s)", self.out)
+        code, p, _ = self.send("stop", "--now", RUNNING=1, SHELLS=1)
+        self.assertIn("1 shell it started in the background still run", self.out)
+        code, p, _ = self.send("hello", "--now")                       # nothing running: no Esc, plain send
+        self.assertEqual((code, p["sent"], p["esc"]), (0, ["hello"], 0))
+        self.assertEqual(self.out, "")
+
+    def test_now_never_presses_esc_twice_types_nothing_when_it_did_not_stop_and_spares_main(self):
+        code, p, err = self.send("stop", "--now", RUNNING=1, STUCK=1)
+        self.assertEqual((code, p["esc"], p["typed"], p["sent"], p["queued"]), (6, 1, "", [], []))
+        self.assertIn("did not stop its turn", err)
+        code, p, err = self.send("hello", "--now", RUNNING=1, DRAFT=1)  # a draft: no Esc either
+        self.assertEqual((code, p["esc"], p["keys"]), (3, 0, 0))
+        r = subprocess.run([sys.executable, THREAD, "send", "--now", "main", "hi"], capture_output=True, text=True,
+                           env=self.e.env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("never interrupted", r.stderr)
 
     def test_only_a_running_session_gets_text(self):
         code, p, err = self.send("hello")

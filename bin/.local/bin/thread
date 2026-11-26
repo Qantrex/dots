@@ -30,11 +30,15 @@
   thread resume <name> | --open              reopen a thread where it was (claude --resume); --open: all
                                              that a shutdown or crash left open (what `cr` did)
   thread model <name> <model>                switch the model (only while it's idle)
-  thread send <name|main> <text...>          type a message into a thread or the main chat and send it, as if
+  thread send [--now] <name|main> <text...>  type a message into a thread or the main chat and send it, as if
                                              typed there (several lines stay several lines, one message);
                                              refused (exit 3) while a question or dialog is open or something
                                              is already typed; exit 4 when the text is typed there but could
-                                             not be sent. The shell's agent panel uses this.
+                                             not be sent. The shell's agent panel uses this. While the thread's
+                                             turn runs, the message queues until its current tool call ends (it
+                                             says so, with how long the turn runs). --now (threads only) presses
+                                             Esc first: the running tool stops, its command ends, and the message
+                                             arrives at once; exit 6 when the turn did not stop (nothing typed)
   thread progress [--brief]                  what each running thread is doing right now: state, how long, steps
                                              done (4/7, 57 %), last action, its share of the weekly limit.
                                              A turn ended with Esc runs no Stop hook: list, progress and watch
@@ -414,9 +418,13 @@ def input_empty(screen_e):
 def cmd_send(args):
     """Type TEXT into a session's input line and press Enter. One way in for everything that
     sends for me (the agent panel), with one rule: never type into a dialog or over a draft."""
+    now = args[:1] == ["--now"]
+    args = args[1:] if now else args
     if len(args) < 2:
-        sys.exit("thread send <name|main> <text...>")
+        sys.exit("thread send [--now] <name|main> <text...>")
     name = "main" if args[0] == "main" else slug(args[0])
+    if now and name == "main":
+        sys.exit("thread send: --now is for threads; the main chat is never interrupted")
     me = os.environ.get("AGENTIC_THREAD", "")
     if name == "main" and (os.environ.get("AGENTIC_SILENT") or (me and silent(read(slug(me))[0]))):
         print(f"thread send: '{me}' is a silent thread; nothing goes to the main chat. Tell the owner here.",
@@ -429,7 +437,57 @@ def cmd_send(args):
     if name not in windows() or (name != "main" and read(name)[0] is None):
         print(f"thread send: no running session '{name}' (thread list)", file=sys.stderr)
         sys.exit(2)
-    sys.exit(send_text(name, text, quiet=False))
+    pane = target(name)
+    if not pane:
+        sys.exit(2)
+    if not empty_prompt(pane):
+        sys.exit(send_to(pane, text, name, quiet=False))          # says why nothing was typed
+    busy = screen_turn(pane) == "running"
+    took = turn_time(pane) if busy else ""
+    note = ""
+    if busy and now:
+        ok, note = interrupt(pane)
+        if not ok:
+            print(f"thread send: '{name}' did not stop its turn after Esc; nothing typed, look at it in its "
+                  f"terminal (dock show {name})", file=sys.stderr)
+            sys.exit(6)
+    code = send_to(pane, text, name, quiet=False)
+    if code == 0 and busy and not now:
+        print(f"queued: '{name}' is in a running turn{f' for {took}' if took else ''}; it reads the message when its "
+              f"current tool call ends. `thread send --now {name} ...` interrupts the tool and delivers it at once.")
+    elif code == 0 and busy:
+        print(f"sent now: interrupted '{name}'s running turn{f' ({took})' if took else ''}{note}")
+    sys.exit(code)
+
+
+def turn_time(pane):
+    """How long the running turn takes so far, from its spinner line ("✢ Working… (7m 3s · ↓ 1.2k tokens)")."""
+    for l in reversed(sh(["tmux", "capture-pane", "-p", "-t", pane]).splitlines()[-12:]):
+        m = re.search(r"…\s*\(((?:\d+[hms]\s*)+)", l)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def interrupt(pane):
+    """Press Esc once in a thread whose turn is running and wait until it ended: Esc stops the tool call in
+    progress, a foreground command included (its processes end), and the input is free again. Ctrl+X Ctrl+S
+    ("send now") would deliver a queued message too, but it moves the running command to the background,
+    where it goes on (checked 2026-11-26 on a session of its own: a retry loop kept running). Never Esc twice:
+    at an empty input that opens the rewind menu. (stopped, note): messages queued earlier go out with the
+    interrupt and start a turn again, so the new one may still wait behind them."""
+    if subprocess.run(["tmux", "send-keys", "-t", pane, "Escape"]).returncode:
+        return False, ""
+    end = time.time() + 8
+    while time.time() < end:
+        time.sleep(0.25)
+        st = screen_turn(pane)
+        if st != "running":
+            shells = re.search(r"\d+ shells?", "\n".join(sh(["tmux", "capture-pane", "-p", "-t", pane]).splitlines()[-8:]))
+            return True, f"; {shells.group(0)} it started in the background still run" if shells else ""
+    # Still running: earlier queued messages went out with the Esc and began a new turn, or Esc had no effect.
+    return any("Interrupted" in l for l in sh(["tmux", "capture-pane", "-p", "-t", pane]).splitlines()[-30:]), \
+        "; messages queued before went out first, so this one waits behind their turn"
 
 
 def message(raw):
