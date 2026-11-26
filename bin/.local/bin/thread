@@ -96,7 +96,7 @@ KEEP_OPEN = UNCOUNTED | {"fixes"}
 # about 90k and it compacted after a few fetched pages. Requests under 250k cost about half of those above it.
 AUTOCOMPACT = "240000"
 CLAUDE = os.path.join(HOME, ".local/bin/claude")
-MODELS = {"fable", "opus", "sonnet", "haiku"}
+MODELS = {"fable", "opus", "sonnet", "haiku", "claude-opus-4-8"}
 CLEAN_ENV = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID",
              "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_PID", "AGENTIC_ROLE"]
 
