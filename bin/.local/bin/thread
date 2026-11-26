@@ -203,6 +203,7 @@ def all_threads(archived=False):
     for f in sorted(glob.glob(os.path.join(DIR, "*.md"))):
         fm, _ = read(os.path.basename(f)[:-3])
         if fm and (archived or fm.get("status") != "archived"):
+            fm.setdefault("name", os.path.basename(f)[:-3])  # a state file without name: (e.g. copied by hand) must not crash every command
             out.append(fm)
     return out
 
