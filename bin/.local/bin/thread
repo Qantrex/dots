@@ -4,6 +4,23 @@
   thread list [--all] [--json]               every thread with its live state; --all includes archived ones
   thread start <name> <folder> [model] [-- brief...]
                                              new session in <folder> (its CLAUDE.md loads), tmux window <name>
+  thread start <profile> [-- task]           a profile thread: a standing thread defined by one file,
+                                             <profiles>/<profile>.md (front matter: model, folder, report,
+                                             archive, description; the body is its standing prompt). A new
+                                             session each time, one state file across them; the standing
+                                             prompt and these thread rules go into the system prompt on every
+                                             start and resume, so they survive compaction. The task, if given,
+                                             is its first message. An edited profile reaches the next start
+                                             (a resumed session keeps its recorded prompt until it compacts).
+                                             report: none makes it silent: no inbox lines, questions, stall
+                                             lines, result card, `thread send main` or SendMessage; progress
+                                             shows only its state; when it stops the owner gets a desktop
+                                             notification that says "done" or "waiting for you". Profile
+                                             threads are never archived by `thread watch` unless archive: auto
+  thread profiles                            every profile with its settings and state, and its problems
+                                             (unknown model or field, missing folder, no prompt); exit 1 then.
+                                             Folder: $AGENTIC_PROFILES or ~/.local/share/agentic/profiles;
+                                             files starting with _ (the template) and README.md are skipped
   thread show <name>                         the state file (goal, now, next, decisions, where, open)
   thread stop <name> | --all                 end the session (/exit); state and transcript stay
   thread resume <name> | --open              reopen a thread where it was (claude --resume); --open: all
@@ -48,7 +65,8 @@
                                              a wake, once per quiet period (never while background shells or
                                              agents run for it). Also stops and
                                              archives a finished thread: idle 30 min after a done stop whose
-                                             result card exists (never misc or fixes; one quiet inbox line)
+                                             result card exists (never misc, fixes or a profile thread without archive: auto; one
+                                             quiet inbox line). Silent threads are never watched
   thread adopt                               turn sessions from before (cr records, open sessions) into threads
   thread durations [name...] [--json]        how long thread work took, per finished run of work: working time
                                              (waits for the owner left out), start to done, steps, minutes per
@@ -92,6 +110,12 @@ UNCOUNTED = {"misc"}  # never counted toward MAX_RUNNING, never stopped to make 
 # `thread watch`, except these (owner, 2026-11-21). `thread resume` brings any of them back.
 RETIRE_AFTER = 30 * 60
 KEEP_OPEN = UNCOUNTED | {"fixes"}
+# Profiles: standing threads, one Markdown file each (front matter: model, folder, report, archive, description;
+# the body is the standing prompt). `thread start <name>` starts one from its file, `thread profiles` lists them.
+PROFILES = os.environ.get("AGENTIC_PROFILES") or os.path.join(DATA, "profiles")
+PROFILE_FIELDS = ("model", "folder", "report", "archive", "description")
+REPORTS = ("normal", "none")      # none: a silent thread, nothing it does reaches the main chat
+ARCHIVES = ("never", "auto")      # auto: archived 30 min after a done stop, like other threads
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
 # about 90k and it compacted after a few fetched pages. Requests under 250k cost about half of those above it.
 AUTOCOMPACT = "240000"
@@ -135,7 +159,8 @@ def read(name):
 def write(name, fm, body):
     os.makedirs(DIR, exist_ok=True)
     fm["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    keys = ["name", "folder", "model", "status", "origin", "session", "started", "updated", "progress", "needs"]
+    keys = ["name", "folder", "model", "status", "origin", "profile", "report", "archive", "session", "started",
+            "updated", "progress", "needs"]
     head = "\n".join(f"{k}: {fm[k]}" for k in keys if k in fm)
     with open(path(name) + ".tmp", "w", encoding="utf-8") as f:
         f.write(f"---\n{head}\n---\n{body}")
@@ -246,8 +271,8 @@ def trust(folder):
     print(f"Marked {d} as trusted in Claude Code, so '{os.path.basename(d)}' starts without the trust question.")
 
 
-def launch(name, folder, cmd_args):
-    """Open a tmux window <name> in <folder> running claude with the given arguments."""
+def launch(name, folder, cmd_args, env=None):
+    """Open a tmux window <name> in <folder> running claude with the given arguments (and extra variables)."""
     trust(folder)
     os.makedirs(RUN, exist_ok=True)
     script = os.path.join(RUN, name + ".sh")
@@ -255,6 +280,7 @@ def launch(name, folder, cmd_args):
     with open(script, "w") as f:
         f.write("#!/bin/sh\n# Written by `thread`; runs one Claude session for thread " + name + ".\n"
                 f"exec env {unset} AGENTIC_ROLE=thread AGENTIC_THREAD={shlex.quote(name)} "
+                + "".join(f"{k}={shlex.quote(v)} " for k, v in (env or {}).items()) +
                 f"SSH_AUTH_SOCK={shlex.quote(os.environ.get('SSH_AUTH_SOCK') or os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % os.getuid()), 'ssh-agent.socket'))} "
                 f"{shlex.quote(CLAUDE)} {' '.join(shlex.quote(a) for a in cmd_args)}\n")
     os.chmod(script, 0o755)
@@ -356,6 +382,11 @@ def cmd_send(args):
     if len(args) < 2:
         sys.exit("thread send <name|main> <text...>")
     name = "main" if args[0] == "main" else slug(args[0])
+    me = os.environ.get("AGENTIC_THREAD", "")
+    if name == "main" and (os.environ.get("AGENTIC_SILENT") or (me and silent(read(slug(me))[0]))):
+        print(f"thread send: '{me}' is a silent thread; nothing goes to the main chat. Tell the owner here.",
+              file=sys.stderr)
+        sys.exit(5)
     text = message(" ".join(args[1:]))
     if not text:
         sys.exit("thread send: nothing to send")
@@ -444,13 +475,185 @@ def send_to(pane, text, name="", quiet=True):
     return 0
 
 
+def protocol(name, report="normal"):
+    """How a thread works with the main chat (or, silent, without it): sent with the brief, and for a profile
+    thread attached to its system prompt, so it survives compaction and restarts."""
+    if report == "none":
+        return (f"You are thread '{name}', a standing thread that works with the owner directly in its own "
+                f"terminal window (tmux {SESSION}:{name}). Your state file is {path(name)}: keep its Goal (the "
+                "current task), Now, Next, Decisions, Where things are and Open for the owner current, facts only. "
+                "You are silent: nothing you do reaches the main chat, and it must stay that way. Never message "
+                "the main chat (no `thread send main`, no SendMessage) and never use `thread ask`; when you need "
+                "a decision, ask the owner here with AskUserQuestion. When the owner has to do something, say it "
+                "plainly in your answer and record it with `thread needs \"<what>\"` (`thread needs --clear` "
+                "once done). When you stop, the owner gets a desktop notification that says only 'done' or "
+                "'waiting for you'. Keep commands, code and findings in this conversation and in files in the "
+                "task's folder, and say where they are. Steps are optional: for a longer task record them with "
+                "`thread step <done>/<total> <next step>`, starting again at 0 for each new task.")
+    return (f"You are thread '{name}', started by the main chat. Your state file is {path(name)}: keep its "
+                  "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. Split the work "
+                  "into steps once you know them and record how far you are with `thread step <done>/<total> <next "
+                  "step>` (e.g. `thread step 0/6 reading the repo`, then after each finished step; change the total "
+                  "when the plan changes; <total>/<total> only when done and checked: that is the done signal, "
+                  "anything less reaches the main chat as paused). When you stop, the main chat hears it by "
+                  "itself and reads the first line of your answer, so start every final answer with a one-line "
+                  "summary: that line is your report. SendMessage to \"main-chat\" is for questions to the main "
+                  "chat during the work, not for the result. When you need a decision from the owner, do not "
+                  "open AskUserQuestion: write the questions as JSON with `thread ask` (the shape AskUserQuestion "
+                  "takes, at most 4; as the `decide` skill says: check first, each question standing alone, your "
+                  "recommendation first), carry on with whatever does not depend on the answers, and end your "
+                  "turn. The answers arrive as a message starting with \"Answers from the owner:\". When the "
+                  "owner has to do something else (run a script, say promote), `thread needs \"<what>\"`, and "
+                  "`thread needs --clear` once it is done.")
+
+
+def parse_profile(file):
+    """(fields, prompt, problems) of a profile file. A value may end in a `# comment`; the body is the
+    standing prompt, with <!-- comments --> left out."""
+    text = open(file, encoding="utf-8").read()
+    m = re.match(r"---\n(.*?)\n---\n?(.*)", text, re.S)
+    if not m:
+        return {}, text.strip(), ["no front matter (a block between two --- lines at the top)"]
+    fields, problems = {}, []
+    for line in m.group(1).splitlines():
+        line = re.sub(r"(^|\s)#.*$", "", line).strip()
+        if not line:
+            continue
+        if ":" not in line:
+            problems.append(f"not a 'field: value' line: {line}")
+            continue
+        k, v = (x.strip() for x in line.split(":", 1))
+        fields[k] = v
+    return fields, re.sub(r"<!--.*?-->", "", m.group(2), flags=re.S).strip(), problems
+
+
+def load_profile(name):
+    """The profile <name> (its file in PROFILES, defaults filled in, a list of problems), or None. Files whose
+    name starts with _ (the template) are not profiles."""
+    file = os.path.join(PROFILES, name + ".md")
+    if not name or name.startswith("_") or name.lower() == "readme" or not os.path.isfile(file):
+        return None
+    f, prompt, problems = parse_profile(file)
+    p = {"name": name, "file": file, "model": f.get("model") or "opus",
+         "folder": os.path.abspath(os.path.expanduser(f.get("folder") or "~")),
+         "report": f.get("report") or "normal", "archive": f.get("archive") or "never",
+         "description": f.get("description", ""), "prompt": prompt}
+    problems += [f"unknown field '{k}' (known: {', '.join(PROFILE_FIELDS)})" for k in f if k not in PROFILE_FIELDS]
+    if p["model"] not in MODELS:
+        problems.append(f"model '{p['model']}' is not one of {', '.join(sorted(MODELS))}")
+    if not os.path.isdir(p["folder"]):
+        problems.append(f"folder {p['folder']} does not exist")
+    if p["report"] not in REPORTS:
+        problems.append(f"report '{p['report']}' is not one of {', '.join(REPORTS)}")
+    if p["archive"] not in ARCHIVES:
+        problems.append(f"archive '{p['archive']}' is not one of {', '.join(ARCHIVES)}")
+    if not prompt:
+        problems.append("no standing prompt (the text under the front matter)")
+    if slug(name) != name or name == "main":
+        problems.append(f"file name: lower case letters, digits and dashes only, not 'main' ({slug(name)}.md)")
+    p["problems"] = problems
+    return p
+
+
+def silent(fm):
+    """A thread whose profile says report: none. Nothing it does reaches the main chat (owner, 2026-11-26)."""
+    return (fm or {}).get("report") == "none"
+
+
+def profile_launch(name, p):
+    """(claude arguments, environment) that make a session a profile thread: the standing prompt and the thread
+    rules in the system prompt (passed on every start and resume: after a compaction Claude Code renders the
+    system prompt again from the launch flags), and for a silent thread no SendMessage and AGENTIC_SILENT."""
+    args = ["--append-system-prompt", p["prompt"] + "\n\n" + protocol(name, p["report"])]
+    env = {}
+    if p["report"] == "none":
+        args += ["--disallowedTools", "SendMessage"]
+        env["AGENTIC_SILENT"] = "1"
+    return args, env
+
+
+def add_where(body, line):
+    """Add '- line' at the end of the state file's "Where things are"."""
+    if "## Where things are" not in body:
+        return body.rstrip("\n") + f"\n\n## Where things are\n- {line}\n"
+    head, tail = body.split("## Where things are", 1)
+    nxt = tail.find("\n## ")
+    sec, rest = (tail, "") if nxt < 0 else (tail[:nxt], tail[nxt:])
+    return head + "## Where things are" + sec.rstrip("\n") + f"\n- {line}\n" + rest
+
+
+def start_profile(p, brief):
+    """Start the profile thread p in a new session. Its state file stays across sessions: an existing one keeps
+    its text, and the earlier session is noted under "Where things are"."""
+    name = p["name"]
+    if p["problems"]:
+        sys.exit(f"Profile '{name}' ({p['file']}) has problems:\n- " + "\n- ".join(p["problems"]))
+    ag, wins = agents(), windows()
+    old, body = read(name)
+    if old and live_state(old, ag, wins) not in ("stopped", "left open"):
+        sys.exit(f"Thread '{name}' already runs (dock show {name}).")
+    if name in wins:
+        sys.exit(f"A tmux window called '{name}' already exists; close it first.")
+    if name not in UNCOUNTED:
+        make_room(ag, wins)
+    if old:
+        prev = old.get("session")
+        if prev and transcript_of(prev):
+            body = add_where(body, f"Earlier session: {prev} (started {old.get('started', '?')}, "
+                                   f"`claude --resume {prev}` in {old.get('folder', '~').replace(HOME, '~', 1)})")
+        clear_progress(name)
+    else:
+        body = body_template(p["description"] or p["prompt"].split("\n")[0][:300], p["folder"])
+    sid = str(uuid.uuid4())
+    fm = {"name": name, "folder": p["folder"], "model": p["model"], "status": "running", "profile": name,
+          "report": p["report"], "archive": p["archive"], "session": sid,
+          "started": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    write(name, fm, body)
+    log_event(name, "start", fm, folder=p["folder"], profile=name)
+    pargs, env = profile_launch(name, p)
+    # The brief is the first task; without one the thread waits at its prompt.
+    launch(name, p["folder"], ([brief] if brief else []) + pargs +
+           ["-n", name, "--session-id", sid, "--model", p["model"], "--effort", "high", "--autocompact", AUTOCOMPACT],
+           env)
+    print(f"Thread '{name}' started from its profile ({p['model']}{', silent' if p['report'] == 'none' else ''}) "
+          f"in {p['folder']}: tmux window {SESSION}:{name}, `dock show {name}`.")
+
+
+def cmd_profiles(args):
+    """Every profile with its settings and state, and what is wrong with a file. Exit 1 when one has a problem."""
+    names = sorted(os.path.basename(f)[:-3] for f in glob.glob(os.path.join(PROFILES, "*.md"))
+                   if not os.path.basename(f).startswith("_") and os.path.basename(f).lower() != "readme.md")
+    if not names:
+        print(f"No profiles in {PROFILES}. Copy _template.md there to <name>.md and fill it in.")
+        return
+    ag, wins = agents(), windows()
+    bad = 0
+    for n in names:
+        p = load_profile(n)
+        fm, _ = read(n)
+        state = live_state(fm, ag, wins) if fm and fm.get("profile") == n else "not started"
+        print(f"{n:20} {p['model']:16} {p['folder'].replace(HOME, '~', 1):30} report {p['report']:7} "
+              f"archive {p['archive']:6} {state}")
+        if p["description"]:
+            print(f"{'':20} {p['description'][:100]}")
+        for pr in p["problems"]:
+            print(f"{'':20} problem: {pr}")
+            bad += 1
+    sys.exit(1 if bad else 0)
+
+
 def cmd_start(args):
     brief = ""
     if "--" in args:
         i = args.index("--")
         brief, args = " ".join(args[i + 1:]), args[:i]
+    prof = load_profile(slug(args[0])) if args else None
+    if prof:
+        if len(args) > 1:
+            sys.exit(f"'{prof['name']}' is a profile ({prof['file']}): thread start {prof['name']} [-- first task]")
+        return start_profile(prof, brief)
     if len(args) < 2:
-        sys.exit("thread start <name> <folder> [model] [-- brief]")
+        sys.exit("thread start <name> <folder> [model] [-- brief]   (or thread start <profile> [-- task]: thread profiles)")
     name, folder = slug(args[0]), os.path.abspath(os.path.expanduser(args[1]))
     model = args[2] if len(args) > 2 else "opus"
     if model not in MODELS:
@@ -472,22 +675,7 @@ def cmd_start(args):
     log_event(name, "start", fm, folder=folder)
     prompt = []
     if brief:
-        prompt = [brief + "\n\n"
-                  f"(You are thread '{name}', started by the main chat. Your state file is {path(name)}: keep its "
-                  "Goal, Now, Next, Decisions, Where things are and Open for the owner current, facts only. Split the work "
-                  "into steps once you know them and record how far you are with `thread step <done>/<total> <next "
-                  "step>` (e.g. `thread step 0/6 reading the repo`, then after each finished step; change the total "
-                  "when the plan changes; <total>/<total> only when done and checked: that is the done signal, "
-                  "anything less reaches the main chat as paused). When you stop, the main chat hears it by "
-                  "itself and reads the first line of your answer, so start every final answer with a one-line "
-                  "summary: that line is your report. SendMessage to \"main-chat\" is for questions to the main "
-                  "chat during the work, not for the result. When you need a decision from the owner, do not "
-                  "open AskUserQuestion: write the questions as JSON with `thread ask` (the shape AskUserQuestion "
-                  "takes, at most 4; as the `decide` skill says: check first, each question standing alone, your "
-                  "recommendation first), carry on with whatever does not depend on the answers, and end your "
-                  "turn. The answers arrive as a message starting with \"Answers from the owner:\". When the "
-                  "owner has to do something else (run a script, say promote), `thread needs \"<what>\"`, and "
-                  "`thread needs --clear` once it is done.)"]
+        prompt = [brief + "\n\n(" + protocol(name) + ")"]
     # Effort high like my default; the advisor (advisorModel in settings) applies by itself.
     launch(name, folder, prompt + ["-n", name, "--session-id", sid, "--model", model, "--effort", "high",
                                    "--autocompact", AUTOCOMPACT])
@@ -523,8 +711,18 @@ def cmd_resume(args):
     # Hub sessions had all of ~; through settings, because --add-dir asks for trust in every session.
     extra = ["--settings", json.dumps({"permissions": {"additionalDirectories": [HOME]}})] \
         if folder.rstrip("/").endswith("/claude-hub") else []
+    pargs, env = [], {}
+    if fm.get("profile"):
+        p = load_profile(fm["profile"])
+        if p:
+            fm["report"], fm["archive"] = p["report"], p["archive"]
+            pargs, env = profile_launch(name, p)
+        else:
+            print(f"Profile '{fm['profile']}' is gone ({PROFILES}); resuming without its standing prompt.",
+                  file=sys.stderr)
     launch(name, folder, ["--session-id" if fresh else "--resume", fm["session"], "-n", name,
-                          "--model", fm.get("model", "opus"), "--effort", "high", "--autocompact", AUTOCOMPACT] + extra)
+                          "--model", fm.get("model", "opus"), "--effort", "high", "--autocompact", AUTOCOMPACT]
+           + extra + pargs, env)
     fm["status"] = "running"
     write(name, fm, body)
     log_event(name, "resume", fm)
@@ -541,6 +739,11 @@ def list_row(t, ag, wins):
         row["signal"] = json.load(open(os.path.join(PROGRESS, t["name"] + ".json"))).get("signal")
     except (OSError, ValueError, KeyError):
         pass
+    if silent(t):               # name and state only, nothing of its work (owner, 2026-11-26)
+        for k in ("progress", "needs"):
+            row.pop(k, None)
+        row.update(step=None, total=None, next="", signal=None)
+        return row
     tpath = (glob.glob(os.path.join(HOME, ".claude/projects/*", t.get("session", "x") + ".jsonl")) or [""])[0]
     if tpath:
         try:
@@ -578,10 +781,10 @@ def steps(fm):
     return int(m.group(1)), int(m.group(2)), m.group(3)
 
 
-def idle_between_jobs(name, st):
-    """An UNCOUNTED thread (misc) with no steps, or none done yet, waits for its next job: that is its normal
-    state, never a pause or a stall. Stopped mid-job (2/5) it is paused like any thread."""
-    return name in UNCOUNTED and (not st or st[0] == 0)
+def idle_between_jobs(name, st, fm=None):
+    """An UNCOUNTED thread (misc) or a profile thread with no steps, or none done yet, waits for its next job:
+    that is its normal state, never a pause or a stall. Stopped mid-job (2/5) it is paused like any thread."""
+    return (name in UNCOUNTED or bool((fm or {}).get("profile"))) and (not st or st[0] == 0)
 
 
 def cmd_step(args):
@@ -634,6 +837,7 @@ def cmd_progress(args):
         if not rows:
             return
         print("Threads right now (from code): " + "; ".join(
+            f"{n} {s}" if silent(t) else
             f"{n} {s}" + (f" for {ago(since)}" if since else "")
             + (f", step {st[0]}/{st[1]}" if (st := steps(t)) else "") + (f", last: {d[:80]}" if d else "")
             for at, n, s, since, d, m, t in rows))
@@ -647,6 +851,9 @@ def cmd_progress(args):
         pass
     cu = usage_module()
     for at, n, s, since, d, m, t in rows:
+        if silent(t):           # name and state only
+            print(f"{n:33} {s:10} {'':14} {m:6} (silent thread: dock show {n})")
+            continue
         st = steps(t)
         if st:
             done, total, nxt = st
@@ -872,6 +1079,9 @@ def cmd_ask(args):
     name, rest = own_name(args, 0)
     if not name or read(name)[0] is None:
         sys.exit("thread ask [<name>] [file]   (JSON on stdin or in the file; inside a thread the name is known)")
+    if silent(read(name)[0]):
+        sys.exit(f"thread ask: '{name}' is a silent thread, nothing reaches the main chat. Ask the owner yourself "
+                 "with AskUserQuestion.")
     raw = open(rest[0], encoding="utf-8").read() if rest else sys.stdin.read()
     try:
         data = json.loads(raw)
@@ -1034,6 +1244,8 @@ def cmd_signal(args):
         sys.exit(f"No thread '{name}'.")
     tpath = args[args.index("--transcript") + 1] if "--transcript" in args[:-1] else ""
     sent = "sent" if tpath and sent_to_main(tpath) else ""
+    if silent(fm):
+        sent = "silent"         # the stop hook sends nothing to the main chat, only a desktop notification
     r = open_round(name)
     st = steps(fm)
     if r:
@@ -1045,7 +1257,7 @@ def cmd_signal(args):
         label, detail = "needs", fm["needs"]
     elif st and st[0] == st[1]:
         label, detail = "done", f"{st[0]}/{st[1]}"
-    elif idle_between_jobs(name, st):
+    elif idle_between_jobs(name, st, fm):
         label, detail = "idle", ""
     else:
         label, detail = "paused", f"{st[0]}/{st[1]}" if st else ""
@@ -1054,7 +1266,7 @@ def cmd_signal(args):
         log_event(name, "stop", fm, label=label, detail=detail)
     print(f"{label}\t{detail}\t{sent}", flush=True)
     # A done stop leaves its result card in the vault. The hook reads the line above; nothing else is printed.
-    if tpath and label == "done":
+    if tpath and label == "done" and not silent(fm):
         try:
             write_card(name, fm, tpath)
         except Exception as e:
@@ -1485,7 +1697,8 @@ def retire_finished(ag, wins, now=None):
         name, session = t["name"], t.get("session", "")
         st = steps(t)
         state = live_state(t, ag, wins)
-        if name in KEEP_OPEN or t.get("origin") == "adopted" or not st or st[0] != st[1] or t.get("needs") \
+        keep = t.get("profile") and t.get("archive") != "auto"      # profile threads stay unless archive: auto
+        if name in KEEP_OPEN or keep or t.get("origin") == "adopted" or not st or st[0] != st[1] or t.get("needs") \
                 or open_round(name) or not (state == "idle" and name in wins or state == "left open"):
             continue
         e = last.get((name, session))
@@ -1532,7 +1745,7 @@ def cmd_watch(args):
         name = t["name"]
         st = live_state(t, ag, wins)
         wf = os.path.join(WATCH, name + ".json")
-        if st in ("stopped", "left open") or name not in wins:
+        if st in ("stopped", "left open") or name not in wins or silent(t):
             continue
         try:
             p = json.load(open(os.path.join(PROGRESS, name + ".json")))
@@ -1950,6 +2163,8 @@ def main():
         cmd_list(rest)
     elif cmd == "start":
         cmd_start(rest)
+    elif cmd == "profiles":
+        cmd_profiles(rest)
     elif cmd == "show":
         fm, body = read(slug(rest[0]) if rest else "")
         if fm is None:

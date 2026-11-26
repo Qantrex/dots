@@ -616,6 +616,93 @@ class AskTest(unittest.TestCase):
         self.assertEqual(self.e.run("signal", "demo"), "questions\t2 questions\t\n")
 
 
+class ProfileTest(unittest.TestCase):
+    """Profiles: one file per standing thread, `thread profiles` finds mistakes, silent threads stay away from
+    the main chat."""
+
+    def setUp(self):
+        self.e = Env()
+        self.prof = os.path.join(self.e.dir, "profiles")
+        os.makedirs(self.prof)
+        self.e.env["AGENTIC_PROFILES"] = self.prof
+        self.bin = os.path.join(self.e.dir, ".local", "bin")
+        os.makedirs(self.bin)
+        self.calls = os.path.join(self.e.dir, "inbox.calls")
+        with open(os.path.join(self.bin, "inbox"), "w") as f:
+            f.write(f'#!/bin/sh\necho "$@" >> "{self.calls}"\n')
+        os.chmod(os.path.join(self.bin, "inbox"), 0o755)
+        for tool, out in (("claude", "echo '[]'"), ("tmux", "exit 0")):      # no live sessions, no windows
+            with open(os.path.join(self.bin, tool), "w") as f:
+                f.write("#!/bin/sh\n" + out + "\n")
+            os.chmod(os.path.join(self.bin, tool), 0o755)
+        self.e.env["PATH"] = self.bin + os.pathsep + self.e.env["PATH"]
+
+    def tearDown(self):
+        self.e.close()
+
+    def profile(self, name, head, body="You are a demo."):
+        with open(os.path.join(self.prof, name + ".md"), "w") as f:
+            f.write("---\n" + head + "\n---\n" + body + "\n")
+
+    def silent_state(self, name="quiet", progress="2/5 scanning 10.0.0.5"):
+        self.e.state(name, "s-" + name, progress=progress)
+        p = os.path.join(self.e.threads, name + ".md")
+        text = open(p).read().replace("status: running\n", "status: running\nprofile: quiet\nreport: none\narchive: never\n")
+        open(p, "w").write(text)
+
+    def run_rc(self, *args, stdin=""):
+        return subprocess.run([sys.executable, THREAD, *args], input=stdin, capture_output=True, text=True,
+                              env=self.e.env)
+
+    def test_profiles_lists_good_files_and_points_out_mistakes(self):
+        self.profile("good", "model: haiku   # a comment\nfolder: /tmp\nreport: none\ndescription: A demo.",
+                     "<!-- left out -->\nYou are a demo.")
+        self.profile("bad", "model: gpt-5\nfolder: /no/such/place\nreport: loud\ncolour: red", "")
+        self.profile("_template", "model: whatever")
+        open(os.path.join(self.prof, "README.md"), "w").write("# notes\n")
+        r = self.run_rc("profiles")
+        self.assertEqual(r.returncode, 1)
+        self.assertRegex(r.stdout, r"good +haiku +/tmp +report none +archive never +not started")
+        self.assertIn("A demo.", r.stdout)
+        for want in ("model 'gpt-5' is not one of", "folder /no/such/place does not exist", "report 'loud'",
+                     "unknown field 'colour'", "no standing prompt"):
+            self.assertIn(want, r.stdout)
+        self.assertNotIn("_template", r.stdout)
+        self.assertNotIn("README", r.stdout)
+
+    def test_a_profile_with_problems_does_not_start(self):
+        self.profile("bad", "model: gpt-5\nfolder: /tmp")
+        r = self.run_rc("start", "bad")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("model 'gpt-5'", r.stderr)
+        r = self.run_rc("start", "bad", "/tmp", "opus")
+        self.assertIn("is a profile", r.stderr)
+
+    def test_a_silent_thread_shows_only_its_state(self):
+        self.silent_state()
+        row = [t for t in json.loads(self.e.run("list", "--json")) if t["name"] == "quiet"][0]
+        self.assertNotIn("progress", row)
+        self.assertIsNone(row["step"])
+        self.assertEqual(row["next"], "")
+
+    def test_a_silent_thread_never_reaches_the_main_chat(self):
+        self.silent_state(progress="5/5 done")
+        tp = self.e.transcript("s-quiet", [prompt(0), answer(5, "Found the flag in /tmp/loot.txt")])
+        self.assertEqual(self.e.run("signal", "quiet", "--transcript", tp), "done\t5/5\tsilent\n")
+        self.assertFalse(os.path.exists(os.path.join(self.e.dir, "Notes", "Results")))   # no result card
+        r = self.run_rc("ask", "quiet", stdin=json.dumps(ROUND))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("AskUserQuestion", r.stderr)
+        self.assertFalse(os.path.exists(self.calls))                                       # no inbox line
+        env = dict(self.e.env, AGENTIC_THREAD="quiet")
+        r = subprocess.run([sys.executable, THREAD, "send", "main", "hello"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 5)
+
+    def test_a_profile_thread_answering_without_steps_is_idle_not_paused(self):
+        self.silent_state(progress="")
+        self.assertEqual(self.e.run("signal", "quiet"), "idle\t\tsilent\n")
+
+
 RESULTS_BIN = os.path.join(os.path.dirname(THREAD), "results")
 
 
