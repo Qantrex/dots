@@ -294,6 +294,24 @@ class RetireTest(WatchBase):
         self.e.run("watch")                                               # 'gone' has no window and no session
         self.assertEqual((self.status("gone"), self.status("gonepaused")), ("archived", "running"))
 
+    def profiled(self, name, report, archive):
+        p = os.path.join(self.e.threads, name + ".md")
+        text = open(p).read().replace("status: running\n",
+                                      f"status: running\nprofile: {name}\nreport: {report}\narchive: {archive}\n")
+        open(p, "w").write(text)
+
+    def test_profile_threads_stay_unless_archive_auto_and_a_silent_one_needs_no_card(self):
+        self.threads([(n, "3/3 done", "idle") for n in ("standing", "loud", "quiet")])
+        self.e.events([self.finished("standing"), self.finished("loud"), self.finished("quiet", card=False)])
+        self.profiled("standing", "normal", "never")
+        self.profiled("loud", "normal", "auto")
+        self.profiled("quiet", "none", "auto")
+        self.e.run("watch")
+        self.assertEqual([self.status(n) for n in ("standing", "loud", "quiet")], ["running", "archived", "archived"])
+        added = open(self.added).read()
+        self.assertIn("'loud'", added)
+        self.assertNotIn("quiet", added)                                  # silent: no inbox line
+
     def test_a_later_event_after_done_keeps_it(self):
         self.threads([("again", "3/3 done", "idle")])
         self.e.events([self.finished("again"), {"ts": 50, "thread": "again", "session": "s-again", "event": "resume"}])

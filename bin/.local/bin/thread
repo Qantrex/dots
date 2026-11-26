@@ -1702,7 +1702,7 @@ def retire_finished(ag, wins, now=None):
                 or open_round(name) or not (state == "idle" and name in wins or state == "left open"):
             continue
         e = last.get((name, session))
-        if not e or e.get("event") != "stop" or e.get("label") != "done" or not find_card(session):
+        if not e or e.get("event") != "stop" or e.get("label") != "done" or not (find_card(session) or silent(t)):
             continue
         tpath = transcript_of(session)
         if now - max(e["ts"], newest_mtime(tpath) if tpath else 0.0) < RETIRE_AFTER \
@@ -1719,7 +1719,8 @@ def retire_finished(ag, wins, now=None):
         fm, body = read(name)
         fm["status"] = "archived"
         write(name, fm, body)
-        subprocess.run([os.path.join(HOME, ".local/bin/inbox"), "add", "archived", "thread",
+        if not silent(fm):                       # a silent thread leaves no inbox line, not even this one
+          subprocess.run([os.path.join(HOME, ".local/bin/inbox"), "add", "archived", "thread",
                         f"'{name}': finished and idle for {RETIRE_AFTER // 60} min, stopped and archived "
                         f"(result in `results`, `thread resume {name}` brings it back)"],
                        stdin=subprocess.DEVNULL, capture_output=True)

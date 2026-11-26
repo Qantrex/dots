@@ -627,8 +627,9 @@ def thread_items():
             n = len(q["questions"])
             items.append({"source": "thread", "level": "questions", "text": f"{name}: {n} question{'s' if n > 1 else ''}",
                           "detail": f"thread questions {name}", "since": q.get("asked")})
-        elif fm.get("needs"):
-            items.append({"source": "thread", "level": "needs", "text": f"{name}: {fm['needs']}",
+        elif fm.get("needs"):          # a silent thread (report: none) shows only that it needs the owner
+            what = "needs you" if fm.get("report") == "none" else fm["needs"]
+            items.append({"source": "thread", "level": "needs", "text": f"{name}: {what}",
                           "detail": f"thread status {fm.get('status', '?')}"})
     return items
 
