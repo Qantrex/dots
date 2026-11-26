@@ -802,6 +802,27 @@ class ProfileTest(unittest.TestCase):
         self.e.run("start", "plain", "--", "only this")
         self.assertEqual(self.launched("plain")[0], "only this")
 
+    def test_advisor_off_switches_the_tool_off_and_a_model_overrides_it(self):
+        self.profile("quiet", f"model: haiku\nfolder: {self.e.dir}\nadvisor: off")
+        self.profile("other", f"model: haiku\nfolder: {self.e.dir}\nadvisor: sonnet")
+        self.profile("plain", f"model: haiku\nfolder: {self.e.dir}")
+        self.profile("wrong", f"model: haiku\nfolder: {self.e.dir}\nadvisor: gpt")
+        out = self.run_rc("profiles").stdout
+        self.assertRegex(out, r"quiet .* advisor off +not started")
+        self.assertIn("advisor 'gpt' is not one of off, fable, opus, sonnet", out)
+        run = lambda n: open(os.path.join(self.e.threads, ".run", n + ".sh")).read()
+        for n in ("quiet", "other", "plain"):
+            self.e.run("start", n)
+        self.assertIn(" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 ", run("quiet"))
+        self.e.run("stop", "quiet")
+        self.e.run("resume", "quiet")                                     # again on resume
+        self.assertIn(" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 ", run("quiet"))
+        args = self.launched("other")
+        self.assertEqual(json.loads(args[args.index("--settings") + 1]), {"advisorModel": "sonnet"})
+        self.assertNotIn("ADVISOR", run("other"))
+        self.assertNotIn("ADVISOR", run("plain"))
+        self.assertNotIn("--settings", self.launched("plain"))
+
     def test_a_profile_thread_answering_without_steps_is_idle_not_paused(self):
         self.silent_state(progress="")
         self.assertEqual(self.e.run("signal", "quiet"), "idle\t\tsilent\n")

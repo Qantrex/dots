@@ -6,8 +6,9 @@
                                              new session in <folder> (its CLAUDE.md loads), tmux window <name>
   thread start <profile> [-- task]           a profile thread: a standing thread defined by one file,
                                              <profiles>/<profile>.md (front matter: model, folder, report,
-                                             archive, effort, description, start; the body is its standing
-                                             prompt; effort low..max, default high). A new
+                                             archive, effort, advisor, description, start; the body is its
+                                             standing prompt; effort low..max, default high; advisor off or a
+                                             model, default the settings' advisorModel). A new
                                              session each time, one state file across them; the standing
                                              prompt and these thread rules go into the system prompt on every
                                              start and resume, so they survive compaction. start: is a standing
@@ -118,8 +119,9 @@ KEEP_OPEN = UNCOUNTED | {"fixes"}
 # Profiles: standing threads, one Markdown file each (front matter: model, folder, report, archive, description;
 # the body is the standing prompt). `thread start <name>` starts one from its file, `thread profiles` lists them.
 PROFILES = os.environ.get("AGENTIC_PROFILES") or os.path.join(DATA, "profiles")
-PROFILE_FIELDS = ("model", "folder", "report", "archive", "effort", "description", "start")
+PROFILE_FIELDS = ("model", "folder", "report", "archive", "effort", "advisor", "description", "start")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+ADVISORS = ("off", "fable", "opus", "sonnet")   # off, or an advisor model; left out: settings' advisorModel
 REPORTS = ("normal", "none")      # none: a silent thread, nothing it does reaches the main chat
 ARCHIVES = ("never", "auto")      # auto: archived 30 min after a done stop, like other threads
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
@@ -548,6 +550,7 @@ def load_profile(name):
     p = {"name": name, "file": file, "model": f.get("model") or "opus",
          "folder": os.path.abspath(os.path.expanduser(f.get("folder") or "~")),
          "report": f.get("report") or "normal", "archive": f.get("archive") or "never", "effort": f.get("effort") or "high",
+         "advisor": f.get("advisor", ""),
          "description": f.get("description", ""), "start": f.get("start", ""), "prompt": prompt}
     problems += [f"unknown field '{k}' (known: {', '.join(PROFILE_FIELDS)})" for k in f if k not in PROFILE_FIELDS]
     if p["model"] not in MODELS:
@@ -558,6 +561,8 @@ def load_profile(name):
         problems.append(f"report '{p['report']}' is not one of {', '.join(REPORTS)}")
     if p["archive"] not in ARCHIVES:
         problems.append(f"archive '{p['archive']}' is not one of {', '.join(ARCHIVES)}")
+    if p["advisor"] and p["advisor"] not in ADVISORS:
+        problems.append(f"advisor '{p['advisor']}' is not one of {', '.join(ADVISORS)} (or left out)")
     if p["effort"] not in EFFORTS:
         problems.append(f"effort '{p['effort']}' is not one of {', '.join(EFFORTS)}")
     if not prompt:
@@ -576,9 +581,16 @@ def silent(fm):
 def profile_launch(name, p):
     """(claude arguments, environment) that make a session a profile thread: the standing prompt and the thread
     rules in the system prompt (passed on every start and resume: after a compaction Claude Code renders the
-    system prompt again from the launch flags), and for a silent thread no SendMessage and AGENTIC_SILENT."""
+    system prompt again from the launch flags), for a silent thread no SendMessage and AGENTIC_SILENT, and the
+    advisor: off sets Claude Code's own switch CLAUDE_CODE_DISABLE_ADVISOR_TOOL, so the session has no advisor
+    tool at all (checked in its debug log: no "[AdvisorTool]" line; advisorModel "off" only works as an invalid
+    name and "" falls back to the main model); a model name overrides advisorModel for this session."""
     args = ["--append-system-prompt", p["prompt"] + "\n\n" + protocol(name, p["report"])]
     env = {}
+    if p.get("advisor") == "off":
+        env["CLAUDE_CODE_DISABLE_ADVISOR_TOOL"] = "1"
+    elif p.get("advisor"):
+        args += ["--settings", json.dumps({"advisorModel": p["advisor"]})]
     if p["report"] == "none":
         args += ["--disallowedTools", "SendMessage"]
         env["AGENTIC_SILENT"] = "1"
@@ -655,7 +667,7 @@ def cmd_profiles(args):
         fm, _ = read(n)
         state = live_state(fm, ag, wins) if fm and fm.get("profile") == n else "not started"
         print(f"{n:20} {p['model']:16} {p['folder'].replace(HOME, '~', 1):30} report {p['report']:7} "
-              f"archive {p['archive']:6} effort {p['effort']:6} {state}")
+              f"archive {p['archive']:6} effort {p['effort']:6} " + (f"advisor {p['advisor']} " if p["advisor"] else "") + state)
         if p["description"]:
             print(f"{'':20} {p['description'][:100]}")
         if p["start"]:
