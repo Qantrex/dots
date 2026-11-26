@@ -244,6 +244,59 @@ class WatchTest(WatchBase):
         self.assertEqual(self.stalled_after_ten_minutes(), ["misc"])
 
 
+class SettleTest(WatchBase):
+    """A turn the owner ended with Esc runs no Stop hook: its progress said 'working' until something else wrote
+    to it (willhaben, 2026-11-26). The screen decides: no running turn and no background work is a stop."""
+
+    FOOT = ("─" * 40, "❯ ", "─" * 40, "  Opus 5.5 · context 7%")
+
+    def screen(self, i, *lines):
+        with open(os.path.join(self.e.dir, f"screen-{i}"), "w") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def working(self, name, at):
+        d = os.path.join(self.e.dir, "state", "agentic", "progress")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, name + ".json"), "w") as f:
+            json.dump({"name": name, "state": "working", "detail": "Bash wh watches", "at": at, "since": at}, f)
+
+    def progress(self, name):
+        return json.load(open(os.path.join(self.e.dir, "state", "agentic", "progress", name + ".json")))
+
+    def test_an_interrupted_turn_is_paused_and_nothing_else_changes(self):
+        names = ["inter", "ended", "running", "bg", "dialog", "fresh"]
+        self.threads([(n, "4/6 next" if n != "ended" else "6/6 done", "busy") for n in names])
+        old = int(time.time()) - 120
+        for n in names:
+            self.working(n, old if n != "fresh" else int(time.time()))
+        self.screen(0, "● Reading the watches", "  ⎿  Interrupted · What should Claude do instead?", *self.FOOT)
+        self.screen(1, "● All six steps are done.", *self.FOOT)
+        self.screen(2, "✶ Thinking… (2m)", *self.FOOT[:3], "  ⏵⏵ auto mode on · esc to interrupt")
+        self.screen(3, "● Waiting for the render.", *self.FOOT[:3], "  ⏵⏵ auto mode on · 1 shell · ↓ to manage")
+        self.screen(4, "Continue the test?", "❯ 1. Yes", "  2. No", "Enter to select · ↑/↓ to navigate · Esc to cancel")
+        self.screen(5, "● Interrupted earlier", *self.FOOT)
+        rows = {r["name"]: r for r in json.loads(self.e.run("list", "--json"))}
+        self.assertEqual({n: rows[n]["state"] for n in names},
+                         {"inter": "idle", "ended": "idle", "running": "working", "bg": "working",
+                          "dialog": "working", "fresh": "working"})
+        p = self.progress("inter")
+        self.assertEqual((p["state"], p["detail"], p["signal"]), ("idle", "interrupted", "paused 4/6"))
+        self.assertEqual(self.progress("ended")["signal"], "done")
+        for n in ("running", "bg", "dialog", "fresh"):
+            self.assertEqual(self.progress(n)["state"], "working")
+        brief = self.e.run("progress", "--brief")
+        self.assertIn("inter idle", brief)
+        self.assertNotIn("inter working", brief)
+        line = open(os.path.join(self.e.dir, "cache", "agentic-threads.line")).read()
+        self.assertIn("○ inter", line)
+        self.assertFalse(os.path.exists(self.added))                    # the owner stopped it: no inbox line
+        stops = [json.loads(l) for l in open(self.e.log) if '"stop"' in l]
+        self.assertEqual(sorted((e["thread"], e["label"], e.get("by")) for e in stops),
+                         [("ended", "done", "ended"), ("inter", "paused", "interrupted")])
+        self.e.run("list", "--json")                                    # settled once: no second stop
+        self.assertEqual(sum(1 for l in open(self.e.log) if '"stop"' in l), 2)
+
+
 class RetireTest(WatchBase):
     """`thread watch` stops and archives a finished thread: done, card written, idle 30 min."""
 

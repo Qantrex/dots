@@ -35,7 +35,9 @@
                                              is already typed; exit 4 when the text is typed there but could
                                              not be sent. The shell's agent panel uses this.
   thread progress [--brief]                  what each running thread is doing right now: state, how long, steps
-                                             done (4/7, 57 %), last action, its share of the weekly limit
+                                             done (4/7, 57 %), last action, its share of the weekly limit.
+                                             A turn ended with Esc runs no Stop hook: list, progress and watch
+                                             read the thread's screen and record that stop themselves
   thread step [<name>] <done>/<total> [next] a thread records how far it is (inside a thread the name comes
                                              from $AGENTIC_THREAD), e.g. `thread step 4/7 panel QML`;
                                              <total>/<total> is the done signal
@@ -343,6 +345,11 @@ def clear_progress(name):
         os.remove(os.path.join(PROGRESS, name + ".json"))
     except OSError:
         pass
+    rebuild_progress()
+
+
+def rebuild_progress():
+    """The panel line and the bar's JSON from the progress files, as the session hook writes them."""
     items = []
     for f in glob.glob(os.path.join(PROGRESS, "*.json")):
         try:
@@ -748,6 +755,61 @@ def cmd_resume(args):
     print(f"Thread '{name}' resumed in {folder}: `dock show {name}`.")
 
 
+def screen_turn(pane):
+    """What a thread's screen says about its turn: 'running' (its footer offers "esc to interrupt"),
+    'dialog', 'background' (turn over, shells or agents it started still run), 'interrupted' (the owner
+    pressed Esc), 'ended', or None without a screen."""
+    lines = sh(["tmux", "capture-pane", "-p", "-t", pane]).rstrip("\n").splitlines()
+    if not lines:
+        return None
+    foot = "\n".join(lines[-8:])
+    if "esc to interrupt" in foot:
+        return "running"
+    if any(re.match(r"\s*❯ \d+\.", l) or "Enter to confirm" in l or "Esc to cancel" in l for l in lines[-15:]):
+        return "dialog"                          # a question or permission dialog: the hooks handle those
+    if re.search(r"\d+ background agents?|\d+ shells?", foot):
+        return "background"
+    return "interrupted" if any("Interrupted" in l for l in lines[-25:]) else "ended"
+
+
+def settle(ag, wins, now=None):
+    """Turns that ended without their stop hook. Esc in a thread's terminal ends the turn and Claude Code runs
+    no Stop hook then, so its progress file kept 'working' (and `claude agents` can stay busy) until something
+    else wrote to it (willhaben, 2026-11-26). A thread whose progress says working, 20 s without news, while
+    its screen shows no running turn and no background work, gets the stop the hook would have written: idle,
+    paused N/M, done or needs you, with "interrupted" (or "ended") as its detail, and counts as idle in `ag`.
+    No inbox line: the owner stopped it. Returns the names."""
+    now = now or time.time()
+    done = []
+    for t in all_threads():
+        name = t["name"]
+        path = os.path.join(PROGRESS, name + ".json")
+        try:
+            p = json.load(open(path))
+        except (OSError, ValueError):
+            continue
+        if p.get("state") != "working" or now - p.get("at", 0) < 20 or name not in wins:
+            continue
+        turn = screen_turn(wins[name][2])
+        if turn not in ("interrupted", "ended"):
+            continue
+        label, detail = stop_label(name, t)
+        p.update(state="needs you" if label in ("questions", "needs") else "idle",
+                 detail="" if silent(t) else turn, at=int(now), since=int(now),
+                 signal=f"paused {detail}".strip() if label == "paused" else label)
+        with open(path + ".tmp", "w") as f:
+            json.dump(p, f)
+        os.replace(path + ".tmp", path)
+        log_event(name, "stop", t, label=label, detail=detail, by=turn)
+        a = ag.get(t.get("session", ""))
+        if a:
+            a["status"], a["state"] = "idle", None
+        done.append(name)
+    if done:
+        rebuild_progress()
+    return done
+
+
 def list_row(t, ag, wins):
     """One thread for `thread list --json`: the state file's fields plus the live state, progress as numbers
     (step, total, next), the label of its last stop (signal) and the minutes since its transcript changed."""
@@ -774,6 +836,7 @@ def list_row(t, ag, wins):
 
 def cmd_list(args):
     ag, wins = agents(), windows()
+    settle(ag, wins)
     ts = all_threads(archived="--all" in args)
     if "--json" in args:
         print(json.dumps([list_row(t, ag, wins) for t in ts]))
@@ -834,6 +897,7 @@ def usage_module():
 def cmd_progress(args):
     """What every running thread is doing, from the progress the session hook writes (code, no tokens)."""
     ag, wins = agents(), windows()
+    settle(ag, wins)
     rows = []
     for t in all_threads():
         st = live_state(t, ag, wins)
@@ -1253,6 +1317,22 @@ def sent_to_main(tpath):
     return sent
 
 
+def stop_label(name, fm):
+    """(label, detail) of a thread whose turn ended: questions, needs, done, idle or paused."""
+    r = open_round(name)
+    st = steps(fm)
+    if r:
+        n = len(r["questions"])
+        return "questions", f"{n} question{'s' if n > 1 else ''}"
+    if fm.get("needs"):
+        return "needs", fm["needs"]
+    if st and st[0] == st[1]:
+        return "done", f"{st[0]}/{st[1]}"
+    if idle_between_jobs(name, st, fm):
+        return "idle", ""
+    return "paused", f"{st[0]}/{st[1]}" if st else ""
+
+
 def cmd_signal(args):
     """The label of a thread's stop, decided in code (the session hook calls this)."""
     if not args:
@@ -1266,20 +1346,9 @@ def cmd_signal(args):
     if silent(fm):
         sent = "silent"         # the stop hook sends nothing to the main chat, only a desktop notification
     r = open_round(name)
-    st = steps(fm)
-    if r:
-        n = len(r["questions"])
-        label, detail = "questions", f"{n} question{'s' if n > 1 else ''}"
-        if r.get("notified"):
-            sent = "notified"           # `thread ask` already told the main chat: the stop hook sends no line
-    elif fm.get("needs"):
-        label, detail = "needs", fm["needs"]
-    elif st and st[0] == st[1]:
-        label, detail = "done", f"{st[0]}/{st[1]}"
-    elif idle_between_jobs(name, st, fm):
-        label, detail = "idle", ""
-    else:
-        label, detail = "paused", f"{st[0]}/{st[1]}" if st else ""
+    if r and r.get("notified"):
+        sent = "notified"               # `thread ask` already told the main chat: the stop hook sends no line
+    label, detail = stop_label(name, fm)
     # Only the stop hook passes --transcript: a look by hand is not a stop.
     if tpath:
         log_event(name, "stop", fm, label=label, detail=detail)
@@ -1758,6 +1827,7 @@ def cmd_watch(args):
     os.makedirs(WATCH, exist_ok=True)
     ag, wins = agents(), windows()
     now = time.time()
+    settle(ag, wins, now)
     if retire_finished(ag, wins, now):
         wins = windows()
     seen = set()
