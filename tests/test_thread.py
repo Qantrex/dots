@@ -8,6 +8,7 @@ signal, durations), or `watch` and `send` with tmux, `claude agents` and `inbox`
 the main chat are never typed into.
 """
 import json
+import shlex
 import time
 import re
 import os
@@ -675,15 +676,15 @@ class ProfileTest(unittest.TestCase):
     def test_profiles_lists_good_files_and_points_out_mistakes(self):
         self.profile("good", "model: haiku   # a comment\nfolder: /tmp\nreport: none\ndescription: A demo.",
                      "<!-- left out -->\nYou are a demo.")
-        self.profile("bad", "model: gpt-5\nfolder: /no/such/place\nreport: loud\ncolour: red", "")
+        self.profile("bad", "model: gpt-5\nfolder: /no/such/place\nreport: loud\neffort: huge\ncolour: red", "")
         self.profile("_template", "model: whatever")
         open(os.path.join(self.prof, "README.md"), "w").write("# notes\n")
         r = self.run_rc("profiles")
         self.assertEqual(r.returncode, 1)
-        self.assertRegex(r.stdout, r"good +haiku +/tmp +report none +archive never +not started")
+        self.assertRegex(r.stdout, r"good +haiku +/tmp +report none +archive never +effort high +not started")
         self.assertIn("A demo.", r.stdout)
         for want in ("model 'gpt-5' is not one of", "folder /no/such/place does not exist", "report 'loud'",
-                     "unknown field 'colour'", "no standing prompt"):
+                     "unknown field 'colour'", "effort 'huge' is not one of", "no standing prompt"):
             self.assertIn(want, r.stdout)
         self.assertNotIn("_template", r.stdout)
         self.assertNotIn("README", r.stdout)
@@ -715,6 +716,38 @@ class ProfileTest(unittest.TestCase):
         env = dict(self.e.env, AGENTIC_THREAD="quiet")
         r = subprocess.run([sys.executable, THREAD, "send", "main", "hello"], capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 5)
+
+    def launched(self, name):
+        """The claude arguments of the last launch of <name> (from its run script)."""
+        script = open(os.path.join(self.e.threads, ".run", name + ".sh")).read()
+        args = shlex.split(script.split("\nexec ", 1)[1])
+        return args[[i for i, a in enumerate(args) if a.endswith("/claude")][0] + 1:]
+
+    def test_the_start_task_comes_first_on_every_start_and_resume(self):
+        self.profile("stock", f"model: haiku\nfolder: {self.e.dir}\neffort: medium\n"
+                              "start: Take stock of the open deals.  # every time")
+        self.profile("plain", f"model: haiku\nfolder: {self.e.dir}")
+        self.assertIn("start: Take stock of the open deals.", self.run_rc("profiles").stdout)
+        self.e.run("start", "stock")
+        args = self.launched("stock")
+        self.assertEqual(args[0], "Take stock of the open deals.")
+        self.assertEqual(args[args.index("--effort") + 1], "medium")
+        self.e.run("stop", "stock")
+        self.e.run("resume", "stock")
+        args = self.launched("stock")
+        self.assertEqual(args[0], "Take stock of the open deals.")
+        self.assertIn("--append-system-prompt", args)
+        self.assertEqual(args[args.index("--effort") + 1], "medium")
+        self.e.run("stop", "stock")
+        self.e.run("start", "stock", "--", "price the helmet")
+        self.assertEqual(self.launched("stock")[0], "First: Take stock of the open deals. Then: price the helmet")
+        self.e.run("start", "plain")                                      # no start: waits at its prompt
+        args = self.launched("plain")
+        self.assertTrue(args[0].startswith("--"))
+        self.assertEqual(args[args.index("--effort") + 1], "high")                  # the default
+        self.e.run("stop", "plain")
+        self.e.run("start", "plain", "--", "only this")
+        self.assertEqual(self.launched("plain")[0], "only this")
 
     def test_a_profile_thread_answering_without_steps_is_idle_not_paused(self):
         self.silent_state(progress="")

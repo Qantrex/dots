@@ -6,11 +6,14 @@
                                              new session in <folder> (its CLAUDE.md loads), tmux window <name>
   thread start <profile> [-- task]           a profile thread: a standing thread defined by one file,
                                              <profiles>/<profile>.md (front matter: model, folder, report,
-                                             archive, description; the body is its standing prompt). A new
+                                             archive, effort, description, start; the body is its standing
+                                             prompt; effort low..max, default high). A new
                                              session each time, one state file across them; the standing
                                              prompt and these thread rules go into the system prompt on every
-                                             start and resume, so they survive compaction. The task, if given,
-                                             is its first message. An edited profile reaches the next start
+                                             start and resume, so they survive compaction. start: is a standing
+                                             first task, sent on every start and resume; a task given here
+                                             follows it ("First: <start>. Then: <task>"), or is the first
+                                             message on its own. An edited profile reaches the next start
                                              (a resumed session keeps its recorded prompt until it compacts).
                                              report: none makes it silent: no inbox lines, questions, stall
                                              lines, result card, `thread send main` or SendMessage; progress
@@ -113,7 +116,8 @@ KEEP_OPEN = UNCOUNTED | {"fixes"}
 # Profiles: standing threads, one Markdown file each (front matter: model, folder, report, archive, description;
 # the body is the standing prompt). `thread start <name>` starts one from its file, `thread profiles` lists them.
 PROFILES = os.environ.get("AGENTIC_PROFILES") or os.path.join(DATA, "profiles")
-PROFILE_FIELDS = ("model", "folder", "report", "archive", "description")
+PROFILE_FIELDS = ("model", "folder", "report", "archive", "effort", "description", "start")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 REPORTS = ("normal", "none")      # none: a silent thread, nothing it does reaches the main chat
 ARCHIVES = ("never", "auto")      # auto: archived 30 min after a done stop, like other threads
 # Threads compact at 240k: the fixed base is about 60k, so 150k (the main chat's cap) left a research thread
@@ -536,8 +540,8 @@ def load_profile(name):
     f, prompt, problems = parse_profile(file)
     p = {"name": name, "file": file, "model": f.get("model") or "opus",
          "folder": os.path.abspath(os.path.expanduser(f.get("folder") or "~")),
-         "report": f.get("report") or "normal", "archive": f.get("archive") or "never",
-         "description": f.get("description", ""), "prompt": prompt}
+         "report": f.get("report") or "normal", "archive": f.get("archive") or "never", "effort": f.get("effort") or "high",
+         "description": f.get("description", ""), "start": f.get("start", ""), "prompt": prompt}
     problems += [f"unknown field '{k}' (known: {', '.join(PROFILE_FIELDS)})" for k in f if k not in PROFILE_FIELDS]
     if p["model"] not in MODELS:
         problems.append(f"model '{p['model']}' is not one of {', '.join(sorted(MODELS))}")
@@ -547,6 +551,8 @@ def load_profile(name):
         problems.append(f"report '{p['report']}' is not one of {', '.join(REPORTS)}")
     if p["archive"] not in ARCHIVES:
         problems.append(f"archive '{p['archive']}' is not one of {', '.join(ARCHIVES)}")
+    if p["effort"] not in EFFORTS:
+        problems.append(f"effort '{p['effort']}' is not one of {', '.join(EFFORTS)}")
     if not prompt:
         problems.append("no standing prompt (the text under the front matter)")
     if slug(name) != name or name == "main":
@@ -570,6 +576,15 @@ def profile_launch(name, p):
         args += ["--disallowedTools", "SendMessage"]
         env["AGENTIC_SILENT"] = "1"
     return args, env
+
+
+def first_message(p, task=""):
+    """The first message of a profile thread's session: its start task (the profile's `start:`, run on every
+    start and resume), then the task given with `-- task`. Empty: it waits at its prompt."""
+    start = p.get("start", "").strip()
+    if start and task:
+        return [f"First: {start.rstrip('.')}. Then: {task}"]
+    return [start or task] if start or task else []
 
 
 def add_where(body, line):
@@ -611,9 +626,9 @@ def start_profile(p, brief):
     write(name, fm, body)
     log_event(name, "start", fm, folder=p["folder"], profile=name)
     pargs, env = profile_launch(name, p)
-    # The brief is the first task; without one the thread waits at its prompt.
-    launch(name, p["folder"], ([brief] if brief else []) + pargs +
-           ["-n", name, "--session-id", sid, "--model", p["model"], "--effort", "high", "--autocompact", AUTOCOMPACT],
+    # The start task and the brief are the first message; without either the thread waits at its prompt.
+    launch(name, p["folder"], first_message(p, brief) + pargs +
+           ["-n", name, "--session-id", sid, "--model", p["model"], "--effort", p["effort"], "--autocompact", AUTOCOMPACT],
            env)
     print(f"Thread '{name}' started from its profile ({p['model']}{', silent' if p['report'] == 'none' else ''}) "
           f"in {p['folder']}: tmux window {SESSION}:{name}, `dock show {name}`.")
@@ -633,9 +648,11 @@ def cmd_profiles(args):
         fm, _ = read(n)
         state = live_state(fm, ag, wins) if fm and fm.get("profile") == n else "not started"
         print(f"{n:20} {p['model']:16} {p['folder'].replace(HOME, '~', 1):30} report {p['report']:7} "
-              f"archive {p['archive']:6} {state}")
+              f"archive {p['archive']:6} effort {p['effort']:6} {state}")
         if p["description"]:
             print(f"{'':20} {p['description'][:100]}")
+        if p["start"]:
+            print(f"{'':20} start: {p['start'][:100]}{'...' if len(p['start']) > 100 else ''}")
         for pr in p["problems"]:
             print(f"{'':20} problem: {pr}")
             bad += 1
@@ -711,17 +728,19 @@ def cmd_resume(args):
     # Hub sessions had all of ~; through settings, because --add-dir asks for trust in every session.
     extra = ["--settings", json.dumps({"permissions": {"additionalDirectories": [HOME]}})] \
         if folder.rstrip("/").endswith("/claude-hub") else []
-    pargs, env = [], {}
+    pargs, env, first, effort = [], {}, [], "high"
     if fm.get("profile"):
         p = load_profile(fm["profile"])
         if p:
             fm["report"], fm["archive"] = p["report"], p["archive"]
             pargs, env = profile_launch(name, p)
+            first = first_message(p)             # its start task, again on every resume
+            effort = p["effort"]
         else:
             print(f"Profile '{fm['profile']}' is gone ({PROFILES}); resuming without its standing prompt.",
                   file=sys.stderr)
-    launch(name, folder, ["--session-id" if fresh else "--resume", fm["session"], "-n", name,
-                          "--model", fm.get("model", "opus"), "--effort", "high", "--autocompact", AUTOCOMPACT]
+    launch(name, folder, first + ["--session-id" if fresh else "--resume", fm["session"], "-n", name,
+                          "--model", fm.get("model", "opus"), "--effort", effort, "--autocompact", AUTOCOMPACT]
            + extra + pargs, env)
     fm["status"] = "running"
     write(name, fm, body)
